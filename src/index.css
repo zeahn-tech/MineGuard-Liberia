@@ -1,0 +1,290 @@
+/* DO NOT CHANGE */
+@import "tailwindcss";
+@import "tw-animate-css";
+@custom-variant dark (&:is(.dark *));
+
+/* DO NOT CHANGE */
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-serif: "Source Serif 4", "Noto Serif", Georgia, "Times New Roman", serif;
+  --font-sans: "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Spline Sans Mono", "IBM Plex Mono", ui-monospace, monospace;
+}
+
+/*
+ * MINEGUARD LIBERIA — PAPERY DESIGN SYSTEM
+ * Editorial "paper & ink" theme inspired by newspapers: warm paper base,
+ * ink-like quiet accents, thin rules, serif headings, generous whitespace.
+ */
+:root {
+  --radius: 0.25rem;
+
+  --background: #f0eee6;
+  --foreground: #232019;
+
+  --card: #f8f7f2;
+  --card-foreground: #232019;
+
+  --popover: #f8f7f2;
+  --popover-foreground: #232019;
+
+  --primary: #232019;
+  --primary-foreground: #f0eee6;
+
+  --secondary: #e6e3d8;
+  --secondary-foreground: #232019;
+
+  --muted: #e6e3d8;
+  --muted-foreground: #6b6558;
+
+  --accent: #dfdccb;
+  --accent-foreground: #232019;
+
+  --destructive: #9c2b1e;
+  --border: #d5d1c2;
+  --input: #cfcbc0;
+  --ring: #6b6558;
+
+  --chart-1: #2c5545;
+  --chart-2: #9c2b1e;
+  --chart-3: #b07d2b;
+  --chart-4: #3e4c66;
+  --chart-5: #6b6558;
+
+  --sidebar: #e9e6db;
+  --sidebar-foreground: #232019;
+  --sidebar-primary: #232019;
+  --sidebar-primary-foreground: #f0eee6;
+  --sidebar-accent: #dfdccb;
+  --sidebar-accent-foreground: #232019;
+  --sidebar-border: #d5d1c2;
+  --sidebar-ring: #6b6558;
+}
+
+.dark {
+  --background: #191713;
+  --foreground: #e9e6db;
+
+  --card: #201e19;
+  --card-foreground: #e9e6db;
+
+  --popover: #201e19;
+  --popover-foreground: #e9e6db;
+
+  --primary: #e9e6db;
+  --primary-foreground: #191713;
+
+  --secondary: #2a2820;
+  --secondary-foreground: #e9e6db;
+
+  --muted: #2a2820;
+  --muted-foreground: #a29a89;
+
+  --accent: #333026;
+  --accent-foreground: #e9e6db;
+
+  --destructive: #d4685c;
+  --border: #3a372e;
+  --input: #454136;
+  --ring: #a29a89;
+
+  --chart-1: #6fa28b;
+  --chart-2: #d4685c;
+  --chart-3: #c9a25e;
+  --chart-4: #8296b5;
+  --chart-5: #a29a89;
+
+  --sidebar: #201e19;
+  --sidebar-foreground: #e9e6db;
+  --sidebar-primary: #e9e6db;
+  --sidebar-primary-foreground: #191713;
+  --sidebar-accent: #333026;
+  --sidebar-accent-foreground: #e9e6db;
+  --sidebar-border: #3a372e;
+  --sidebar-ring: #a29a89;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    background-image: radial-gradient(
+      ellipse at top,
+      rgba(0, 0, 0, 0.015),
+      transparent 60%
+    );
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-serif);
+  }
+  button:not([disabled]),
+  [role="button"]:not([disabled]) {
+    cursor: pointer;
+  }
+  ::selection {
+    background: #dfdccb;
+    color: #232019;
+  }
+  .dark ::selection {
+    background: #333026;
+    color: #e9e6db;
+  }
+}
+
+@layer utilities {
+  /* Thin editorial rule, like a newspaper hairline */
+  .rule {
+    @apply border-border;
+    border-width: 1px;
+  }
+  .rule-double {
+    border-top: 1px solid var(--border);
+    box-shadow: 0 3px 0 -2px var(--border);
+  }
+  /* Serif display headline with tight leading */
+  .display {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    line-height: 1.08;
+  }
+  /* Small all-caps kicker above headlines, like newspaper section labels */
+  .kicker {
+    font-family: var(--font-sans);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+  /* Paper card: crisp corners, hairline border, faint paper grain */
+  .paper {
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    box-shadow:
+      0 1px 0 0 rgba(35, 32, 25, 0.04),
+      inset 0 0 40px rgba(35, 32, 25, 0.02);
+  }
+  /* Stamped status tag used across the platform */
+  .stamp {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border: 1px solid currentColor;
+    padding: 0.125rem 0.375rem;
+    border-radius: calc(var(--radius) - 2px);
+    line-height: 1.4;
+    white-space: nowrap;
+  }
+  .paper-grain {
+    background-image:
+      repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(35, 32, 25, 0.008) 2px,
+        rgba(35, 32, 25, 0.008) 4px
+      );
+  }
+  .stat-figure {
+    font-family: var(--font-serif);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+}
+
+/* Map (Leaflet) — match Papery */
+.leaflet-container {
+  background: #e9e6db;
+  font-family: var(--font-sans);
+}
+.leaflet-tile {
+  filter: grayscale(0.85) sepia(0.25) brightness(1.04) contrast(0.92);
+}
+.dark .leaflet-tile {
+  filter: grayscale(0.7) sepia(0.3) brightness(0.72) contrast(0.95);
+}
+.leaflet-popup-content-wrapper {
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+.leaflet-popup-tip {
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+.leaflet-popup-content {
+  margin: 10px 12px;
+  font-size: 12px;
+}
+.leaflet-control-zoom a {
+  background: var(--card) !important;
+  color: var(--card-foreground) !important;
+  border-color: var(--border) !important;
+  border-radius: 0 !important;
+}
+.leaflet-bar {
+  border: 1px solid var(--border) !important;
+  box-shadow: none !important;
+}
+.mg-site-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50% 50% 50% 4px;
+  transform: rotate(-45deg);
+  border: 1.5px solid #232019;
+  font-size: 13px;
+}
+.dark .mg-site-marker {
+  border-color: #e9e6db;
+}
+.mg-site-marker > span {
+  transform: rotate(45deg);
+}
