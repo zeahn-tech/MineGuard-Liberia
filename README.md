@@ -1,272 +1,94 @@
-## Overview
+# MineGuard Liberia
 
-This project uses the following tech stack:
-- Vite
-- Typescript
-- React Router v7 (all imports from `react-router` instead of `react-router-dom`)
-- React 19 (for frontend components)
-- Tailwind v4 (for styling)
-- Shadcn UI (for UI components library)
-- Lucide Icons (for icons)
-- Convex (for backend & database)
-- Convex Auth (for authentication)
-- Framer Motion (for animations)
-- Three js (for 3d models)
+**National mining oversight, safety, compliance, environmental monitoring & intelligence platform.**
 
-All relevant files live in the 'src' directory.
+> Not an official Government of Liberia system. Designed for potential government adoption — no government approval, partnership, seal, dataset or statistic is claimed or implied.
 
-Use bun for the package manager.
+MineGuard Liberia gives authorized oversight personnel a unified platform for the mining-site registry, field inspections, incident management, the compliance chain (inspection → finding → corrective action → verification), environmental observations, community reporting with public tracking, an explainable site-risk engine, and a national GIS map. Field operations are **offline-first**: submissions are persisted on-device before any network attempt and sync with idempotent dedupe.
 
-## Setup
+Built with React 19 + Vite + TypeScript, a **Papery** editorial design system (paper `#F0EEE6`, ink accents, serif hierarchy), and **Google Firebase** (Firestore, Authentication, Cloud Storage) with security rules as the server-side authorization boundary.
 
-This project is set up already and running on a cloud environment, as well as a convex development in the sandbox.
+---
 
-## Environment Variables
+## Features
 
-The project is set up with project specific CONVEX_DEPLOYMENT and VITE_CONVEX_URL environment variables on the client side.
+| Area | What it does |
+|------|--------------|
+| Command Center | Live statistics computed from real data — never hardcoded |
+| Mining-site registry | Admin-authored sites with codes (`MGL-<COUNTY>-0001`), status lifecycle, explainable risk scores |
+| Field inspections | Configurable templates, GPS capture with accuracy, draft → review → approve/reject lifecycle |
+| Offline queue | localStorage drafts + submission queue; auto-sync on reconnect; server-side `clientRef` dedupe; nothing silently dropped |
+| Incidents | Configurable types (fatality, injury, near-miss, environmental, …), severity, status workflow |
+| Environment | Observations with explicit verification states: observed / measured / verified / unverified / alleged |
+| Community reports | Public submission (no account), tracking code, human triage workflow — a report is never an automatic accusation |
+| Audit log | Append-only trail of every consequential action, visible in-app |
+| Access control | 4 roles (admin / supervisor / inspector / operator), geographic scope, operator tenant isolation — enforced by Firestore rules *and* re-derived per call |
+| PWA | Installable, offline app shell, theme-colored, maskable icons |
 
-The convex server has a separate set of environment variables that are accessible by the convex backend.
+## Quick start
 
-Currently, these variables include auth-specific keys: JWKS, JWT_PRIVATE_KEY, and SITE_URL.
-
-
-# Using Authentication (Important!)
-
-You must follow these conventions when using authentication.
-
-## Auth is already set up.
-
-All convex authentication functions are already set up. The auth currently uses email OTP and anonymous users, but can support more.
-
-The email OTP configuration is defined in `src/convex/auth/emailOtp.ts`. DO NOT MODIFY THIS FILE.
-
-Also, DO NOT MODIFY THESE AUTH FILES: `src/convex/auth.config.ts` and `src/convex/auth.ts`.
-
-## Using Convex Auth on the backend
-
-On the `src/convex/users.ts` file, you can use the `getCurrentUser` function to get the current user's data.
-
-## Using Convex Auth on the frontend
-
-The `/auth` page is already set up to use auth. Navigate to `/auth` for all log in / sign up sequences.
-
-You MUST use this hook to get user data. Never do this yourself without the hook:
-```typescript
-import { useAuth } from "@/hooks/use-auth";
-
-const { isLoading, isAuthenticated, user, signIn, signOut } = useAuth();
+```bash
+bun install          # or npm install / pnpm install
+bun run dev          # local dev server on :5173
+bun run typecheck    # tsc -b --noEmit
+bun run build        # typecheck + production build to dist/
 ```
 
-## Protected Routes
+### Firebase setup (one-time, project owner)
 
-The starter `/dashboard` route is protected with `RequireAuth`, which sends
-signed-out users to `/auth?returnTo=<current route>`. Extend that page for the
-product's authenticated experience, and reuse `RequireAuth` when adding another
-protected route.
+1. Create a Firebase project, then **Firestore Database** (Build → Firestore Database)
+2. Enable **Email/Password** and **Anonymous** sign-in (Build → Authentication)
+3. Publish `firestore.rules` into Firestore → Rules, and `storage.rules` into Storage → Rules (or `npx firebase deploy --only firestore:rules,storage`)
+4. Set the web config in `src/lib/firebase.ts`
+5. First email account to complete a staff profile becomes the **administrator** (one-time bootstrap, guarded by `meta/hasStaff`)
 
-## Auth Page
+## Deployment
 
-The auth page is defined in `src/pages/Auth.tsx`. Send sign-in and sign-up actions
-to `/auth`.
+Static hosting anywhere (Netlify, Vercel, Cloudflare Pages, any web server):
 
-## Authorization
-
-You can perform authorization checks on the frontend and backend.
-
-On the frontend, you can use the `useAuth` hook to get the current user's data and authentication state.
-
-You should also be protecting queries, mutations, and actions at the base level, checking for authorization securely.
-
-## Adding a redirect after auth
-
-The `/auth` route in `src/main.tsx` redirects to `/dashboard` by default. If the
-product's main authenticated route is different, update `redirectAfterAuth` to
-that route. A validated same-origin `returnTo` query parameter takes priority so
-users can resume the protected page they originally requested. Never leave an
-authenticated product redirecting back to the public landing page.
-
-## Complete authenticated products
-
-When the requested product implies accounts, a workspace, a dashboard, or other
-signed-in functionality, the task is not complete with only a landing page and
-auth form. Build the main authenticated experience, protect its route, and verify
-that signing in reaches it.
-
-# Frontend Conventions
-
-You will be using the Vite frontend with React 19, Tailwind v4, and Shadcn UI.
-
-Generally, pages should be in the `src/pages` folder, and components should be in the `src/components` folder.
-
-Shadcn primitives are located in the `src/components/ui` folder and should be used by default.
-
-## Page routing
-
-Your page component should go under the `src/pages` folder.
-
-When adding a page, update the react router configuration in `src/main.tsx` to include the new route you just added.
-
-## Shad CN conventions
-
-Follow these conventions when using Shad CN components, which you should use by default.
-- Remember to use "cursor-pointer" to make the element clickable
-- For title text, use the "tracking-tight font-bold" class to make the text more readable
-- Always make apps MOBILE RESPONSIVE. This is important
-- AVOID NESTED CARDS. Try and not to nest cards, borders, components, etc. Nested cards add clutter and make the app look messy.
-- AVOID SHADOWS. Avoid adding any shadows to components. stick with a thin border without the shadow.
-- Avoid skeletons; instead, use the loader2 component to show a spinning loading state when loading data.
-
-
-## Landing Pages
-
-You must always create good-looking designer-level styles to your application. 
-- Make it well animated and fit a certain "theme", ie neo brutalist, retro, neumorphism, glass morphism, etc
-
-Use known images and emojis from online.
-
-If the user is logged in already, show the get started button to say "Dashboard" or "Profile" instead to take them there.
-
-## Responsiveness and formatting
-
-Make sure pages are wrapped in a container to prevent the width stretching out on wide screens. Always make sure they are centered aligned and not off-center.
-
-Always make sure that your designs are mobile responsive. Verify the formatting to ensure it has correct max and min widths as well as mobile responsiveness.
-
-- Always create sidebars for protected dashboard pages and navigate between pages
-- Always create navbars for landing pages
-- On these bars, the created logo should be clickable and redirect to the index page
-
-## Animating with Framer Motion
-
-You must add animations to components using Framer Motion. It is already installed and configured in the project.
-
-To use it, import the `motion` component from `framer-motion` and use it to wrap the component you want to animate.
-
-
-### Other Items to animate
-- Fade in and Fade Out
-- Slide in and Slide Out animations
-- Rendering animations
-- Button clicks and UI elements
-
-Animate for all components, including on landing page and app pages.
-
-## Three JS Graphics
-
-Your app comes with three js by default. You can use it to create 3D graphics for landing pages, games, etc.
-
-
-## Colors
-
-You can override colors in: `src/index.css`
-
-This uses the oklch color format for tailwind v4.
-
-Always use these color variable names.
-
-Make sure all ui components are set up to be mobile responsive and compatible with both light and dark mode.
-
-Set theme using `dark` or `light` variables at the parent className.
-
-## Styling and Theming
-
-When changing the theme, always change the underlying theme of the shad cn components app-wide under `src/components/ui` and the colors in the index.css file.
-
-Avoid hardcoding in colors unless necessary for a use case, and properly implement themes through the underlying shad cn ui components.
-
-When styling, ensure buttons and clickable items have pointer-click on them (don't by default).
-
-Always follow a set theme style and ensure it is tuned to the user's liking.
-
-## Toasts
-
-You should always use toasts to display results to the user, such as confirmations, results, errors, etc.
-
-Use the shad cn Sonner component as the toaster. For example:
-
-```
-import { toast } from "sonner"
-
-import { Button } from "@/components/ui/button"
-export function SonnerDemo() {
-  return (
-    <Button
-      variant="outline"
-      onClick={() =>
-        toast("Event has been created", {
-          description: "Sunday, December 03, 2023 at 9:00 AM",
-          action: {
-            label: "Undo",
-            onClick: () => console.log("Undo"),
-          },
-        })
-      }
-    >
-      Show Toast
-    </Button>
-  )
-}
+```bash
+bun run build        # output in dist/
 ```
 
-Remember to import { toast } from "sonner". Usage: `toast("Event has been created.")`
+**GitHub Pages** — a workflow is included at `.github/workflows/deploy-pages.yml`:
 
-## Dialogs
+1. Push the repository to GitHub
+2. Settings → Pages → Source: **GitHub Actions**
+3. Push to `main` — the site builds and deploys to `https://<user>.github.io/<repo>/`
 
-Always ensure your larger dialogs have a scroll in its content to ensure that its content fits the screen size. Make sure that the content is not cut off from the screen.
+The build is repository-aware: on GitHub Pages it automatically serves from `/<repo>/` (override with `PUBLIC_PATH=/custom/base/`). Routing uses `HashRouter`, so deep links work with zero server configuration. A service worker provides the offline app shell.
 
-Ideally, instead of using a new page, use a Dialog instead. 
+## Project structure
 
-# Using the Convex backend
-
-You will be implementing the convex backend. Follow your knowledge of convex and the documentation to implement the backend.
-
-## The Convex Schema
-
-You must correctly follow the convex schema implementation.
-
-The schema is defined in `src/convex/schema.ts`.
-
-Do not include the `_id` and `_creationTime` fields in your queries (it is included by default for each table).
-Do not index `_creationTime` as it is indexed for you. Never have duplicate indexes.
-
-
-## Convex Actions: Using CRUD operations
-
-When running anything that involves external connections, you must use a convex action with "use node" at the top of the file.
-
-You cannot have queries or mutations in the same file as a "use node" action file. Thus, you must use pre-built queries and mutations in other files.
-
-You can also use the pre-installed internal crud functions for the database:
-
-```ts
-// in convex/users.ts
-import { crud } from "convex-helpers/server/crud";
-import schema from "./schema.ts";
-
-export const { create, read, update, destroy } = crud(schema, "users");
-
-// in some file, in an action:
-const user = await ctx.runQuery(internal.users.read, { id: userId });
-
-await ctx.runMutation(internal.users.update, {
-  id: userId,
-  patch: {
-    status: "inactive",
-  },
-});
+```
+src/
+  lib/
+    firebase.ts        Firebase init (Auth, Firestore, Storage)
+    backend.ts         Data layer: the whole API surface, authz re-derived per call
+    backend-react.ts   Convex-style useQuery/useMutation hooks over Firestore
+    types.ts           Domain types + client-side authorization mirror
+    compat-types.ts    Id<T>/Doc<T> compatibility shims
+    offline-queue.ts   Field queue: local persistence, retry, idempotent sync
+  pages/               Landing, Auth, Portal (Command Center, Sites, Map,
+                       Inspections, Incidents, Environment, Community, Audit)
+  components/ui/       shadcn/ui primitives
+firestore.rules        Server-side authorization (authoritative)
+storage.rules          Evidence media rules
+docs/00–16             Full engineering documentation set
+scripts/               Icon generator (dev-only)
 ```
 
+## Documentation
 
-## Common Convex Mistakes To Avoid
+The `docs/` directory is the authoritative engineering record (master directive, product spec, system/database/security/GIS/evidence architecture, AI governance, design system, API spec, implementation status, ADRs, test strategy, deployment, data governance, pilot readiness). Requirement classifications are explicit: `IMPLEMENTED` / `PARTIALLY IMPLEMENTED` / `PLANNED` / `REQUIRES GOVERNMENT CONFIRMATION`. Documentation is kept synchronized with the implementation; functionality is never documented that does not exist.
 
-When using convex, make sure:
-- Document IDs are referenced as `_id` field, not `id`.
-- Document ID types are referenced as `Id<"TableName">`, not `string`.
-- Document object types are referenced as `Doc<"TableName">`.
-- Keep schemaValidation to false in the schema file.
-- You must correctly type your code so that it passes the type checker.
-- You must handle null / undefined cases of your convex queries for both frontend and backend, or else it will throw an error that your data could be null or undefined.
-- Always use the `@/folder` path, with `@/convex/folder/file.ts` syntax for importing convex files.
-- This includes importing generated files like `@/convex/_generated/server`, `@/convex/_generated/api`
-- Remember to import functions like useQuery, useMutation, useAction, etc. from `convex/react`
-- NEVER have return type validators.
+## Security notes
+
+- Firebase web config is a public client identifier by design; **all access control lives in the security rules**, never in config secrecy
+- Role/scope live in `/users/{uid}` and are admin-writable only; self-elevation is impossible (rules + data layer both enforce)
+- Audit log is append-only (create permitted, update/delete denied)
+- Community report submissions are rate-guarded at the rule level; a report is a concern, never an accusation of guilt
+
+## License
+
+See [LICENSE](./LICENSE).

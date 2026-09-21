@@ -1,8 +1,30 @@
 # 11 — Implementation Status
 
-**Session:** Firebase backend migration (v1.0 scope carried over from Convex)
+**Session:** Firebase backend migration + GitHub deployment readiness
 **Date:** 2026-09-21
-**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · Convex removed from the dependency tree
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun run build` ✓ (clean production build)
+
+## GitHub deployment readiness [IMPLEMENTED 2026-09]
+
+- **HashRouter** — every deep link works on any static host with zero server
+  config (GitHub Pages serves only `index.html`).
+- **Repository-aware base path** — `vite.config.ts` derives `base` from
+  `GITHUB_REPOSITORY` (set automatically in Actions) or an explicit
+  `PUBLIC_PATH`; verified `/mineguard-liberia/assets/…` output and default `/`
+  locally.
+- **GitHub Actions workflow** `.github/workflows/deploy-pages.yml` — install →
+  typecheck → build (`DISABLE_VLY_PLUGIN=1`) → 404.html SPA fallback →
+  deploy-pages. Requires Settings → Pages → Source: **GitHub Actions**.
+- **Installable PWA** — corrected manifest (real name/description, Papery
+  theme colors, `start_url`/`scope` relative), procedurally generated icon set
+  (192/512 + maskable + apple-touch + favicon, `bun run icons`), full meta/OG
+  tags in `index.html`.
+- **Offline app shell** — `public/sw.js` (network-first navigations, cache
+  fallback, Firebase traffic never cached) registered in `index.html`.
+- **Repository hygiene** — real project README (features, setup, Firebase
+  activation, deployment), MIT LICENSE, expanded `.gitignore`,
+  `package.json` renamed `mineguard-liberia@1.0.0` with `typecheck`/`icons`
+  scripts.
 
 ## Completed this session
 

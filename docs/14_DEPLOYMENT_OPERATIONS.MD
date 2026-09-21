@@ -6,6 +6,12 @@ Firebase console activation by the project owner is pending.
 ## Current topology
 
 - Vite SPA (Freebuff-managed dev server, HMR disabled by platform policy).
+- **Static-hosting ready** (added 2026-09): `HashRouter` (deep links work on
+  any static host), repository-aware `base` path, offline service worker
+  (`public/sw.js`), installable PWA manifest with generated Papery icons
+  (`public/icons/`, regenerate via `bun run icons`). GitHub Pages deployment
+  ships via `.github/workflows/deploy-pages.yml` (Settings → Pages → Source:
+  GitHub Actions). Other static hosts: `bun run build` → serve `dist/`.
 - Firebase project `mineguard-liberia`:
   - **Cloud Firestore** — all domain data (collections per doc 03).
   - **Firebase Authentication** — email/password + anonymous guest.
@@ -64,7 +70,8 @@ read them in `src/lib/firebase.ts` — never commit separate credentials.
 3. First admin account bootstrapped; then all other roles assigned through the
    admin UI (`provisionByEmail` requires the target to have signed in once).
 4. Demo seeder disabled/removed in production builds.
-5. Custom domain added to Firebase Auth authorized domains for sign-in.
+5. Custom domain added to Firebase Auth authorized domains for sign-in (and
+   to the hosting provider if not using the platform domain).
 6. Backups: Firestore scheduled exports (PITR enabled); restore tested.
 7. Tile source reviewed (self-host or vendor) for reliability.
 

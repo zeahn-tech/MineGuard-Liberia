@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
 import React, { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Route, Routes } from "react-router";
+import { HashRouter, Route, Routes } from "react-router";
 import "./index.css";
 
 const Landing = lazy(() => import("./pages/Landing.tsx"));
@@ -73,7 +73,10 @@ class RootErrorBoundary extends React.Component<
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <RootErrorBoundary>
-      <BrowserRouter>
+      {/* HashRouter: static hosts (GitHub Pages) serve only index.html;
+          hash routing keeps every deep link (/portal, /report, /auth)
+          working with zero server-side rewrite configuration. */}
+      <HashRouter>
         <Suspense fallback={<RouteLoading />}>
           <Routes>
             {/* Public */}
@@ -109,7 +112,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>
-      </BrowserRouter>
+      </HashRouter>
       <Toaster />
     </RootErrorBoundary>
   </StrictMode>,

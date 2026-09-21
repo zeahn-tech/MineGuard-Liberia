@@ -3,12 +3,41 @@
 
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" type="image/svg+xml" href="/logo.svg" />
-  <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MineGuard Liberia</title>
-</head>
+  <title>MineGuard Liberia — Mining Oversight Platform</title>
+  <meta name="description"
+    content="National mining oversight, safety, compliance, environmental monitoring and intelligence platform. Designed for potential government adoption — not an official Government of Liberia system." />
 
+  <!-- PWA -->
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <meta name="theme-color" content="#F0EEE6" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="MineGuard" />
+
+  <!-- Icons (relative paths: required for GitHub Pages subdirectory hosting) -->
+  <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png" />
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+
+  <!-- Open Graph / social preview -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="MineGuard Liberia — Mining Oversight Platform" />
+  <meta property="og:description"
+    content="Mining oversight, safety, compliance and environmental monitoring. Government-ready architecture, designed for potential government adoption." />
+  <meta name="twitter:card" content="summary" />
+
+  <script>
+    // Register the offline service worker (relative scope works at any base path).
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", function () {
+        navigator.serviceWorker.register("./sw.js").catch(function () {
+          /* offline support is progressive enhancement — ignore failures */
+        });
+      });
+    }
+  </script>
+</head>
 
 <body>
   <div id="root"></div>
