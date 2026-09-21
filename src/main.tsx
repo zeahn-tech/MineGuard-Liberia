@@ -24,6 +24,11 @@ const CommunitySubmit = lazy(() => import("./pages/CommunitySubmit.tsx"));
 const CommunityTrack = lazy(() => import("./pages/CommunityTrack.tsx"));
 const Audit = lazy(() => import("./pages/Audit.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
+const InspectionsLocal = lazy(() =>
+  import("./pages/Inspections.tsx").then((m) => ({
+    default: m.LocalInspectionForm,
+  })),
+);
 
 function RouteLoading() {
   return (

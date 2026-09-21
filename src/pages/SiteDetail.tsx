@@ -17,14 +17,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { ArrowLeft, MapPin } from "lucide-react";
+import type { Id } from "@/convex/_generated/dataModel";
 
 export default function SiteDetail() {
   const { siteId } = useParams<{ siteId: string }>();
-  const site = useQuery(api.sites.get, siteId ? { siteId } : "skip");
+  const site = useQuery(
+    api.sites.get,
+    siteId ? { siteId: siteId as Id<"sites"> } : "skip",
+  );
   const inspections = useQuery(api.inspections.list);
   const cas = useQuery(
     api.inspections.listSiteCorrectiveActions,
-    siteId ? { siteId } : "skip",
+    siteId ? { siteId: siteId as Id<"sites"> } : "skip",
   );
   const incidents = useQuery(api.records.listIncidents);
   const observations = useQuery(api.records.listObservations);
@@ -48,7 +52,7 @@ export default function SiteDetail() {
 
   const changeStatus = async () => {
     try {
-      await setStatus({ siteId, status: newStatus });
+      await setStatus({ siteId: siteId as Id<"sites">, status: newStatus });
       toast.success(`Status set to ${newStatus.replace(/_/g, " ")}`);
       setStatusOpen(false);
     } catch (e) {

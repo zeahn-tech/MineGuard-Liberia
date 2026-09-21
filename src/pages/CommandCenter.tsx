@@ -47,7 +47,7 @@ export default function CommandCenter() {
     .map(([siteId, r]) => ({ siteId, ...r }))
     .sort((a, b) => b.score - a.score);
 
-  const siteById = new Map((sites ?? []).map((s) => [s._id, s]));
+  const siteById = new Map((sites ?? []).map((s) => [s._id as string, s]));
   const priority = riskEntries.slice(0, 5).filter((r) => r.score > 0);
 
   const pendingReports = (communityReports ?? []).filter(

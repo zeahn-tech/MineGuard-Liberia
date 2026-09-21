@@ -99,6 +99,21 @@ export const commandCenter = query({
 });
 
 // ---------------------------------------------------------------------------
+// AUDIT LOG — staff-visible trail of consequential actions.
+// ---------------------------------------------------------------------------
+export const recentAuditLog = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireStaff(ctx);
+    return await ctx.db
+      .query("auditLog")
+      .withIndex("by_created")
+      .order("desc")
+      .take(200);
+  },
+});
+
+// ---------------------------------------------------------------------------
 // PUBLIC — aggregate, non-sensitive counts for the landing page.
 // Never exposes descriptions, coordinates, or any record content.
 // ---------------------------------------------------------------------------
