@@ -71,9 +71,15 @@ project owner (documented in doc 14).
 
 ## Unresolved issues / known risks
 
-1. **Firebase console steps pending (owner):** create the Firestore database,
-   enable Email/Password + Anonymous sign-in providers, deploy the two rules
-   files (doc 14 has exact steps). Until then the app cannot reach the backend.
+1. **Firebase activation status (2026-09-21):** Firestore database created ✓;
+   Email/Password + Anonymous providers enabled ✓; Firestore rules published and
+   verified live via probes (public report submission creates a document,
+   staff-only reads deny anonymous access) ✓. **Cloud Storage rules NOT
+   deployed** — the project is on the no-cost Spark plan, and Storage security
+   rules require the Blaze plan. Evidence upload stays disabled in-app (no UI
+   wired) until the owner either upgrades to Blaze or adopts a rule-free
+   approach; `evidence.upload` will fail with a rules/permission error if
+   invoked, and that failure is surfaced to the user, never silent (doc 05).
 2. Evidence attachment UI not yet wired into field forms (backend ready).
 3. Rules cannot fully express county-scoped list filters; enforced in the data
    layer, re-checked on single-doc gets (doc 04 gap 5).
