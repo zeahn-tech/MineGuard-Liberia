@@ -90,10 +90,14 @@ export default function PortalLayout() {
     [syncCreateDraft, syncUpdateDraft, syncSubmit],
   );
 
+  // Profile completion gate: EVERY signed-in user must complete a profile
+  // (not just staff) — the first email account to do so becomes the platform
+  // administrator via the server-side bootstrap. Without this, a fresh
+  // install could never create its first admin.
   useEffect(() => {
     if (!user) return;
-    if (isStaff && !user.profileComplete) setShowProfile(true);
-  }, [user, isStaff]);
+    if (user.profileComplete !== true) setShowProfile(true);
+  }, [user]);
 
   // Offline queue state + auto-sync on reconnect
   useEffect(() => {
@@ -270,8 +274,15 @@ export default function PortalLayout() {
         </div>
       </div>
 
-      {/* Profile completion dialog */}
-      <Dialog open={showProfile} onOpenChange={setShowProfile}>
+      {/* Profile completion dialog — not dismissable until completed,
+          otherwise a first-run install has no path to its first admin. */}
+      <Dialog
+        open={showProfile}
+        onOpenChange={(open) => {
+          if (!open && user?.profileComplete !== true) return;
+          setShowProfile(open);
+        }}
+      >
         <DialogContent className="paper">
           <DialogHeader>
             <DialogTitle>Complete your staff profile</DialogTitle>

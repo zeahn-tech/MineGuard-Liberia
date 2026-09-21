@@ -1358,6 +1358,12 @@ export const api = {
       operatorName?: string;
     }) => {
       const user = await requireAuthed();
+      const { auth } = await import("./firebase");
+      if (auth.currentUser?.isAnonymous) {
+        throw new Error(
+          "GUEST_ACCOUNT: guest accounts cannot hold staff roles. Sign up with an email account instead.",
+        );
+      }
       // First-run bootstrap: if no staff exists yet (meta/hasStaff sentinel
       // absent), the first user to complete a profile becomes the platform
       // administrator. This is the only path that grants admin without a
