@@ -67,11 +67,11 @@ community reports, inspection coverage %. Priority sites from the risk indicator
 ### Risk indicator [IMPLEMENTED]
 Explainable, weighted factors (findings by severity, repeat findings, overdue
 corrective actions, fatalities, serious incidents, verified environmental alerts).
-Configurable weights in `src/convex/sites.ts`. Decision-support only.
+Configurable weights in `src/lib/backend.ts` (sites.riskScores). Decision-support only.
 
 ### Evidence & media [PARTIALLY IMPLEMENTED]
 Storage-backed uploads with kind detection, size limit, metadata, and provenance.
-Backend modules exist (`src/convex/evidence.ts`); field UI attachment flow is not
+Backend exists (`evidence.upload` in `src/lib/backend.ts`); field UI attachment flow is not
 wired into the inspection form yet [PLANNED next session].
 
 ### Offline operations [IMPLEMENTED for inspections]

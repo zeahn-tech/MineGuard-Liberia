@@ -1,22 +1,26 @@
 # 03 — Database Architecture
 
-**Status:** implemented schema in `src/convex/schema.ts`.
+**Status:** implemented as Cloud Firestore collections (migrated from Convex).
+Collections mirror the former Convex tables 1:1; documents carry the same
+fields plus the document ID as `_id` when surfaced through the data layer.
 
-## Tables
+## Collections
 
-| Table | Purpose | Key fields | Indexes |
+| Collection | Purpose | Key fields | Notes |
 |-------|---------|-----------|---------|
-| users | Accounts + MineGuard profile | role, scope, county, operatorName, profileComplete | email |
-| sites | Mining site registry | code, name, operatorName, county, status, lat/lng | by_code, by_county, by_status |
-| inspectionTemplates | Configurable inspection structure | sections[] { title, questions[] { label, answerType, options, required } } | by_active |
-| inspections | Field inspections | siteId, templateId, inspectorId, status, answers, GPS, clientRef | by_site, by_status, by_inspector, by_client_ref |
-| findings | Inspection findings | inspectionId, siteId, title, severity, status | by_site, by_inspection, by_status |
-| correctiveActions | Compliance chain | findingId, siteId, description, status, dueAt, operatorNote | by_site, by_finding, by_status |
-| incidents | Incident records | siteId, type, severity, occurredAt, fatalities, injured, reportSource | by_site, by_type, by_status |
-| evidence | Media metadata | storageId, parentType, parentId, siteId, kind, mime, size | by_parent, by_site |
-| environmentalObservations | Environmental monitoring | siteId, category, verification, observedAt, lat/lng | by_site, by_category |
-| communityReports | Public reports | trackingCode, category, county, status, contactPhone | by_tracking_code, by_status, by_county |
-| auditLog | Append-only trail | actorId, actorLabel, action, entityType, entityId, summary | by_created |
+| users | Accounts + MineGuard profile (doc ID = Firebase UID) | role, scope, county, operatorName, profileComplete, emailLower | role admin-writable only; `meta/hasStaff` guards first-admin bootstrap |
+| sites | Mining site registry | code, name, operatorName, county, status, lat/lng | never deleted |
+| inspectionTemplates | Configurable inspection structure | sections[] { title, questions[] { label, answerType, options, required } } | admin-managed |
+| inspections | Field inspections | siteId, templateId, inspectorId, status, answers, GPS, clientRef | clientRef dedupe via query |
+| findings | Inspection findings | inspectionId, siteId, title, severity, status | |
+| correctiveActions | Compliance chain | findingId, siteId, description, status, dueAt, operatorNote | |
+| incidents | Incident records | siteId, type, severity, occurredAt, fatalities, injured, reportSource | |
+| evidence | Media metadata | storagePath (Cloud Storage), parentType, parentId, siteId, kind, mime, size | bytes in Storage |
+| environmentalObservations | Environmental monitoring | siteId, category, verification, observedAt, lat/lng | verification = observed/measured/verified/unverified/alleged |
+| communityReports | Public reports | trackingCode, category, county, status, contactPhone | |
+| reportTracking | Public tracking mirror | trackingCode, status, createdAt | world-readable coarse status by code |
+| meta | Sentinels + aggregates | hasStaff, publicStats | publicStats = landing-page counts |
+| auditLog | Append-only trail | actorId, actorLabel, action, entityType, entityId, summary | create-only under rules |
 
 ## Data integrity rules [IMPLEMENTED]
 
@@ -25,8 +29,8 @@
 2. **Lifecycle over deletion.** Sites, inspections, findings, corrective actions,
    incidents and observations use status transitions. No delete endpoints exist
    for domain records. (Draft discard on-device only removes unsynced local data.)
-3. **Idempotency.** `inspections.clientRef` plus the `by_client_ref` index powers
-   server-side dedupe of offline submissions.
+3. **Idempotency.** `inspections.clientRef` powers server-side dedupe of offline
+   submissions (queried by equality on sync).
 4. **Verification states.** `environmentalObservations.verification` is a closed
    union: observed / measured / verified / unverified / alleged.
 5. **Tenant isolation.** Operator access is filtered by `operatorName` equality

@@ -1,8 +1,13 @@
 # 10 — API Specification
 
-All endpoints are Convex functions (typed RPC). Authorization is enforced inside
-each handler. Errors are thrown as short codes (`UNAUTHENTICATED`, `FORBIDDEN`,
-`NOT_FOUND`, `NOT_EDITABLE`, `FILE_TOO_LARGE`, `USER_NOT_FOUND: …`).
+The API is the `api` object in `src/lib/backend.ts` — a function-for-function
+mirror of the original Convex surface, now backed by Firebase (Firestore +
+Storage). Authorization is enforced by `firestore.rules`/`storage.rules`
+(authoritative) and re-derived in each function (fail-fast). Errors are thrown
+as short codes (`UNAUTHENTICATED`, `FORBIDDEN`, `NOT_FOUND`, `NOT_EDITABLE`,
+`FILE_TOO_LARGE`, `USER_NOT_FOUND: …`). Queries return a subscribable handle;
+the React layer (`src/lib/backend-react.ts`) exposes them with Convex
+`useQuery(fn, args)` semantics.
 
 ## sites.ts
 | Function | Type | Auth | Notes |
@@ -60,14 +65,13 @@ each handler. Errors are thrown as short codes (`UNAUTHENTICATED`, `FORBIDDEN`,
 ## evidence.ts
 | Function | Type | Auth | Notes |
 |----------|------|------|-------|
-| `requestUploadUrl` | mutation | authenticated | Convex storage upload URL |
-| `record` | mutation | authenticated | Metadata after upload; 25MB cap; audit |
-| `listForParent` | query | admin | Per-parent listing |
-| `getUrl` | action | authenticated | Returns storage URL (ACL deep-check planned) |
+| `upload` | mutation | authenticated | Uploads bytes to Cloud Storage then writes metadata; 25MB cap; audit |
+| `listForParent` | query | staff | Per-parent listing |
+| `getUrl` | mutation | authenticated | Returns a Storage download URL (ACL deep-check planned) |
 | `storageFootprint` | query | admin | Governance metric |
 
 ## seed.ts
 | Function | Type | Auth | Notes |
 |----------|------|------|-------|
-| `seedIfEmpty` | mutation | authenticated | Synthetic demo data only when DB empty |
-| `checkSeeded` | query | authenticated | Site count |
+| `seedIfEmpty` | mutation | admin | Synthetic demo data only when DB empty |
+| `checkSeeded` | query | staff | Site count |

@@ -28,7 +28,7 @@ document triage.
 - Cite-or-abstain: summaries must cite record IDs or state uncertainty.
 - Human confirmation: any AI-suggested action requires an explicit,
   audit-logged user action before taking effect.
-- Provider keys live server-side only (Convex action environment).
+- Provider keys live server-side only (e.g. Cloud Functions environment config).
 
 ## Rationale
 

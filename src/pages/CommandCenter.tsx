@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "react-router";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api";
+import { useQuery, useMutation } from "@/lib/backend-react";
+import { api } from "@/lib/backend";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { readQueue } from "@/lib/offline-queue";

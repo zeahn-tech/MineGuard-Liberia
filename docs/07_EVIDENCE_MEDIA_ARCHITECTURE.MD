@@ -4,15 +4,17 @@
 
 ## Data model [IMPLEMENTED]
 
-`evidence` table: `storageId` (Convex storage), `parentType`
-(inspection/incident/observation), `parentId`, optional `siteId`, `kind`
-(photo/video/audio/document — derived from MIME), `fileName`, `mimeType`,
-`sizeBytes`, `caption`, `capturedAt`, `uploadedById`, `createdAt`.
+`evidence` collection: `storagePath` (Cloud Storage for Firebase,
+`evidence/{uid}/…`), `parentType` (inspection/incident/observation),
+`parentId`, optional `siteId`, `kind` (photo/video/audio/document — derived
+from MIME), `fileName`, `mimeType`, `sizeBytes`, `caption`, `capturedAt`,
+`uploadedById`, `createdAt`.
 
 ## Rules [IMPLEMENTED]
 
-1. Bytes are uploaded to Convex storage first (`requestUploadUrl` → POST →
-   `storageId`); only then is the metadata record created. A device-local URI is
+1. Bytes are uploaded to Cloud Storage first (`evidence.upload` performs the
+   upload and writes the metadata record in one call); only then does the
+   record exist. A device-local URI is
    never persisted as a media reference.
 2. Size limit of 25 MB enforced server-side.
 3. Uploads and metadata writes are authenticated; the uploader identity and

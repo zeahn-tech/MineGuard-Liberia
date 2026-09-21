@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api";
+import { useQuery, useMutation } from "@/lib/backend-react";
+import { api } from "@/lib/backend";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,7 +43,7 @@ import {
   type QueueItem,
 } from "@/lib/offline-queue";
 import { toast } from "sonner";
-import { ROLES } from "@/convex/schema";
+import { ROLES } from "@/lib/types";
 
 const NAV = [
   { to: "/portal", label: "Command Center", icon: LayoutDashboard },
@@ -365,8 +365,8 @@ export default function PortalLayout() {
         </DialogContent>
       </Dialog>
 
-      {/* Dev seed — staff only, visible in footer area via button */}
-      {isStaff && (
+      {/* Dev seed — admin only, visible in footer area via button */}
+      {isAdmin && (
         <SeedButton onSeed={handleSeed} />
       )}
     </div>
@@ -427,4 +427,4 @@ function ProfileForm({ onDone, defaultScope }: { onDone: () => void; defaultScop
   );
 }
 
-export { ROLES };
+

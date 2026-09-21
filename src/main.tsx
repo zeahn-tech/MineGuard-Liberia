@@ -1,8 +1,6 @@
-import { useEffect, lazy, Suspense } from "react";
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
-import { ConvexAuthProvider } from "@convex-dev/auth/react";
-import { ConvexReactClient } from "convex/react";
 import React, { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router";
@@ -72,51 +70,47 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
-const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
-
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <RootErrorBoundary>
-      <ConvexAuthProvider client={convex}>
-        <BrowserRouter>
-          <Suspense fallback={<RouteLoading />}>
-            <Routes>
-              {/* Public */}
-              <Route path="/" element={<Landing />} />
-              <Route
-                path="/auth"
-                element={<AuthPage redirectAfterAuth="/portal" />}
-              />
-              <Route path="/report" element={<CommunitySubmit />} />
-              <Route path="/report/track" element={<CommunityTrack />} />
+      <BrowserRouter>
+        <Suspense fallback={<RouteLoading />}>
+          <Routes>
+            {/* Public */}
+            <Route path="/" element={<Landing />} />
+            <Route
+              path="/auth"
+              element={<AuthPage redirectAfterAuth="/portal" />}
+            />
+            <Route path="/report" element={<CommunitySubmit />} />
+            <Route path="/report/track" element={<CommunityTrack />} />
 
-              {/* Authenticated portal */}
-              <Route
-                path="/portal"
-                element={
-                  <RequireAuth>
-                    <PortalLayout />
-                  </RequireAuth>
-                }
-              >
-                <Route index element={<CommandCenter />} />
-                <Route path="sites" element={<Sites />} />
-                <Route path="sites/:siteId" element={<SiteDetail />} />
-                <Route path="map" element={<NationalMap />} />
-                <Route path="inspections" element={<Inspections />} />
-                <Route path="inspections/:inspectionId" element={<InspectionDetail />} />
-                <Route path="incidents" element={<Incidents />} />
-                <Route path="environment" element={<Environment />} />
-                <Route path="community" element={<Community />} />
-                <Route path="audit" element={<Audit />} />
-              </Route>
+            {/* Authenticated portal */}
+            <Route
+              path="/portal"
+              element={
+                <RequireAuth>
+                  <PortalLayout />
+                </RequireAuth>
+              }
+            >
+              <Route index element={<CommandCenter />} />
+              <Route path="sites" element={<Sites />} />
+              <Route path="sites/:siteId" element={<SiteDetail />} />
+              <Route path="map" element={<NationalMap />} />
+              <Route path="inspections" element={<Inspections />} />
+              <Route path="inspections/:inspectionId" element={<InspectionDetail />} />
+              <Route path="incidents" element={<Incidents />} />
+              <Route path="environment" element={<Environment />} />
+              <Route path="community" element={<Community />} />
+              <Route path="audit" element={<Audit />} />
+            </Route>
 
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </Suspense>
-        </BrowserRouter>
-        <Toaster />
-      </ConvexAuthProvider>
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
+      </BrowserRouter>
+      <Toaster />
     </RootErrorBoundary>
   </StrictMode>,
 );

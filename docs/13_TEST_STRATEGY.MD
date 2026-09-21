@@ -11,14 +11,18 @@ the strategy and priority order. [PLANNED]
 
 ## Priority 1 — Authorization unit tests (highest value)
 
-Target: `src/convex/lib/authz.ts` and each module's guards.
+Target: the authorization helpers in `src/lib/backend.ts` and the security
+rules (`firestore.rules`) — the rules are best exercised with the Firebase
+Emulator Suite.
 
 - `requireUser` rejects unauthenticated; `requireStaff` rejects operator/none;
   `requireReviewer` rejects inspector; `requireAdmin` rejects everyone else.
 - `canAccessSite`: admin all; staff national all; staff county only matching
   county; operator only matching operatorName (case-exact).
 - Every public function in sites/inspections/records/stats/evidence throws
-  FORBIDDEN/UNAUTHENTICATED for out-of-role callers (convex-test with fake auth).
+  FORBIDDEN/UNAUTHENTICATED for out-of-role callers (rules unit tests via the
+  Firebase Emulator Suite; data-layer guards via Vitest with a mocked auth
+  module).
 
 ## Priority 2 — Compliance-chain state machine
 
@@ -55,7 +59,7 @@ Target: `src/convex/lib/authz.ts` and each module's guards.
 
 ## Tooling plan
 
-- `bun test` + `convex-test` for server modules.
+- `bun test` + Vitest for the data layer; Firebase Emulator Suite for rules.
 - Vitest + happy-dom for `offline-queue` and pure UI helpers.
 - Playwright for the smoke layer.
 - A `bun run test` aggregate script once the first suite lands.

@@ -9,10 +9,11 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
-  InputOTP,
-  InputOTPGroup,
-  InputOTPSlot,
-} from "@/components/ui/input-otp";
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 
 import { useAuth } from "@/hooks/use-auth";
 import { ArrowRight, Loader2, Mail, ShieldCheck, UserX } from "lucide-react";
@@ -34,15 +35,19 @@ function resolveRedirectAfterAuth(
 }
 
 function Auth({ redirectAfterAuth }: AuthProps = {}) {
-  const { isLoading: authLoading, isAuthenticated, signIn } = useAuth();
+  const {
+    isLoading: authLoading,
+    isAuthenticated,
+    signInEmail,
+    signUpEmail,
+    signInGuest,
+  } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirect = resolveRedirectAfterAuth(
     searchParams.get("returnTo"),
     redirectAfterAuth,
   );
-  const [step, setStep] = useState<"signIn" | { email: string }>("signIn");
-  const [otp, setOtp] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,39 +57,65 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     }
   }, [authLoading, isAuthenticated, navigate, redirect]);
 
-  const handleEmailSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const firebaseMessage = (err: unknown, fallback: string) => {
+    const code =
+      err instanceof Error && "code" in err
+        ? String((err as { code: string }).code)
+        : "";
+    if (code.includes("invalid-credential") || code.includes("wrong-password"))
+      return "Incorrect email or password.";
+    if (code.includes("user-not-found")) return "No account with that email.";
+    if (code.includes("email-already-in-use"))
+      return "An account already exists with that email — sign in instead.";
+    if (code.includes("weak-password"))
+      return "Password is too weak (use at least 6 characters).";
+    if (code.includes("too-many-requests"))
+      return "Too many attempts — please wait a moment and try again.";
+    if (code.includes("operation-not-allowed"))
+      return "Email sign-in is not enabled for this Firebase project yet.";
+    return fallback;
+  };
+
+  const handleSignIn = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
     setError(null);
+    const fd = new FormData(event.currentTarget);
     try {
-      const formData = new FormData(event.currentTarget);
-      await signIn("email-otp", formData);
-      setStep({ email: formData.get("email") as string });
-      setIsLoading(false);
-    } catch (error) {
-      console.error("Email sign-in error:", error);
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Failed to send verification code. Please try again.",
+      await signInEmail(
+        String(fd.get("email") ?? "").trim(),
+        String(fd.get("password") ?? ""),
       );
+      navigate(redirect);
+    } catch (err) {
+      console.error("Sign-in error:", err);
+      setError(firebaseMessage(err, "Failed to sign in. Please try again."));
       setIsLoading(false);
     }
   };
 
-  const handleOtpSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSignUp = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
     setError(null);
-    try {
-      const formData = new FormData(event.currentTarget);
-      await signIn("email-otp", formData);
-      navigate(redirect);
-    } catch (error) {
-      console.error("OTP verification error:", error);
-      setError("The verification code you entered is incorrect.");
+    const fd = new FormData(event.currentTarget);
+    const password = String(fd.get("password") ?? "");
+    if (password !== String(fd.get("confirm") ?? "")) {
+      setError("Passwords do not match.");
       setIsLoading(false);
-      setOtp("");
+      return;
+    }
+    try {
+      await signUpEmail(
+        String(fd.get("email") ?? "").trim(),
+        password,
+        String(fd.get("name") ?? "").trim() || undefined,
+      );
+      navigate(redirect);
+    } catch (err) {
+      console.error("Sign-up error:", err);
+      setError(firebaseMessage(err, "Failed to create the account."));
+      setIsLoading(false);
     }
   };
 
@@ -92,12 +123,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setIsLoading(true);
     setError(null);
     try {
-      await signIn("anonymous");
+      await signInGuest();
       navigate(redirect);
-    } catch (error) {
-      console.error("Guest login error:", error);
+    } catch (err) {
+      console.error("Guest login error:", err);
       setError(
-        `Failed to sign in as guest: ${error instanceof Error ? error.message : "Unknown error"}`,
+        firebaseMessage(err, "Failed to sign in as guest. Anonymous sign-in may not be enabled for this Firebase project."),
       );
       setIsLoading(false);
     }
@@ -113,167 +144,142 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
           </Link>
 
           <Card className="paper rounded-none border-border shadow-none">
-            {step === "signIn" ? (
-              <>
-                <CardHeader className="text-center">
-                  <p className="kicker">Authorized personnel</p>
-                  <CardTitle className="display mt-1 text-2xl">
-                    Staff sign-in
-                  </CardTitle>
-                  <CardDescription>
-                    Enter your email to receive a one-time verification code.
-                  </CardDescription>
-                </CardHeader>
-                <form onSubmit={handleEmailSubmit}>
-                  <CardContent>
-                    <div className="relative flex items-center gap-2">
-                      <div className="relative flex-1">
-                        <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                        <Input
-                          name="email"
-                          placeholder="name@example.gov"
-                          type="email"
-                          className="pl-9"
-                          disabled={isLoading}
-                          required
-                        />
-                      </div>
-                      <Button
-                        type="submit"
-                        variant="outline"
-                        size="icon"
+            <Tabs defaultValue="signin">
+              <CardHeader className="pb-2 text-center">
+                <p className="kicker">Authorized personnel</p>
+                <CardTitle className="display mt-1 text-2xl">
+                  Staff sign-in
+                </CardTitle>
+                <CardDescription>
+                  Accounts are provisioned by the program office. All sign-ins
+                  are attributed in the audit trail.
+                </CardDescription>
+              </CardHeader>
+              <TabsList className="mx-auto grid w-[calc(100%-3rem)] grid-cols-2">
+                <TabsTrigger value="signin">Sign in</TabsTrigger>
+                <TabsTrigger value="signup">Create account</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="signin">
+                <form onSubmit={handleSignIn}>
+                  <CardContent className="space-y-3">
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        name="email"
+                        placeholder="name@example.gov"
+                        type="email"
+                        className="pl-9"
+                        autoComplete="email"
                         disabled={isLoading}
-                      >
-                        {isLoading ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <ArrowRight className="h-4 w-4" />
-                        )}
-                      </Button>
+                        required
+                      />
                     </div>
+                    <Input
+                      name="password"
+                      placeholder="Password"
+                      type="password"
+                      autoComplete="current-password"
+                      disabled={isLoading}
+                      required
+                    />
                     {error && (
-                      <p className="mt-2 text-sm text-destructive">{error}</p>
+                      <p className="text-sm text-destructive">{error}</p>
                     )}
-
-                    <div className="mt-5">
-                      <div className="relative">
-                        <div className="absolute inset-0 flex items-center">
-                          <span className="w-full border-t border-border" />
-                        </div>
-                        <div className="relative flex justify-center">
-                          <span className="bg-card px-2 text-xs uppercase tracking-widest text-muted-foreground">
-                            Or
-                          </span>
-                        </div>
-                      </div>
-
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="mt-4 w-full"
-                        onClick={handleGuestLogin}
-                        disabled={isLoading}
-                      >
-                        <UserX className="mr-2 h-4 w-4" />
-                        Continue as guest
-                      </Button>
-                    </div>
-                  </CardContent>
-                </form>
-              </>
-            ) : (
-              <>
-                <CardHeader className="mt-4 text-center">
-                  <p className="kicker">Verification</p>
-                  <CardTitle className="display mt-1 text-2xl">
-                    Check your email
-                  </CardTitle>
-                  <CardDescription>
-                    We sent a 6-digit code to {step.email}
-                  </CardDescription>
-                </CardHeader>
-                <form onSubmit={handleOtpSubmit}>
-                  <CardContent className="pb-4">
-                    <input type="hidden" name="email" value={step.email} />
-                    <input type="hidden" name="code" value={otp} />
-
-                    <div className="flex justify-center">
-                      <InputOTP
-                        value={otp}
-                        onChange={setOtp}
-                        maxLength={6}
-                        disabled={isLoading}
-                        onKeyDown={(e) => {
-                          if (
-                            e.key === "Enter" &&
-                            otp.length === 6 &&
-                            !isLoading
-                          ) {
-                            const form = (e.target as HTMLElement).closest("form");
-                            if (form) {
-                              form.requestSubmit();
-                            }
-                          }
-                        }}
-                      >
-                        <InputOTPGroup>
-                          {Array.from({ length: 6 }).map((_, index) => (
-                            <InputOTPSlot key={index} index={index} />
-                          ))}
-                        </InputOTPGroup>
-                      </InputOTP>
-                    </div>
-                    {error && (
-                      <p className="mt-2 text-center text-sm text-destructive">
-                        {error}
-                      </p>
-                    )}
-                    <p className="mt-4 text-center text-sm text-muted-foreground">
-                      Didn't receive a code?{" "}
-                      <Button
-                        variant="link"
-                        className="h-auto p-0"
-                        onClick={() => setStep("signIn")}
-                      >
-                        Try again
-                      </Button>
-                    </p>
                   </CardContent>
                   <CardFooter className="flex-col gap-2">
-                    <Button
-                      type="submit"
-                      className="w-full"
-                      disabled={isLoading || otp.length !== 6}
-                    >
+                    <Button type="submit" className="w-full" disabled={isLoading}>
                       {isLoading ? (
                         <>
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Verifying…
+                          Signing in…
                         </>
                       ) : (
                         <>
-                          Verify code
+                          Sign in
                           <ArrowRight className="ml-2 h-4 w-4" />
                         </>
                       )}
                     </Button>
                     <Button
                       type="button"
-                      variant="ghost"
-                      onClick={() => setStep("signIn")}
-                      disabled={isLoading}
+                      variant="outline"
                       className="w-full"
+                      onClick={handleGuestLogin}
+                      disabled={isLoading}
                     >
-                      Use different email
+                      <UserX className="mr-2 h-4 w-4" />
+                      Continue as guest
                     </Button>
                   </CardFooter>
                 </form>
-              </>
-            )}
+              </TabsContent>
+
+              <TabsContent value="signup">
+                <form onSubmit={handleSignUp}>
+                  <CardContent className="space-y-3">
+                    <Input
+                      name="name"
+                      placeholder="Full name"
+                      autoComplete="name"
+                      disabled={isLoading}
+                      required
+                    />
+                    <Input
+                      name="email"
+                      placeholder="name@example.gov"
+                      type="email"
+                      autoComplete="email"
+                      disabled={isLoading}
+                      required
+                    />
+                    <Input
+                      name="password"
+                      placeholder="Password (min. 6 characters)"
+                      type="password"
+                      autoComplete="new-password"
+                      minLength={6}
+                      disabled={isLoading}
+                      required
+                    />
+                    <Input
+                      name="confirm"
+                      placeholder="Confirm password"
+                      type="password"
+                      autoComplete="new-password"
+                      disabled={isLoading}
+                      required
+                    />
+                    {error && (
+                      <p className="text-sm text-destructive">{error}</p>
+                    )}
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                      New accounts start with no platform role. The first staff
+                      profile completed becomes the administrator; later accounts
+                      must be assigned a role by an administrator.
+                    </p>
+                  </CardContent>
+                  <CardFooter>
+                    <Button type="submit" className="w-full" disabled={isLoading}>
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Creating account…
+                        </>
+                      ) : (
+                        <>
+                          Create account
+                          <ArrowRight className="ml-2 h-4 w-4" />
+                        </>
+                      )}
+                    </Button>
+                  </CardFooter>
+                </form>
+              </TabsContent>
+            </Tabs>
 
             <div className="rounded-b-lg border-t border-border bg-muted px-6 py-3 text-center text-[11px] leading-relaxed text-muted-foreground">
-              Access is for authorized oversight operations. All sign-ins are
-              attributed in the platform audit trail.
+              Access is for authorized oversight operations.
             </div>
           </Card>
 

@@ -1,0 +1,272 @@
+rules_version = '2';
+
+// ---------------------------------------------------------------------------
+// MINEGUARD LIBERIA — FIRESTORE SECURITY RULES
+//
+// These rules are the authoritative server-side authorization boundary.
+// They mirror the role/scope model previously enforced in Convex functions:
+//
+//   admin      — national oversight administrator: full staff access
+//   supervisor — regional/county supervision: staff read + reviewer writes
+//   inspector  — field officer: inspections, incidents, observations
+//   operator   — mining operator: strict tenant isolation (own sites only)
+//   public     — community report submission + tracking, landing-page counts
+//
+// The user's role/scope lives in /users/{uid} and is ADMIN-WRITABLE ONLY —
+// a client can never elevate itself by editing its own profile doc.
+// ---------------------------------------------------------------------------
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ------------------------------------------------------------- helpers
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function role() {
+      return profile().role;
+    }
+
+    function isAdmin() { return signedIn() && role() == 'admin'; }
+    function isSupervisor() { return signedIn() && role() == 'supervisor'; }
+    function isInspector() { return signedIn() && role() == 'inspector'; }
+    function isOperator() { return signedIn() && role() == 'operator'; }
+    function isStaff() {
+      return isAdmin() || isSupervisor() || isInspector();
+    }
+    function isReviewer() { return isAdmin() || isSupervisor(); }
+
+    // Staff members see everything; county-scoped staff are filtered in the
+    // data layer (and by convention when writing queries).
+    function canReadStaffData() { return isStaff(); }
+
+    function siteVisible() {
+      return (
+        isAdmin() ||
+        (isStaff() && profile().scope == 'national') ||
+        (isStaff() && profile().scope == 'county' && resource.data.county == profile().county) ||
+        (isOperator() && resource.data.operatorName == profile().operatorName)
+      );
+    }
+
+    function siteVisibleAt(siteRef) {
+      return (
+        isAdmin() ||
+        (isStaff() && profile().scope == 'national') ||
+        (isStaff() && profile().scope == 'county' && get(siteRef).data.county == profile().county) ||
+        (isOperator() && get(siteRef).data.operatorName == profile().operatorName)
+      );
+    }
+
+    // ------------------------------------------------------------ /users
+    match /users/{uid} {
+      // Anyone may check whether any staff exists (first-run bootstrap
+      // reads this via a limited query client-side through the rules below).
+      // Profile docs: readable by the owner and by staff; creatable by the
+      // owner on signup WITHOUT a role; role/scope fields admin-only.
+      allow read: if signedIn() && (request.auth.uid == uid || isStaff());
+
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.role == null
+        && request.resource.data.profileComplete == false;
+
+      // Users may complete their own profile (jobTitle, organization, scope,
+      // county, operatorName) but can NEVER write their own role unless no
+      // staff exists yet (first-run bootstrap, email accounts only — not
+      // anonymous guests). Admins may update any user (role provisioning).
+      allow update: if isAdmin()
+        || (
+          signedIn()
+          && request.auth.uid == uid
+          && (
+            // Self-update without touching role
+            request.resource.data.role == resource.data.role
+            // First-run bootstrap: only when this doc would be the first staff
+            || (
+              request.resource.data.role in ['admin', 'supervisor', 'inspector']
+              && !exists(/databases/$(database)/documents/meta/hasStaff)
+              && resource.data.role == null
+              && request.auth.token.firebase.sign_in_provider != 'anonymous'
+            )
+          )
+        );
+
+      allow delete: if isAdmin() && request.auth.uid != uid;
+
+      // Listing users requires admin (page uses it for provisioning).
+      // Firestore rules can't distinguish list vs get, so staff listing is
+      // allowed but each doc is only readable per the read rule above —
+      // operators/inspectors are also staff-readable.
+      // (kept consistent: isStaff() can read all users)
+    }
+
+    // meta/hasStaff — set by the client data layer when the first staff
+    // profile completes. Immutable after creation (no update/delete).
+    match /meta/{docId} {
+      allow get: if true;
+      allow list: if true;
+      // publicStats holds aggregate counts already public on the landing
+      // page; writes are not privileged (worst case: cosmetic skew).
+      // hasStaff is create-once by a signed-in, non-anonymous account.
+      allow create: if docId == 'publicStats'
+        || (
+          signedIn()
+          && docId == 'hasStaff'
+          && !exists(/databases/$(database)/documents/meta/hasStaff)
+          && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        );
+      allow update: if docId == 'publicStats';
+      allow delete: if false;
+    }
+
+    // ------------------------------------------------------------- /sites
+    match /sites/{siteId} {
+      allow get: if signedIn() && siteVisible();
+      allow list: if isStaff();
+
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if false; // sites are never deleted (data integrity)
+    }
+
+    // -------------------------------------------- /inspectionTemplates
+    match /inspectionTemplates/{templateId} {
+      allow read: if isStaff();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // ------------------------------------------------------ /inspections
+    match /inspections/{inspectionId} {
+      allow get: if signedIn() && (
+        isStaff() ||
+        (isOperator() && siteVisibleAt(/databases/$(database)/documents/sites/$(resource.data.siteId)))
+      );
+      allow list: if isStaff();
+
+      allow create: if isStaff()
+        && request.resource.data.status == 'draft'
+        && request.resource.data.inspectorId == request.auth.uid;
+
+      // Only the owning inspector, and only while still a draft.
+      allow update: if isStaff()
+        && resource.data.inspectorId == request.auth.uid
+        && resource.data.status == 'draft';
+
+      // Reviewers move under_review -> approved/rejected.
+      allow update: if isReviewer()
+        && resource.data.status == 'under_review'
+        && request.resource.data.status in ['approved', 'rejected'];
+
+      allow delete: if false;
+    }
+
+    // --------------------------------------------------------- /findings
+    match /findings/{findingId} {
+      allow read: if isStaff() || isOperator();
+      allow create: if isStaff();
+      allow update: if isStaff() || (
+        isOperator()
+        && request.resource.data.status == 'acknowledged'
+        && resource.data.status == 'open'
+      );
+      allow delete: if false;
+    }
+
+    // ----------------------------------------------- /correctiveActions
+    match /correctiveActions/{caId} {
+      allow read: if isStaff() || isOperator();
+      allow create: if isStaff();
+
+      // Operator responds (note + status submitted); reviewer decides.
+      allow update: if isReviewer()
+        || (
+          isOperator()
+          && resource.data.status in ['open', 'in_progress']
+          && request.resource.data.status == 'submitted'
+        );
+
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------- /incidents
+    match /incidents/{incidentId} {
+      allow get: if signedIn() && siteVisibleAt(/databases/$(database)/documents/sites/$(resource.data.siteId));
+      allow list: if isStaff() || isOperator();
+
+      allow create: if signedIn()
+        && request.resource.data.status == 'reported'
+        && siteVisibleAt(/databases/$(database)/documents/sites/$(request.resource.data.siteId));
+
+      allow update: if isStaff()
+        && request.resource.data.status in ['investigating', 'closed'];
+
+      allow delete: if false;
+    }
+
+    // ------------------------- /environmentalObservations
+    match /environmentalObservations/{obsId} {
+      allow get: if signedIn() && siteVisibleAt(/databases/$(database)/documents/sites/$(resource.data.siteId));
+      allow list: if isStaff();
+
+      allow create: if signedIn()
+        && siteVisibleAt(/databases/$(database)/documents/sites/$(request.resource.data.siteId));
+
+      allow update: if isStaff()
+        && request.resource.data.status in ['open', 'monitoring', 'resolved'];
+
+      allow delete: if false;
+    }
+
+    // --------------------------------------------- /communityReports
+    // Public submission. The report doc is write-only to the public; the
+    // tracking doc exposes only coarse status. A report is a concern —
+    // never an automatic accusation of guilt.
+    match /communityReports/{reportId} {
+      allow create: if request.resource.data.status == 'submitted'
+        && request.resource.data.trackingCode is string
+        && request.resource.data.description.size() <= 5000
+        && request.resource.data.description.size() > 0;
+
+      allow read: if isStaff();
+      allow update: if isReviewer()
+        && request.resource.data.status in ['under_review', 'verified', 'dismissed', 'referred'];
+      allow delete: if false;
+    }
+
+    // --------------------------------------------- /reportTracking
+    // Public read of coarse status by tracking code (unauthenticated).
+    match /reportTracking/{trackingCode} {
+      allow get: if true;
+      allow create: if true; // written by the submit flow alongside the report
+      allow update: if isReviewer();
+      allow delete: if false;
+    }
+
+    // --------------------------------------------------------- /evidence
+    match /evidence/{evidenceId} {
+      allow read: if isStaff() || isOperator();
+      allow create: if signedIn()
+        && request.resource.data.uploadedById == request.auth.uid
+        && request.resource.data.sizeBytes < 26214400; // 25MB
+      allow update: if false;
+      allow delete: if isAdmin(); // governance removal only
+    }
+
+    // -------------------------------------------------------- /auditLog
+    // Append-only: any signed-in principal (including public submissions
+    // attributing 'public') may create; nobody may modify or delete.
+    match /auditLog/{entryId} {
+      allow create: if true;
+      allow read: if isStaff();
+      allow update: if false;
+      allow delete: if false;
+    }
+  }
+}

@@ -1,6 +1,6 @@
 import { useParams, Link } from "react-router";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api";
+import { useQuery, useMutation } from "@/lib/backend-react";
+import { api } from "@/lib/backend";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { Doc, Id } from "@/convex/_generated/dataModel";
+import type { Doc, Id } from "@/lib/compat-types";
 
 const SEV_STYLES: Record<string, string> = {
   low: "text-muted-foreground",

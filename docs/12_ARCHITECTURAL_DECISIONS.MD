@@ -2,19 +2,32 @@
 
 Short records of the significant choices made in this build, with rationale.
 
-## ADR-01 — Convex as the single backend
-**Decision:** All server logic in Convex functions; no second API layer.
-**Rationale:** The template already runs Convex Auth + Convex; queries are
-reactive (fresh command-center data with no polling); mutations give
-transactional audit-log writes. Rejected: Express/Postgres stack (duplicated
-auth, more deployment surface for a pilot).
+## ADR-09 — Backend migrated from Convex to Firebase [2026-09]
+**Decision:** Replace Convex with Firebase (Firestore + Firebase Auth + Cloud
+Storage + Security Rules) at the project owner's request; the project
+`mineguard-liberia` was provided by the owner.
+**Rationale:** Owner-managed infrastructure. The migration preserved the entire
+API surface (`src/lib/backend.ts` mirrors every former Convex function) and the
+authorization model (now enforced by `firestore.rules`/`storage.rules`, with
+identical checks re-derived in the data layer). Page logic was untouched via
+Convex-compatible React hooks. Trade-offs accepted: rules cannot express some
+per-county list filters (doc 04 gap 5); multi-step mutations are no longer
+single transactions (the audit write is best-effort ordered after the business
+write; a Cloud Functions hardening pass can restore atomicity).
 
-## ADR-02 — Authorization centralized in one module
-**Decision:** `src/convex/lib/authz.ts` owns identity, roles, scopes, operator
-isolation, and audit helper.
-**Rationale:** One place to review the security model; modules cannot drift.
-Every handler calls a `require*` helper — no ad-hoc identity checks outside
-evidence's action-context identity gate.
+## ADR-01 — Backend consolidated in one managed platform (superseded detail: now Firebase)
+**Decision:** All server logic in the managed backend; no second API layer.
+**Rationale:** Originally Convex (template default); migrated to Firebase per
+ADR-09. Reactive subscriptions are preserved via Firestore listeners; rejected:
+Express/Postgres stack (duplicated auth, more deployment surface for a pilot).
+
+## ADR-02 — Authorization centralized (two layers after ADR-09)
+**Decision:** Originally `src/convex/lib/authz.ts`; now the security rules own
+authorization authoritatively and `src/lib/backend.ts` re-derives the same
+checks per call.
+**Rationale:** One place to review the security model per layer; modules cannot
+drift. Every backend function calls a `require*` helper — no ad-hoc identity
+checks.
 
 ## ADR-03 — Roles + scope + operatorName (not a generic RBAC matrix)
 **Decision:** Four roles; geographic scope on staff; `operatorName` equality for

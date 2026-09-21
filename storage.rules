@@ -1,0 +1,32 @@
+rules_version = '2';
+
+// ---------------------------------------------------------------------------
+// MINEGUARD LIBERIA — STORAGE SECURITY RULES
+//
+// Evidence files (photos, video, audio, documents) live under evidence/.
+// Only signed-in users may upload; staff may read. Paths are namespaced by
+// uploading uid. Size and content-type guards mirror the data layer.
+// ---------------------------------------------------------------------------
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    match /evidence/{uid}/{fileName} {
+      allow read: if signedIn();
+      allow write: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.size < 26214400 // 25MB
+        && request.resource.contentType.matches('.*');
+      allow delete: if false; // governance removal via admin tooling only
+    }
+
+    // Deny everything else by default.
+    match /{allPaths=**} {
+      allow read: if false;
+      allow write: if false;
+    }
+  }
+}

@@ -40,7 +40,9 @@ assignment → permissions.
 ## 5. Non-negotiable engineering principles
 
 1. **Server-side authorization.** Frontend hiding is not authorization. Every
-   Convex function re-derives permissions in `src/convex/lib/authz.ts`.
+   backend call is authorized twice: authoritatively by the Firebase security
+   rules (`firestore.rules`, `storage.rules`), and defensively re-derived in
+   `src/lib/backend.ts` before every operation.
 2. **Data integrity.** Records carry unique IDs, timestamps, authorship, status
    and audit history. No silent deletion of important records; controlled
    lifecycle states only.

@@ -146,8 +146,8 @@ export function pendingCount(): number {
 // SYNC ENGINE
 // ---------------------------------------------------------------------------
 
-// Kept structurally loose: callers bind Convex mutations whose ID types are
-// branded; the queue only ever stores opaque strings.
+// Kept structurally loose: callers bind backend mutations whose ID types are
+// opaque strings (Firestore document IDs).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Api = {
   createDraft: (args: {

@@ -2,8 +2,8 @@ import { useMemo } from "react";
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
+import { useQuery } from "@/lib/backend-react";
+import { api } from "@/lib/backend";
 
 const CENTER: [number, number] = [6.9, 9.3]; // approximate centroid of Liberia
 
