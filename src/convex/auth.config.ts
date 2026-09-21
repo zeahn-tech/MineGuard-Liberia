@@ -5,8 +5,10 @@ import type { AuthConfig } from "convex/server";
 // identity into this project without going through local sign-in. customJwt
 // is correct for this provider: freebuff's tokens and JWKS both carry a
 // `kid` header, which the customJwt validation path requires.
-const freebuffIssuer =
-  process.env.VLY_CONVEX_AUTH_ISSUER ?? "https://freebuff.com";
+// The federated Freebuff token issuer is fixed here. This project's own
+// sign-in (email code / guest, see src/convex/auth.ts) does not depend on it,
+// so no VLY_CONVEX_AUTH_ISSUER environment variable is required.
+const freebuffIssuer = "https://freebuff.com";
 
 export default {
   providers: [
