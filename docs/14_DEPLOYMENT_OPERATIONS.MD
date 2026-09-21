@@ -9,6 +9,17 @@
   environment; production would use `bun convex deploy` from CI.
 - No standalone API servers; no containers to manage.
 
+## Environment variables
+
+| Variable | Side | Purpose |
+|----------|------|---------|
+| `VITE_CONVEX_URL` | Client (build) | WebSocket/HTTP endpoint of the Convex deployment; consumed by `ConvexReactClient` in `src/main.tsx` |
+| `CONVEX_SITE_URL` | Server (deployment) | Public site URL; used by Convex Auth as token issuer in `src/convex/auth.config.ts` |
+
+Both are platform-managed in this environment (no manual key entry required).
+A self-hosted or externally deployed instance must set them explicitly —
+client code must never contain a hardcoded deployment URL or access token.
+
 ## Environments
 
 | Environment | Purpose | Data |
