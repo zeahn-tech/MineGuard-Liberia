@@ -257,6 +257,19 @@ async function getSite(siteId: string): Promise<Site | null> {
   return snap.exists() ? withId<Site>(snap.id, snap.data()) : null;
 }
 
+/** Site list scoped to the caller. Staff see their scope (all sites; the UI
+ *  layers county filters on top); operators see ONLY sites operated by their
+ *  organization — enforced at the rules level via an operatorName query;
+ *  unassigned accounts see none instead of an authorization error (a denied
+ *  read would otherwise leave the UI loading forever). */
+async function sitesForUser(user: UserProfile): Promise<Site[]> {
+  if (isStaffRole(user.role)) return all<Site>("sites");
+  if (user.role === ROLES.OPERATOR && user.operatorName) {
+    return whereAll<Site>("sites", "operatorName", "==", user.operatorName);
+  }
+  return [];
+}
+
 async function all<T>(name: string): Promise<T[]> {
   const snap = await getDocs(collection(db, name));
   return snap.docs.map((d) => withId<T>(d.id, d.data()));
@@ -435,9 +448,9 @@ export const api = {
   sites: {
     list: () =>
       live<(Site & { openActions: number })[]>(async () => {
-        const user = await requireStaffUser(true);
+        const user = await requireAuthed(true);
         const [sites, cas] = await Promise.all([
-          all<Site>("sites"),
+          sitesForUser(user),
           all<CorrectiveAction>("correctiveActions"),
         ]);
         const openBySite = new Map<string, number>();
@@ -524,9 +537,9 @@ export const api = {
     riskScores: () =>
       live<Record<string, { score: number; factors: { label: string; points: number }[] }>>(
         async () => {
-          await requireStaffUser(true);
+          const user = await requireAuthed(true);
           const [sites, findings, cas, incidents, env] = await Promise.all([
-            all<Site>("sites"),
+            sitesForUser(user),
             all<Finding>("findings"),
             all<CorrectiveAction>("correctiveActions"),
             all<Incident>("incidents"),
@@ -639,7 +652,9 @@ export const api = {
   inspections: {
     listTemplates: () =>
       live<InspectionTemplate[]>(async () => {
-        await requireStaffUser();
+        // Non-sensitive form definitions — operators need them to render
+        // inspection records referencing a template (rules allow staff+operator).
+        await requireAuthed();
         const allT = await all<InspectionTemplate>("inspectionTemplates");
         return allT.filter((t) => t.active);
       }, ["inspectionTemplates"]),
@@ -658,7 +673,10 @@ export const api = {
           inspectorId: string;
         }[]
       >(async () => {
-        const user = await requireStaffUser(true);
+        const user = await requireAuthed(true);
+        // Unassigned accounts have no readable scope; return empty rather than
+        // triggering a rules denial that would leave the tab loading forever.
+        if (!user.role) return [];
         const [inspections, sites] = await Promise.all([
           all<Inspection>("inspections"),
           all<Site>("sites"),
@@ -668,11 +686,13 @@ export const api = {
         for (const insp of inspections) {
           const site = byId.get(insp.siteId);
           if (!site) continue;
-          if (user.scope === "county" && user.county !== site.county) continue;
+          // Unified scope filter: admins see all, county staff their county,
+          // operators their organization's sites, unassigned accounts none.
+          if (!canAccessSite(user, site)) continue;
           if (
             user.role === ROLES.INSPECTOR &&
-            insp.inspectorId !== user.uid &&
-            user.scope !== "national"
+            user.scope !== "national" &&
+            insp.inspectorId !== user.uid
           ) {
             continue;
           }
@@ -825,7 +845,14 @@ export const api = {
 
     listFindingsForInspection: (args: { inspectionId: string }) =>
       live<Finding[]>(async () => {
-        await requireStaffUser();
+        const user = await requireAuthed();
+        // Operators may read findings for inspections at sites they operate
+        // (they acknowledge findings and respond to corrective actions).
+        const snap = await getDoc(doc(db, "inspections", args.inspectionId));
+        if (!snap.exists()) throw new Error("NOT_FOUND");
+        const insp = withId<Inspection>(snap.id, snap.data());
+        const site = await getSite(insp.siteId);
+        if (!site || !canAccessSite(user, site)) throw new Error("FORBIDDEN");
         return await whereAll<Finding>(
           "findings",
           "inspectionId",
@@ -901,12 +928,18 @@ export const api = {
 
     listCorrectiveActions: (args: { findingId: string }) =>
       live<CorrectiveAction[]>(async () => {
-        await requireStaffUser();          return await whereAll<CorrectiveAction>(
-            "correctiveActions",
-            "findingId",
-            "==",
-            args.findingId,
-          );
+        const user = await requireAuthed();
+        const snap = await getDoc(doc(db, "findings", args.findingId));
+        if (!snap.exists()) throw new Error("NOT_FOUND");
+        const finding = withId<Finding>(snap.id, snap.data());
+        const site = await getSite(finding.siteId);
+        if (!site || !canAccessSite(user, site)) throw new Error("FORBIDDEN");
+        return await whereAll<CorrectiveAction>(
+          "correctiveActions",
+          "findingId",
+          "==",
+          args.findingId,
+        );
       }, ["correctiveActions"]),
 
     listSiteCorrectiveActions: (args: { siteId: string }) =>
@@ -1089,7 +1122,8 @@ export const api = {
 
     listObservations: () =>
       live<EnvironmentalObservation[]>(async () => {
-        const user = await requireStaffUser(true);
+        const user = await requireAuthed(true);
+        if (!user.role) return [];
         const [obs, sites] = await Promise.all([
           all<EnvironmentalObservation>("environmentalObservations"),
           all<Site>("sites"),
@@ -1099,7 +1133,7 @@ export const api = {
         for (const o of obs) {
           const site = byId.get(o.siteId);
           if (!site) continue;
-          if (user.scope === "county" && user.county !== site.county) continue;
+          if (!canAccessSite(user, site)) continue;
           out.push({
             ...o,
             siteCode: site.code,
@@ -1265,16 +1299,21 @@ export const api = {
   stats: {
     commandCenter: () =>
       live<CommandCenterStats>(async () => {
-        const user = await requireStaffUser(true);
+        const user = await requireAuthed(true);
+        const staff = isStaffRole(user.role);
         const [sites, inspections, findings, cas, incidents, env, reports] =
           await Promise.all([
-            all<Site>("sites"),
+            sitesForUser(user),
             all<Inspection>("inspections"),
             all<Finding>("findings"),
             all<CorrectiveAction>("correctiveActions"),
             all<Incident>("incidents"),
             all<EnvironmentalObservation>("environmentalObservations"),
-            all<CommunityReport>("communityReports"),
+            // Community reports are staff-readable only (rules). Operators
+            // legitimately see zeros for these figures.
+            staff
+              ? all<CommunityReport>("communityReports")
+              : Promise.resolve([] as CommunityReport[]),
           ]);
         const now = Date.now();
 

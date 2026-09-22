@@ -127,7 +127,11 @@ service cloud.firestore {
     // ------------------------------------------------------------- /sites
     match /sites/{siteId} {
       allow get: if signedIn() && siteVisible();
-      allow list: if isStaff();
+      // Operators may list, but every returned doc must match their own
+      // operatorName (rules-enforced tenant isolation; the query must filter
+      // on operatorName). Staff list per their scope.
+      allow list: if isStaff()
+        || (isOperator() && resource.data.operatorName == profile().operatorName);
 
       allow create: if isAdmin();
       allow update: if isAdmin();
@@ -135,8 +139,10 @@ service cloud.firestore {
     }
 
     // -------------------------------------------- /inspectionTemplates
+    // Templates are non-sensitive form definitions; operators need them to
+    // render inspection records that reference a template.
     match /inspectionTemplates/{templateId} {
-      allow read: if isStaff();
+      allow read: if isStaff() || isOperator();
       allow create: if isAdmin();
       allow update: if isAdmin();
       allow delete: if false;
@@ -148,7 +154,7 @@ service cloud.firestore {
         isStaff() ||
         (isOperator() && siteVisibleAt(/databases/$(database)/documents/sites/$(resource.data.siteId)))
       );
-      allow list: if isStaff();
+      allow list: if isStaff() || isOperator();
 
       allow create: if isStaff()
         && request.resource.data.status == 'draft'
@@ -213,7 +219,9 @@ service cloud.firestore {
     // ------------------------- /environmentalObservations
     match /environmentalObservations/{obsId} {
       allow get: if signedIn() && siteVisibleAt(/databases/$(database)/documents/sites/$(resource.data.siteId));
-      allow list: if isStaff();
+      // Operators may list; the data layer filters to sites they operate
+      // (same pattern as /incidents).
+      allow list: if isStaff() || isOperator();
 
       allow create: if signedIn()
         && siteVisibleAt(/databases/$(database)/documents/sites/$(request.resource.data.siteId));
