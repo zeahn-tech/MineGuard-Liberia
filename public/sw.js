@@ -7,7 +7,7 @@
  * Version bump busts the cache on deploy.
  * ------------------------------------------------------------------------- */
 
-const VERSION = "v1.0.0";
+const VERSION = "v1.0.1";
 const CACHE = `mineguard-shell-${VERSION}`;
 
 const PRECACHE = [

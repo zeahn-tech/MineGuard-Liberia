@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   workflow_dispatch:
 
 permissions:
@@ -40,6 +40,16 @@ jobs:
 
       - name: SPA fallback (404 → index)
         run: cp dist/index.html dist/404.html
+
+      # Fail the deploy loudly instead of shipping a broken artifact if the
+      # build output is incomplete (missing manifest = broken PWA).
+      - name: Sanity-check build output
+        run: |
+          test -f dist/index.html || { echo "dist/index.html missing"; exit 1; }
+          test -f dist/manifest.webmanifest || { echo "dist/manifest.webmanifest missing"; exit 1; }
+          test -f dist/sw.js || { echo "dist/sw.js missing"; exit 1; }
+          test -d dist/icons || { echo "dist/icons missing"; exit 1; }
+          ls -la dist
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

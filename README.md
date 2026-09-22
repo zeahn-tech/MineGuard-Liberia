@@ -53,10 +53,21 @@ bun run build        # output in dist/
 **GitHub Pages** — a workflow is included at `.github/workflows/deploy-pages.yml`:
 
 1. Push the repository to GitHub
-2. Settings → Pages → Source: **GitHub Actions**
-3. Push to `main` — the site builds and deploys to `https://<user>.github.io/<repo>/`
+2. **Settings → Pages → Source: GitHub Actions** (not "Deploy from a branch")
+3. Push to `main` (or `master`) — the site builds and deploys to `https://<user>.github.io/<repo>/`
 
 The build is repository-aware: on GitHub Pages it automatically serves from `/<repo>/` (override with `PUBLIC_PATH=/custom/base/`). Routing uses `HashRouter`, so deep links work with zero server configuration. A service worker provides the offline app shell.
+
+> **Blank screen / 404s for `manifest.webmanifest` after deploying?** GitHub
+> Pages is serving the repository source instead of the built app. Check:
+> 1. **Settings → Pages → Source** must be **GitHub Actions**. If it says
+>    "Deploy from a branch", Pages publishes raw repo files (the raw
+>    `index.html` references `/src/main.tsx`, which only exists in dev → blank
+>    screen; `manifest.webmanifest` 404s because it lives in `public/`).
+> 2. The workflow triggers on pushes to `main`/`master` — confirm the
+>    workflow ran under the **Actions** tab and check its error logs.
+> 3. After fixing the source setting, push again (or use *Actions → Deploy to
+>    GitHub Pages → Run workflow*) and hard-refresh (Ctrl+Shift+R).
 
 ## Project structure
 
