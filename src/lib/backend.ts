@@ -449,6 +449,8 @@ export const api = {
     list: () =>
       live<(Site & { openActions: number })[]>(async () => {
         const user = await requireAuthed(true);
+        // Unassigned accounts have no readable scope — empty, not an error.
+        if (!user.role) return [];
         const [sites, cas] = await Promise.all([
           sitesForUser(user),
           all<CorrectiveAction>("correctiveActions"),
@@ -466,11 +468,13 @@ export const api = {
       }, ["sites", "correctiveActions"]),
 
     get: (args: { siteId: string }) =>
-      live<Site>(async () => {
+      live<Site | null>(async () => {
         const user = await requireAuthed();
         const site = await getSite(args.siteId);
-        if (!site) throw new Error("NOT_FOUND");
-        if (!canAccessSite(user, site)) throw new Error("FORBIDDEN");
+        // Null (not a throw) so the detail page renders its
+        // "not found or access denied" state instead of spinning forever.
+        if (!site) return null;
+        if (!canAccessSite(user, site)) return null;
         return site;
       }, ["sites"]),
 
@@ -538,6 +542,7 @@ export const api = {
       live<Record<string, { score: number; factors: { label: string; points: number }[] }>>(
         async () => {
           const user = await requireAuthed(true);
+          if (!user.role) return {};
           const [sites, findings, cas, incidents, env] = await Promise.all([
             sitesForUser(user),
             all<Finding>("findings"),
@@ -713,18 +718,19 @@ export const api = {
       }, ["inspections", "sites"]),
 
     get: (args: { inspectionId: string }) =>
-      live<Inspection>(async () => {
+      live<Inspection | null>(async () => {
         const user = await requireAuthed();
         const snap = await getDoc(doc(db, "inspections", args.inspectionId));
         if (!snap.exists()) throw new Error("NOT_FOUND");
         const insp = withId<Inspection>(snap.id, snap.data());
         const site = await getSite(insp.siteId);
-        if (!site) throw new Error("NOT_FOUND");
+        // Null (not a throw) so the detail page can render its denied state.
+        if (!site) return null;
         if (user.role === ROLES.OPERATOR) {
           if (!user.operatorName || site.operatorName !== user.operatorName)
-            throw new Error("FORBIDDEN");
+            return null;
         } else if (!isStaffRole(user.role)) {
-          throw new Error("FORBIDDEN");
+          return null;
         }
         return insp;
       }, ["inspections"]),
@@ -946,8 +952,7 @@ export const api = {
       live<CorrectiveAction[]>(async () => {
         const user = await requireAuthed();
         const site = await getSite(args.siteId);
-        if (!site) throw new Error("NOT_FOUND");
-        if (!canAccessSite(user, site)) throw new Error("FORBIDDEN");
+        if (!site || !canAccessSite(user, site)) return [];
         return await whereAll<CorrectiveAction>(
           "correctiveActions",
           "siteId",
@@ -1040,6 +1045,7 @@ export const api = {
     listIncidents: () =>
       live<Incident[]>(async () => {
         const user = await requireAuthed(true);
+        if (!user.role) return [];
         const [incidents, sites] = await Promise.all([
           all<Incident>("incidents"),
           all<Site>("sites"),
@@ -1205,7 +1211,10 @@ export const api = {
 
     listCommunityReports: () =>
       live<CommunityReport[]>(async () => {
-        await requireStaffUser();
+        // Staff-only data (rules). Non-staff callers get an empty queue
+        // instead of a denial that would leave the UI loading forever.
+        const user = await requireAuthed();
+        if (!isStaffRole(user.role)) return [];
         const allR = await all<CommunityReport>("communityReports");
         allR.sort((a, b) => b.createdAt - a.createdAt);
         return allR;
@@ -1301,6 +1310,29 @@ export const api = {
       live<CommandCenterStats>(async () => {
         const user = await requireAuthed(true);
         const staff = isStaffRole(user.role);
+        // Unassigned accounts: zeroed figures, no denied queries.
+        if (!user.role) {
+          return {
+            scope: user.scope ?? "national",
+            sites: 0,
+            activeSites: 0,
+            inspectionsTotal: 0,
+            inspectionsUnderReview: 0,
+            findingsTotal: 0,
+            findingsCriticalOpen: 0,
+            correctiveActionsOpen: 0,
+            correctiveActionsOverdue: 0,
+            incidentsTotal: 0,
+            fatalities: 0,
+            envAlerts: 0,
+            envByCategory: {},
+            communityReports: 0,
+            communityReportsPending: 0,
+            inspectionCoveragePct: 0,
+            countyCounts: {},
+            incidentTypes: {},
+          };
+        }
         const [sites, inspections, findings, cas, incidents, env, reports] =
           await Promise.all([
             sitesForUser(user),
@@ -1401,7 +1433,9 @@ export const api = {
 
     recentAuditLog: () =>
       live<AuditEntry[]>(async () => {
-        await requireStaffUser();
+        // Staff-only data (rules); non-staff get an empty list, not a hang.
+        const user = await requireAuthed();
+        if (!isStaffRole(user.role)) return [];
         const snap = await getDocs(
           fsQuery(
             collection(db, "auditLog"),

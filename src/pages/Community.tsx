@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { useAuth } from "@/hooks/use-auth";
+import { StaffOnly } from "@/components/StaffOnly";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -34,6 +35,7 @@ export default function Community() {
   );
 
   return (
+    <StaffOnly>
     <div className="space-y-8">
       <header>
         <p className="kicker">Public channel · triage</p>
@@ -167,10 +169,10 @@ export default function Community() {
                   <p className="mt-1 text-xs italic text-muted-foreground">“{r.triageNote}”</p>
                 )}
               </li>
-            ))}
-          </ul>
-        )}
+            ))}        </ul>
+      )}
       </section>
     </div>
+    </StaffOnly>
   );
 }

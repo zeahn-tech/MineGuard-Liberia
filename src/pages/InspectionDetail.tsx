@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { Doc, Id } from "@/lib/compat-types";
+import { isStaffRole } from "@/lib/types";
 
 const SEV_STYLES: Record<string, string> = {
   low: "text-muted-foreground",
@@ -46,6 +47,9 @@ export default function InspectionDetail() {
   const { user } = useAuth();
 
   const isReviewer = user?.role === "admin" || user?.role === "supervisor";
+  // Finding creation and corrective-action opening are staff-only (rules);
+  // operators acknowledge findings and view the compliance chain.
+  const isStaff = isStaffRole(user?.role);
   const [reviewNote, setReviewNote] = useState("");
   const [findingForm, setFindingForm] = useState({ title: "", description: "", severity: "medium" });
   const [caForm, setCaForm] = useState<{ findingId: string; description: string; dueAt: string } | null>(null);
@@ -250,7 +254,7 @@ export default function InspectionDetail() {
                       Acknowledge
                     </Button>
                   )}
-                  {(f.status === "acknowledged" || f.status === "open") && (
+                  {isStaff && (f.status === "acknowledged" || f.status === "open") && (
                     <>
                       <Button
                         size="sm"
@@ -282,7 +286,8 @@ export default function InspectionDetail() {
           </ul>
         )}
 
-        {/* Add finding */}
+        {/* Add finding — staff-only (rules gate finding creation) */}
+        {isStaff && (
         <div className="paper mt-6 p-4">
           <p className="kicker">Record a finding</p>
           <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -334,6 +339,7 @@ export default function InspectionDetail() {
             Record finding
           </Button>
         </div>
+        )}
       </section>
 
       {/* Corrective action dialog */}

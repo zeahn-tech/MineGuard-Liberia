@@ -201,6 +201,16 @@ export default function PortalLayout() {
               <br />
               {user?.role ?? "unassigned"} · {user?.scope ?? "—"}
             </div>
+            {user && user.profileComplete !== true && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mb-2 w-full justify-start"
+                onClick={() => setShowProfile(true)}
+              >
+                <FileCheck2 className="size-3.5" /> Complete profile
+              </Button>
+            )}
             {isAdmin && (
               <Button
                 variant="outline"
@@ -275,15 +285,10 @@ export default function PortalLayout() {
         </div>
       </div>
 
-      {/* Profile completion dialog — not dismissable until completed,
-          otherwise a first-run install has no path to its first admin. */}
-      <Dialog
-        open={showProfile}
-        onOpenChange={(open) => {
-          if (!open && user?.profileComplete !== true) return;
-          setShowProfile(open);
-        }}
-      >
+      {/* Profile completion dialog. The ✕ (and Escape/backdrop) now dismiss
+          it — unassigned accounts can still browse the portal, and the
+          "Complete profile" button in the sidebar/drawer reopens this dialog. */}
+      <Dialog open={showProfile} onOpenChange={setShowProfile}>
         <DialogContent className="paper">
           <DialogHeader>
             <DialogTitle>Complete your staff profile</DialogTitle>
@@ -327,6 +332,19 @@ export default function PortalLayout() {
             />
           </nav>
           <div className="space-y-2 border-t border-border p-3">
+            {user && user.profileComplete !== true && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full justify-start"
+                onClick={() => {
+                  setMobileNavOpen(false);
+                  setShowProfile(true);
+                }}
+              >
+                <FileCheck2 className="size-3.5" /> Complete profile
+              </Button>
+            )}
             {isAdmin && (
               <Button
                 variant="outline"

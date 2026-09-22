@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
+import { useAuth } from "@/hooks/use-auth";
+import { isStaffRole } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,6 +49,10 @@ export default function Inspections() {
   const inspections = useQuery(api.inspections.list);
   const sites = useQuery(api.sites.list);
   const templates = useQuery(api.inspections.listTemplates);
+  const { user } = useAuth();
+  // Draft creation is staff-only (rules); operators browse their sites'
+  // inspections read-only.
+  const isStaff = isStaffRole(user?.role);
   const navigate = useNavigate();
   const [localDrafts, setLocalDrafts] = useState<LocalDraft[]>([]);
   const [open, setOpen] = useState(false);
@@ -74,9 +80,11 @@ export default function Inspections() {
             automatically with server-side dedupe.
           </p>
         </div>
-        <Button onClick={() => setOpen(true)} disabled={!templates?.length}>
-          <FilePlus2 className="size-4" /> New inspection
-        </Button>
+        {isStaff && (
+          <Button onClick={() => setOpen(true)} disabled={!templates?.length}>
+            <FilePlus2 className="size-4" /> New inspection
+          </Button>
+        )}
       </header>
 
       {localDrafts.length > 0 && (

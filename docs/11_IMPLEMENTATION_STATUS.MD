@@ -4,6 +4,37 @@
 **Date:** 2026-09-21
 **Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun run build` ✓ (clean production build)
 
+## Non-staff portal stabilization [IMPLEMENTED 2026-09-22]
+
+Fixes the "loads forever after sign-in" failure for operator and unassigned
+accounts (root cause: staff-only queries denied by rules surfaced as a
+never-resolving loading state):
+
+- **Rules (`firestore.rules`)** — operator list grants: `/sites` (query must
+  filter `operatorName == profile().operatorName` — rules-enforced tenant
+  isolation), `/inspections`, `/environmentalObservations` (data-layer
+  filtered, same pattern as `/incidents`); `/inspectionTemplates` readable by
+  staff + operators (non-sensitive form definitions).
+- **Data layer (`src/lib/backend.ts`)** — `sitesForUser` scoping helper;
+  `sites.list`/`riskScores`/`commandCenter`/`inspections.list`/
+  `listTemplates`/`listFindingsForInspection`/`listCorrectiveActions`/
+  `listSiteCorrectiveActions`/`listObservations` are role-aware; unassigned
+  accounts receive well-defined empty results instead of denied reads;
+  community reports + audit log remain staff-only (empty for non-staff);
+  `sites.get`/`inspections.get` return `null` so detail pages render their
+  denied state instead of spinning.
+- **UI** — `StaffOnly` gate component (audit log, community triage);
+  staff-only controls hidden for non-staff (New inspection, record finding,
+  resolve finding, open corrective action); profile-completion dialog is now
+  dismissable (✕/Escape/backdrop) with a persistent "Complete profile" button
+  in the sidebar and mobile drawer to reopen it.
+- **Operational note:** a sign-up whose profile completed while
+  `meta/hasStaff` already exists remains unassigned (role `null`) until an
+  admin provisions them. If no admin exists (e.g. demo users were deleted but
+  the sentinel doc remains), delete `meta/hasStaff` in the Firebase console
+  (Firestore → `meta` collection) and complete a profile again to re-trigger
+  the one-time first-admin bootstrap.
+
 ## GitHub deployment readiness [IMPLEMENTED 2026-09]
 
 - **HashRouter** — every deep link works on any static host with zero server
