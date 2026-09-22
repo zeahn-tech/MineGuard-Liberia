@@ -32,12 +32,20 @@ import {
   Leaf,
   LogOut,
   Map,
+  Menu,
   MessageSquareWarning,
   RefreshCw,
   ScrollText,
   ShieldCheck,
   UserCog,
 } from "lucide-react";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   readQueue,
   syncQueue,
@@ -62,6 +70,7 @@ export default function PortalLayout() {
   const navigate = useNavigate();
   const [showProvision, setShowProvision] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [syncing, setSyncing] = useState(false);
 
@@ -184,23 +193,7 @@ export default function PortalLayout() {
             <span className="ml-auto stamp text-[9px] text-muted-foreground">V1.0</span>
           </div>
           <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-4">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === "/portal"}
-                className={({ isActive }) =>
-                  `flex items-center gap-2.5 rounded-sm px-3 py-2 text-sm transition-colors ${
-                    isActive
-                      ? "bg-accent font-medium text-accent-foreground"
-                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                  }`
-                }
-              >
-                <item.icon className="size-4" strokeWidth={1.5} />
-                {item.label}
-              </NavLink>
-            ))}
+            <NavLinks items={navItems} />
           </nav>
           <div className="border-t border-border p-3">
             <div className="mb-2 px-2 text-[11px] leading-snug text-muted-foreground">
@@ -236,6 +229,13 @@ export default function PortalLayout() {
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur">
             <div className="flex items-center gap-3 px-4 py-3 md:px-6">
+              <button
+                onClick={() => setMobileNavOpen(true)}
+                className="rounded-sm border border-border p-2 text-foreground transition-colors hover:bg-accent md:hidden"
+                aria-label="Open navigation menu"
+              >
+                <Menu className="size-5" strokeWidth={1.5} />
+              </button>
               <Link to="/portal" className="display text-sm md:hidden">
                 MineGuard Liberia
               </Link>
