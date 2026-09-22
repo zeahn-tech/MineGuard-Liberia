@@ -298,6 +298,64 @@ export default function PortalLayout() {
         </DialogContent>
       </Dialog>
 
+      {/* Mobile navigation drawer — slides in from the left, mirrors the
+          desktop sidebar. Tapping a link navigates and slides it back. */}
+      <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+        <SheetContent
+          side="left"
+          className="w-72 bg-sidebar p-0 sm:max-w-[18rem]"
+        >
+          <SheetHeader className="border-b border-border px-4 py-5 text-left">
+            <SheetTitle className="flex items-center gap-2 text-sm">
+              <ShieldCheck className="size-5" strokeWidth={1.5} />
+              <span className="display">MineGuard</span>
+              <span className="kicker text-[10px]">Liberia</span>
+              <span className="stamp ml-auto text-[9px] text-muted-foreground">
+                V1.0
+              </span>
+            </SheetTitle>
+            <SheetDescription className="truncate text-[11px]">
+              {user?.email ?? ""}
+              <br />
+              {user?.role ?? "unassigned"} · {user?.scope ?? "—"}
+            </SheetDescription>
+          </SheetHeader>
+          <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-4">
+            <NavLinks
+              items={navItems}
+              onNavigate={() => setMobileNavOpen(false)}
+            />
+          </nav>
+          <div className="space-y-2 border-t border-border p-3">
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full justify-start"
+                onClick={() => {
+                  setMobileNavOpen(false);
+                  setShowProvision(true);
+                }}
+              >
+                <UserCog className="size-3.5" /> Assign roles
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start text-muted-foreground"
+              onClick={async () => {
+                setMobileNavOpen(false);
+                await signOut();
+                navigate("/");
+              }}
+            >
+              <LogOut className="size-3.5" /> Sign out
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
       {/* Admin provisioning dialog */}
       <Dialog open={showProvision} onOpenChange={setShowProvision}>
         <DialogContent className="paper">
@@ -382,6 +440,39 @@ export default function PortalLayout() {
         <SeedButton onSeed={handleSeed} />
       )}
     </div>
+  );
+}
+
+// Shared navigation list: rendered in the desktop sidebar and the mobile
+// drawer so both surfaces always show the same tabs.
+function NavLinks({
+  items,
+  onNavigate,
+}: {
+  items: typeof NAV;
+  onNavigate?: () => void;
+}) {
+  return (
+    <>
+      {items.map((item) => (
+        <NavLink
+          key={item.to}
+          to={item.to}
+          end={item.to === "/portal"}
+          onClick={onNavigate}
+          className={({ isActive }) =>
+            `flex items-center gap-2.5 rounded-sm px-3 py-2 text-sm transition-colors ${
+              isActive
+                ? "bg-accent font-medium text-accent-foreground"
+                : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+            }`
+          }
+        >
+          <item.icon className="size-4" strokeWidth={1.5} />
+          {item.label}
+        </NavLink>
+      ))}
+    </>
   );
 }
 
