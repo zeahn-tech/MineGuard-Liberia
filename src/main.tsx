@@ -102,6 +102,9 @@ createRoot(document.getElementById("root")!).render(
               <Route path="sites/:siteId" element={<SiteDetail />} />
               <Route path="map" element={<NationalMap />} />
               <Route path="inspections" element={<Inspections />} />
+              {/* Static segment ranks above :inspectionId — must come as a sibling;
+                  this is the offline-capable local draft form. */}
+              <Route path="inspections/local/:clientRef" element={<InspectionsLocal />} />
               <Route path="inspections/:inspectionId" element={<InspectionDetail />} />
               <Route path="incidents" element={<Incidents />} />
               <Route path="environment" element={<Environment />} />
