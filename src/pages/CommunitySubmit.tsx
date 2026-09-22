@@ -46,6 +46,7 @@ export default function CommunitySubmit() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (busy) return;
     if (!category || !county || !description.trim()) {
       toast.error("Category, county and description are required.");
       return;

@@ -6,64 +6,251 @@
 // function taking the args object and returning a QueryHandle.
 // useMutation(fn) — returns a callable wrapping the async backend function.
 //
-// Queries re-subscribe whenever Firebase auth state changes so data
-// refreshes on sign-in/sign-out.
+// PERFORMANCE MODEL (this is what makes tab switches instant):
+//  1. Subscriptions are SHARED per (query function, args). Twenty components
+//     reading the same query = one Firestore read loop, not twenty.
+//  2. Cache entries outlive unmount (KEEPALIVE_MS). Navigating to another tab
+//     and back replays the last value SYNCHRONOUSLY, then refreshes in the
+//     background — no loading flash, no re-download.
+//  3. Auth state is a module-level store; sign-in/out bumps a single epoch
+//     that auth-bound subscriptions re-derive from. Document subscriptions
+//     not tied to identity (e.g. public stats) survive across epochs.
+//  4. useSyncExternalStore drives re-renders straight from the cache — no
+//     per-component state copies, no extra render passes.
 // ---------------------------------------------------------------------------
 
-import { useEffect, useRef, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { onAuthStateChanged, type User } from "firebase/auth";
 import { auth } from "./firebase";
 import type { QueryHandle } from "./backend";
 
-/** Track auth state transitions so queries re-run after sign-in/out. */
-export function useAuthEpoch(): number {
-  const [epoch, setEpoch] = useState(0);
-  useEffect(() => onAuthStateChanged(auth, () => setEpoch((e) => e + 1)), []);
-  return epoch;
+type Listener = () => void;
+
+// Query handles may declare themselves auth-bound: their result depends on
+// who is signed in, so an auth change must re-derive them.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyHandle = QueryHandle<any> & { authBound?: boolean };
+
+interface CacheEntry {
+  value: unknown | undefined; // undefined = not yet loaded
+  hasValue: boolean;
+  listeners: Set<Listener>;
+  handle: AnyHandle | null;
+  unsubHandle: (() => void) | null;
+  epoch: number; // auth epoch this subscription was established under
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+type QueryFn = (args?: any) => AnyHandle;
+
+const CACHE = new Map<string, CacheEntry>();
+
+/** How long an unused cache entry stays subscribed after its last consumer
+ *  goes away. Long enough that tab A → B → A never refetches; short enough
+ *  that sign-out doesn't linger another user's data for long. */
+const KEEPALIVE_MS = 90_000;
+
+function getEntry(key: string): CacheEntry {
+  let e = CACHE.get(key);
+  if (!e) {
+    e = {
+      value: undefined,
+      hasValue: false,
+      listeners: new Set(),
+      handle: null,
+      unsubHandle: null,
+      epoch: -1,
+    };
+    CACHE.set(key, e);
+  }
+  return e;
+}
+
+function notify(e: CacheEntry) {
+  for (const l of e.listeners) l();
+}
+
+/** Establish or refresh the underlying live subscription for a cache entry.
+ *  Skipped entirely when a valid subscription already exists. */
+function ensureSubscribed(
+  key: string,
+  fn: QueryFn,
+  args: unknown,
+  epoch: number,
+) {
+  const e = getEntry(key);
+  if (e.unsubHandle) {
+    const authBound = e.handle?.authBound === true;
+    // Non-auth-bound subscriptions (public stats doc) stay valid forever.
+    // Auth-bound ones stay valid only within the epoch they were built in.
+    if (!authBound || e.epoch === epoch) return;
+    e.unsubHandle();
+    e.unsubHandle = null;
+    // Auth changed underneath an auth-bound query: back to loading.
+    e.value = undefined;
+    e.hasValue = false;
+  }
+  // Resubscribing after keepalive teardown within the same epoch: keep the
+  // cached value so consumers replay it instantly; the fetcher will deliver
+  // a fresh copy momentarily.
+  e.epoch = epoch;
+  e.handle = fn(args);
+  e.unsubHandle = e.handle.subscribe((v) => {
+    if (!e.hasValue && v === undefined) return; // remain "loading"
+    e.value = v;
+    e.hasValue = true;
+    notify(e);
+  });
+}
+
+function releaseSubscription(key: string) {
+  const e = CACHE.get(key);
+  if (!e) return;
+  if (e.listeners.size > 0) return; // another consumer took over
+  const scheduleTeardown = () => {
+    window.setTimeout(() => {
+      const cur = CACHE.get(key);
+      if (!cur || cur.listeners.size > 0) return;
+      const idleFor = Date.now() - lastActiveAt(key);
+      if (idleFor < KEEPALIVE_MS) {
+        // Activity happened after this timer was scheduled — re-arm.
+        scheduleTeardown();
+        return;
+      }
+      cur.unsubHandle?.();
+      cur.unsubHandle = null;
+      cur.handle = null;
+      // NOTE: cached value is intentionally kept so a remount replays it.
+    }, KEEPALIVE_MS);
+  };
+  scheduleTeardown();
+}
+
+// Last-active bookkeeping for keepalive decisions.
+const LAST_ACTIVE = new Map<string, number>();
+function touch(key: string) {
+  LAST_ACTIVE.set(key, Date.now());
+}
+function lastActiveAt(key: string): number {
+  return LAST_ACTIVE.get(key) ?? 0;
+}
+
+// ---------------------------------------------------------------------------
+// AUTH STATE — module-level, shared, no per-component subscriptions
+// ---------------------------------------------------------------------------
+
+let authEpoch = 0;
+let authUser: User | null = null;
+let authReady = false;
+const epochListeners = new Set<Listener>();
+
+onAuthStateChanged(auth, (u) => {
+  const changed = u?.uid !== authUser?.uid;
+  authUser = u;
+  authReady = true;
+  if (changed) authEpoch++;
+  for (const l of epochListeners) l();
+});
+
+function useAuthEpoch(): number {
+  return useSyncExternalStore(
+    (cb) => {
+      epochListeners.add(cb);
+      return () => epochListeners.delete(cb);
+    },
+    () => authEpoch,
+    () => 0,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// useQuery
+// ---------------------------------------------------------------------------
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function useQuery<T = any>(
+  // Keep T in the parameter type so it is inferred from the query factory at
+  // every call site (e.g. api.stats.commandCenter → CommandCenterStats).
   fn: (args?: any) => QueryHandle<T>,
   args?: unknown,
 ): T | undefined {
-  const [value, setValue] = useState<T | undefined>(undefined);
   const epoch = useAuthEpoch();
-  const fnRef = useRef(fn);
-  fnRef.current = fn;
   // Convex "skip" sentinel: keep the query undefined without subscribing.
   const skipped = args === "skip";
   // Args are often inline object literals; key on their JSON so identical
   // values don't resubscribe every render.
   const argsKey = skipped || args === undefined ? "" : JSON.stringify(args);
+  const key = skipped ? null : `${fnCacheId(fn)}|${argsKey}`;
 
+  // Stable per call-site identity even though `fn` may be re-created.
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+  const argsRef = useRef(args);
+  argsRef.current = args;
+
+  const subscribe = useCallback(
+    (cb: Listener) => {
+      if (!key) return () => {};
+      const e = getEntry(key);
+      e.listeners.add(cb);
+      touch(key);
+      return () => {
+        e.listeners.delete(cb);
+        touch(key);
+        releaseSubscription(key);
+      };
+    },
+    [key],
+  );
+
+  const snapshot = useCallback(() => {
+    if (!key) return undefined;
+    const e = getEntry(key);
+    return e.hasValue ? e.value : undefined;
+  }, [key]);
+
+  const value = useSyncExternalStore(subscribe, snapshot, snapshot);
+
+  // Establish/refresh the underlying subscription after render (mount, args
+  // change, or auth-epoch change). Effects, not render, own network work.
   useEffect(() => {
-    if (skipped) return;
-    let cancelled = false;
-    let unsub: (() => void) | undefined;
-    try {
-      const handle = fnRef.current(skipped ? undefined : args);
-      unsub = handle.subscribe((v) => {
-        if (!cancelled) setValue(v);
-      });
-    } catch (err) {
-      console.error("[backend] query setup failed:", err);
-      if (!cancelled) setValue(undefined);
-    }
-    return () => {
-      cancelled = true;
-      unsub?.();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [epoch, argsKey]);
+    if (!key || skipped) return;
+    // QueryHandle<T> is assignable to AnyHandle (authBound is optional).
+    ensureSubscribed(
+      key,
+      fnRef.current as unknown as QueryFn,
+      argsRef.current,
+      epoch,
+    );
+  }, [key, epoch, skipped]);
 
-  return value;
+  if (skipped) return undefined;
+  return value as T | undefined;
 }
+
+/** Identity for the query fn so call sites don't need to memoize it. */
+const FN_IDS = new WeakMap<object, string>();
+let FN_SEQ = 0;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function fnCacheId(fn: (args?: any) => AnyHandle): string {
+  let id = FN_IDS.get(fn);
+  if (!id) {
+    id = `q${FN_SEQ++}`;
+    FN_IDS.set(fn, id);
+  }
+  return id;
+}
+
+// ---------------------------------------------------------------------------
+// useMutation — thin stable wrapper around the async backend function.
+// ---------------------------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function useMutation(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   fn: (...args: any[]) => Promise<any>,
-): (...args: any[]) => Promise<any> {
+): // eslint-disable-next-line @typescript-eslint/no-explicit-any
+(...args: any[]) => Promise<any> {
   const fnRef = useRef(fn);
   fnRef.current = fn;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -74,16 +261,9 @@ export function useIsAuthenticated(): {
   isLoading: boolean;
   isAuthenticated: boolean;
 } {
-  const [state, setState] = useState<{ ready: boolean; authed: boolean }>({
-    ready: false,
-    authed: false,
-  });
-  useEffect(
-    () =>
-      onAuthStateChanged(auth, (u) => {
-        setState({ ready: true, authed: !!u });
-      }),
-    [],
-  );
-  return { isLoading: !state.ready, isAuthenticated: state.authed };
+  useAuthEpoch();
+  return {
+    isLoading: !authReady,
+    isAuthenticated: authUser !== null,
+  };
 }

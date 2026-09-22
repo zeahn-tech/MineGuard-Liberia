@@ -1,27 +1,17 @@
 import { Link, useNavigate } from "react-router";
-import { useQuery, useMutation } from "@/lib/backend-react";
+import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { readQueue } from "@/lib/offline-queue";
-import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import { ArrowRight, ShieldAlert, TriangleAlert } from "lucide-react";
 
-function useSeedOnce() {
-  const seed = useMutation(api.seed.seedIfEmpty);
-  const [attempted, setAttempted] = useState(false);
-  useEffect(() => {
-    if (attempted) return;
-    setAttempted(true);
-    seed({}).catch(() => {
-      /* seed is opportunistic; failures are surfaced elsewhere */
-    });
-  }, [attempted, seed]);
-}
+// NOTE: the demo-data seed is an explicit admin action ("Load demo data"
+// button in the sidebar). It must NOT auto-run on page mount — an implicit
+// write per navigation adds rules round-trips and latency to every visit.
 
 export default function CommandCenter() {
-  useSeedOnce();
   const { user } = useAuth();
   const navigate = useNavigate();
   const stats = useQuery(api.stats.commandCenter);

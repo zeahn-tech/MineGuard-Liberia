@@ -118,6 +118,7 @@ export default function Sites() {
 function RegisterSiteDialog() {
   const create = useMutation(api.sites.create);
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: "",
     operatorName: "",
@@ -133,10 +134,12 @@ function RegisterSiteDialog() {
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const submit = async () => {
+    if (saving) return;
     if (!form.name || !form.operatorName || !form.county) {
       toast.error("Name, operator and county are required.");
       return;
     }
+    setSaving(true);
     try {
       await create({
         name: form.name,
@@ -154,6 +157,8 @@ function RegisterSiteDialog() {
       setForm({ name: "", operatorName: "", county: "", district: "", community: "", mineralType: "", latitude: "", longitude: "", notes: "" });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to register site");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -216,8 +221,8 @@ function RegisterSiteDialog() {
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={submit}>
-            <MapPin className="size-4" /> Register
+          <Button onClick={submit} disabled={saving}>
+            {saving ? "Registering…" : (<><MapPin className="size-4" /> Register</>)}
           </Button>
         </DialogFooter>
       </DialogContent>

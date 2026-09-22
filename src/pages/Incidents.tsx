@@ -143,6 +143,7 @@ function ReportDialog() {
   const sites = useQuery(api.sites.list);
   const report = useMutation(api.records.reportIncident);
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     siteId: "",
     type: "injury",
@@ -154,10 +155,12 @@ function ReportDialog() {
   });
 
   const submit = async () => {
+    if (saving) return;
     if (!form.siteId || !form.description.trim()) {
       toast.error("Site and description are required.");
       return;
     }
+    setSaving(true);
     try {
       await report({
         siteId: form.siteId as never,
@@ -173,6 +176,8 @@ function ReportDialog() {
       setForm({ ...form, siteId: "", description: "", fatalities: "", injured: "" });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to record incident");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -269,7 +274,9 @@ function ReportDialog() {
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={submit}>Record incident</Button>
+          <Button onClick={submit} disabled={saving}>
+            {saving ? "Recording…" : "Record incident"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

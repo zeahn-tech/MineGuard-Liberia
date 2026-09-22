@@ -22,10 +22,11 @@ import {
   setDoc,
   updateDoc,
   where,
+  type DocumentReference,
   type Unsubscribe,
 } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
-import { db, fbStorage } from "./firebase";
+import { auth, db, fbStorage } from "./firebase";
 import {
   canAccessSite,
   isStaffRole,
@@ -53,32 +54,76 @@ import {
 // ---------------------------------------------------------------------------
 
 export interface QueryHandle<T> {
+  /** True when the result depends on the signed-in user. Consumed by the
+   *  React cache layer to re-derive subscriptions after auth changes. */
+  authBound?: boolean;
   subscribe(cb: (value: T | undefined) => void): Unsubscribe;
 }
 
+// PERF CONTRACT (performance fix):
+//  - The fetcher runs ONCE on subscribe, then at most once per burst of
+//    snapshot events (300ms trailing debounce), and never concurrently
+//    (single-flight with a dirty flag). Snapshot storms therefore collapse
+//    into a single refetch instead of refetch-per-event.
+//  - authBound (default true): the result depends on the signed-in user, so
+//    the shared cache re-derives it after sign-in/out. Public queries opt out.
 function live<T>(
   fetcher: () => Promise<T>,
   watch: string[],
+  opts?: { authBound?: boolean },
 ): QueryHandle<T> {
+  const authBound = opts?.authBound !== false;
   return {
+    // Flag consumed by the React cache layer (backend-react.ts).
+    authBound,
     subscribe(cb) {
       let cancelled = false;
+      let inFlight = false;
+      let dirty = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
       const run = async () => {
+        if (inFlight) {
+          dirty = true;
+          return;
+        }
+        inFlight = true;
         try {
           const value = await fetcher();
           if (!cancelled) cb(value);
         } catch (err) {
           console.error("[backend] query failed:", err);
           if (!cancelled) cb(undefined);
+        } finally {
+          inFlight = false;
+          if (dirty && !cancelled) {
+            dirty = false;
+            timer = setTimeout(() => {
+              timer = null;
+              void run();
+            }, 100);
+          }
         }
       };
       void run();
       const unsubs: Unsubscribe[] = [];
       for (const name of watch) {
         try {
-          const unsub = onSnapshot(collection(db, name), () => {
-            void run();
-          });
+          const unsub = onSnapshot(
+            collection(db, name),
+            () => {
+              if (cancelled) return;
+              if (timer) clearTimeout(timer);
+              timer = setTimeout(() => {
+                timer = null;
+                void run();
+              }, 300);
+            },
+            (err) => {
+              // Denied LIST (e.g. role-scoped collections) must not become an
+              // unhandled rejection; the initial fetch already surfaced state.
+              console.warn(`[backend] watcher for "${name}" denied:`, err.code);
+            },
+          );
           unsubs.push(unsub);
         } catch {
           // Collection watcher is best-effort; initial fetch already ran.
@@ -86,8 +131,39 @@ function live<T>(
       }
       return () => {
         cancelled = true;
+        if (timer) clearTimeout(timer);
         for (const u of unsubs) u();
       };
+    },
+  };
+}
+
+/** Single-document live query: true push reactivity, zero watchers over whole
+ *  collections. Used for the user profile and public stats. */
+function liveDoc<T>(
+  getRef: () => DocumentReference | null,
+  opts?: { authBound?: boolean },
+): QueryHandle<T | null> {
+  const authBound = opts?.authBound !== false;
+  return {
+    // Flag consumed by the React cache layer (backend-react.ts).
+    authBound,
+    subscribe(cb) {
+      const r = getRef();
+      if (!r) {
+        cb(null);
+        return () => {};
+      }
+      return onSnapshot(
+        r,
+        (snap) => {
+          cb(snap.exists() ? withId<T>(snap.id, snap.data()) : null);
+        },
+        (err) => {
+          console.error("[backend] doc query failed:", err);
+          cb(null);
+        },
+      );
     },
   };
 }
@@ -108,29 +184,51 @@ async function getProfile(uid: string): Promise<UserProfile | null> {
   return { uid: snap.id, ...(snap.data() as object) } as unknown as UserProfile;
 }
 
-async function requireAuthed(): Promise<UserProfile> {
-  const { auth } = await import("./firebase");
+// Short-TTL profile cache: list queries re-derive authorization on every run;
+// without this, one dashboard render costs a profile getDoc per query. TTL is
+// intentionally short (5s) so role changes surface quickly. Mutations always
+// use a fresh read (cached=false default).
+let profileCache: { uid: string; profile: UserProfile | null; at: number } | null =
+  null;
+const PROFILE_TTL_MS = 5_000;
+
+async function getProfileCached(uid: string): Promise<UserProfile | null> {
+  if (
+    profileCache &&
+    profileCache.uid === uid &&
+    Date.now() - profileCache.at < PROFILE_TTL_MS
+  ) {
+    return profileCache.profile;
+  }
+  const profile = await getProfile(uid);
+  profileCache = { uid, profile, at: Date.now() };
+  return profile;
+}
+
+async function requireAuthed(cached = false): Promise<UserProfile> {
   const u = auth.currentUser;
   if (!u) throw new Error("UNAUTHENTICATED");
-  const profile = await getProfile(u.uid);
+  const profile = cached
+    ? await getProfileCached(u.uid)
+    : await getProfile(u.uid);
   if (!profile) throw new Error("UNREGISTERED_USER");
   return profile;
 }
 
-async function requireStaffUser(): Promise<UserProfile> {
-  const user = await requireAuthed();
+async function requireStaffUser(cached = false): Promise<UserProfile> {
+  const user = await requireAuthed(cached);
   if (!isStaffRole(user.role)) throw new Error("FORBIDDEN");
   return user;
 }
 
-async function requireAdminUser(): Promise<UserProfile> {
-  const user = await requireAuthed();
+async function requireAdminUser(cached = false): Promise<UserProfile> {
+  const user = await requireAuthed(cached);
   if (user.role !== ROLES.ADMIN) throw new Error("FORBIDDEN");
   return user;
 }
 
-async function requireReviewerUser(): Promise<UserProfile> {
-  const user = await requireAuthed();
+async function requireReviewerUser(cached = false): Promise<UserProfile> {
+  const user = await requireAuthed(cached);
   if (user.role !== ROLES.ADMIN && user.role !== ROLES.SUPERVISOR)
     throw new Error("FORBIDDEN");
   return user;
@@ -184,10 +282,19 @@ async function anyStaffExists(): Promise<boolean> {
   return snap.exists();
 }
 
+// Public stats recompute reads four whole collections; throttled to once per
+// minute so bursty writes (bulk inspection submission, seeding) don't multiply
+// read volume. The seed path forces a refresh.
+const PUBLIC_STATS_MIN_INTERVAL_MS = 60_000;
+let lastPublicStatsAt = 0;
+
 /** Recompute public aggregate counts (landing page). Never exposes content.
  *  Best-effort: a permission denial (e.g. unauthenticated public submit
  *  flow) must never fail the business transaction itself. */
-async function refreshPublicStats() {
+async function refreshPublicStats(force = false) {
+  const now = Date.now();
+  if (!force && now - lastPublicStatsAt < PUBLIC_STATS_MIN_INTERVAL_MS) return;
+  lastPublicStatsAt = now;
   try {
     const [sites, inspections, incidents, reports] = await Promise.all([
       getDocs(collection(db, "sites")),
@@ -209,6 +316,13 @@ async function refreshPublicStats() {
   } catch (err) {
     console.warn("[backend] publicStats refresh skipped:", err);
   }
+}
+
+interface PublicStatsShape {
+  sites: number;
+  inspections: number;
+  incidents: number;
+  communityReports: number;
 }
 
 function evidenceKindByMime(mime: string): EvidenceKind {
@@ -307,19 +421,21 @@ export async function ensureProfileDoc(
 export const api = {
   // ----------------------------------------------------------------- users
   users: {
+    // Single-document subscription: the profile updates via push (e.g. the
+    // profile-completion dialog closes the instant the write lands) instead of
+    // refetching the whole users collection.
     currentUser: () =>
-      live<UserProfile | null>(async () => {
-        const { auth } = await import("./firebase");
+      liveDoc<UserProfile>(() => {
         const u = auth.currentUser;
-        return u ? await getProfile(u.uid) : null;
-      }, ["users"]),
+        return u ? doc(db, "users", u.uid) : null;
+      }),
   },
 
   // ----------------------------------------------------------------- sites
   sites: {
     list: () =>
       live<(Site & { openActions: number })[]>(async () => {
-        const user = await requireStaffUser();
+        const user = await requireStaffUser(true);
         const [sites, cas] = await Promise.all([
           all<Site>("sites"),
           all<CorrectiveAction>("correctiveActions"),
@@ -408,7 +524,7 @@ export const api = {
     riskScores: () =>
       live<Record<string, { score: number; factors: { label: string; points: number }[] }>>(
         async () => {
-          await requireStaffUser();
+          await requireStaffUser(true);
           const [sites, findings, cas, incidents, env] = await Promise.all([
             all<Site>("sites"),
             all<Finding>("findings"),
@@ -542,7 +658,7 @@ export const api = {
           inspectorId: string;
         }[]
       >(async () => {
-        const user = await requireStaffUser();
+        const user = await requireStaffUser(true);
         const [inspections, sites] = await Promise.all([
           all<Inspection>("inspections"),
           all<Site>("sites"),
@@ -785,13 +901,12 @@ export const api = {
 
     listCorrectiveActions: (args: { findingId: string }) =>
       live<CorrectiveAction[]>(async () => {
-        await requireStaffUser();
-        return await whereAll<CorrectiveAction>(
-          "correctiveActions",
-          "findingId",
-          "==",
-          args.findingId,
-        );
+        await requireStaffUser();          return await whereAll<CorrectiveAction>(
+            "correctiveActions",
+            "findingId",
+            "==",
+            args.findingId,
+          );
       }, ["correctiveActions"]),
 
     listSiteCorrectiveActions: (args: { siteId: string }) =>
@@ -891,7 +1006,7 @@ export const api = {
   records: {
     listIncidents: () =>
       live<Incident[]>(async () => {
-        const user = await requireAuthed();
+        const user = await requireAuthed(true);
         const [incidents, sites] = await Promise.all([
           all<Incident>("incidents"),
           all<Site>("sites"),
@@ -974,7 +1089,7 @@ export const api = {
 
     listObservations: () =>
       live<EnvironmentalObservation[]>(async () => {
-        const user = await requireStaffUser();
+        const user = await requireStaffUser(true);
         const [obs, sites] = await Promise.all([
           all<EnvironmentalObservation>("environmentalObservations"),
           all<Site>("sites"),
@@ -1150,7 +1265,7 @@ export const api = {
   stats: {
     commandCenter: () =>
       live<CommandCenterStats>(async () => {
-        const user = await requireStaffUser();
+        const user = await requireStaffUser(true);
         const [sites, inspections, findings, cas, incidents, env, reports] =
           await Promise.all([
             all<Site>("sites"),
@@ -1259,31 +1374,13 @@ export const api = {
       }, ["auditLog"]),
 
     publicStats: () =>
-      live<{ sites: number; inspections: number; incidents: number; communityReports: number }>(
-        async () => {
-          const snap = await getDoc(doc(db, "meta", "publicStats"));
-          if (!snap.exists()) {
-            return {
-              sites: 0,
-              inspections: 0,
-              incidents: 0,
-              communityReports: 0,
-            };
-          }
-          const d = snap.data();
-          return {
-            sites: (d.sites as number) ?? 0,
-            inspections: (d.inspections as number) ?? 0,
-            incidents: (d.incidents as number) ?? 0,
-            communityReports: (d.communityReports as number) ?? 0,
-          };
-        },
-        ["meta"],
-      ),
+      liveDoc<PublicStatsShape>(() => doc(db, "meta", "publicStats"), {
+        authBound: false,
+      }),
 
     listUsers: () =>
       live<UserProfile[]>(async () => {
-        await requireAdminUser();
+        await requireAdminUser(true);
         return await all<UserProfile>("users");
       }, ["users"]),
 
@@ -1358,7 +1455,6 @@ export const api = {
       operatorName?: string;
     }) => {
       const user = await requireAuthed();
-      const { auth } = await import("./firebase");
       if (auth.currentUser?.isAnonymous) {
         throw new Error(
           "GUEST_ACCOUNT: guest accounts cannot hold staff roles. Sign up with an email account instead.",
@@ -1411,7 +1507,8 @@ export const api = {
       capturedAt?: number;
     }) => {
       const user = await requireAuthed();
-      if (args.file.size > 25 * 1024 * 1024) throw new Error("FILE_TOO_LARGE");
+      if (args.file.size > 25 * 1024 * 1024)
+        throw new Error("FILE_TOO_LARGE");
       const kind = evidenceKindByMime(args.mimeType);
       const path = `evidence/${user.uid}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${args.fileName}`;
       const storageRef = ref(fbStorage(), path);
@@ -1498,6 +1595,7 @@ export const api = {
       }
       await runSeed(user);
       return { seeded: true as const };
+      // (runSeed forces a publicStats refresh via refreshPublicStats(true))
     },
   },
 };
@@ -1745,5 +1843,5 @@ async function runSeed(user: UserProfile) {
     createdAt: now,
   });
 
-  await refreshPublicStats();
+  await refreshPublicStats(true);
 }

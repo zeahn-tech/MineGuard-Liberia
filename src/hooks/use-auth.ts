@@ -9,7 +9,10 @@ import { useIsAuthenticated, useQuery } from "@/lib/backend-react";
 
 export function useAuth() {
   const { isLoading: isAuthLoading, isAuthenticated } = useIsAuthenticated();
-  const user = useQuery(() => api.users.currentUser());
+  // Pass the stable query-factory reference (NOT an inline wrapper) so the
+  // shared query cache can key it and share one subscription across all
+  // components that read the current profile.
+  const user = useQuery(api.users.currentUser);
 
   // undefined until profile loads; null profile = signed in but no doc.
   const isLoading = isAuthLoading || (isAuthenticated && user === undefined);

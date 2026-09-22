@@ -26,6 +26,7 @@ import {
   Command,
   FileCheck2,
   HeartPulse,
+  Loader2,
   Landmark,
   LayoutDashboard,
   Leaf,
@@ -399,7 +400,31 @@ function ProfileForm({ onDone, defaultScope }: { onDone: () => void; defaultScop
   const [jobTitle, setJobTitle] = useState("");
   const [organization, setOrganization] = useState("");
   const [scope, setScope] = useState(defaultScope);
+  const [saving, setSaving] = useState(false);
   const complete = useMutation(api.stats.completeProfile);
+
+  const save = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await complete({
+        jobTitle: jobTitle || "Field Officer",
+        organization: organization || "MineGuard Program",
+        scope: scope as never,
+      });
+      toast.success("Profile saved");
+      onDone();
+    } catch (e) {
+      toast.error(
+        e instanceof Error
+          ? e.message
+          : "Failed to save profile — please try again.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-3">
       <div className="space-y-1.5">
@@ -421,18 +446,14 @@ function ProfileForm({ onDone, defaultScope }: { onDone: () => void; defaultScop
           </SelectContent>
         </Select>
       </div>
-      <Button
-        className="w-full"
-        onClick={async () => {
-          await complete({
-            jobTitle: jobTitle || "Field Officer",
-            organization: organization || "MineGuard Program",
-            scope: scope as never,
-          });
-          onDone();
-        }}
-      >
-        Save profile
+      <Button className="w-full" onClick={save} disabled={saving}>
+        {saving ? (
+          <>
+            <Loader2 className="size-4 animate-spin" /> Saving…
+          </>
+        ) : (
+          "Save profile"
+        )}
       </Button>
     </div>
   );

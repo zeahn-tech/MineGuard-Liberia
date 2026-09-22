@@ -8,7 +8,13 @@
 
 import { initializeApp, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
-import { getFirestore, type Firestore } from "firebase/firestore";
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  type Firestore,
+} from "firebase/firestore";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
 
 export const firebaseConfig = {
@@ -34,7 +40,25 @@ export function fbAuth(): Auth {
 }
 
 export function firestore(): Firestore {
-  if (!_db) _db = getFirestore(firebaseApp());
+  if (!_db) {
+    // Persistent local cache: snapshots resolve from IndexedDB instantly on
+    // tab switches and cold starts, and field operations keep working fully
+    // offline — then reconcile when connectivity returns.
+    // ignoreUndefinedProperties: optional form fields (district, coordinates,
+    // notes…) are passed as `undefined` by callers; without this flag any
+    // such write would hard-fail. Undefined fields are simply skipped.
+    try {
+      _db = initializeFirestore(firebaseApp(), {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+        ignoreUndefinedProperties: true,
+      });
+    } catch {
+      // Very old browsers without IndexedDB: fall back to in-memory cache.
+      _db = getFirestore(firebaseApp());
+    }
+  }
   return _db;
 }
 

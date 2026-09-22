@@ -134,6 +134,7 @@ function ObservationDialog() {
   const sites = useQuery(api.sites.list);
   const report = useMutation(api.records.reportObservation);
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     siteId: "",
     category: "water_pollution",
@@ -145,10 +146,12 @@ function ObservationDialog() {
   });
 
   const submit = async () => {
+    if (saving) return;
     if (!form.siteId || !form.description.trim()) {
       toast.error("Site and description are required.");
       return;
     }
+    setSaving(true);
     try {
       await report({
         siteId: form.siteId as never,
@@ -164,6 +167,8 @@ function ObservationDialog() {
       setForm({ ...form, siteId: "", description: "", latitude: "", longitude: "" });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to record observation");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -247,7 +252,9 @@ function ObservationDialog() {
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={submit}>Record observation</Button>
+          <Button onClick={submit} disabled={saving}>
+            {saving ? "Recording…" : "Record observation"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
