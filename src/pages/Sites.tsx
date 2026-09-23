@@ -37,6 +37,7 @@ export default function Sites() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const [scrollLeft, setScrollLeft] = useState(0);
 
   return (
     <div className="space-y-6">
@@ -57,58 +58,110 @@ export default function Sites() {
       ) : sites.length === 0 ? (
         <div className="paper p-10 text-center">
           <p className="text-sm text-muted-foreground">
-            No sites registered in your scope yet. An administrator can register sites
-            here.
+            No sites registered in your scope yet. An administrator can register
+            sites here.
           </p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-sm border border-border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/40 text-left">
-                <th className="px-4 py-2.5 font-medium">Code</th>
-                <th className="px-4 py-2.5 font-medium">Site</th>
-                <th className="hidden px-4 py-2.5 font-medium md:table-cell">County</th>
-                <th className="hidden px-4 py-2.5 font-medium md:table-cell">Operator</th>
-                <th className="px-4 py-2.5 font-medium">Status</th>
-                <th className="hidden px-4 py-2.5 text-right font-medium sm:table-cell">Open actions</th>
-                <th className="hidden px-4 py-2.5 text-right font-medium md:table-cell">Risk</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {sites.map((s) => {
-                const r = risk?.[s._id];
-                return (
-                  <tr
-                    key={s._id}
-                    className="cursor-pointer transition-colors hover:bg-accent/50"
-                    onClick={() => navigate(`/portal/sites/${s._id}`)}
-                  >
-                    <td className="px-4 py-3 font-mono text-xs">{s.code}</td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium">{s.name}</div>
-                      <div className="text-xs text-muted-foreground md:hidden">
-                        {s.county} · {s.operatorName}
-                      </div>
-                    </td>
-                    <td className="hidden px-4 py-3 md:table-cell">{s.county}</td>
-                    <td className="hidden px-4 py-3 md:table-cell">{s.operatorName}</td>
-                    <td className="px-4 py-3">
-                      <span className={`stamp ${STATUS_STYLES[s.status] ?? ""}`}>
-                        {s.status.replace(/_/g, " ")}
-                      </span>
-                    </td>
-                    <td className="hidden px-4 py-3 text-right sm:table-cell">
-                      {s.openActions}
-                    </td>
-                    <td className="hidden px-4 py-3 text-right md:table-cell">
-                      <span className="stat-figure">{r?.score ?? 0}</span>
-                    </td>
+        <div className="relative overflow-x-auto rounded-sm border border-border">
+          {/* Left/right pan buttons (hidden on wide screens) */}
+          <button
+            type="button"
+            className="absolute right-2 top-1/2 z-20 -translate-y-1/2 flex size-10 items-center justify-center rounded-full border border-border bg-background text-sm shadow-sm transition-opacity hover:opacity-80 sm:right-4"
+            onClick={() => setScrollLeft((v) => Math.max(0, v - 120))}
+            aria-label="Scroll left"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 15l-6-6 6-6" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="absolute left-2 top-1/2 z-20 -translate-y-1/2 flex size-10 items-center justify-center rounded-full border border-border bg-background text-sm shadow-sm transition-opacity hover:opacity-80 sm:left-4"
+            onClick={() => setScrollLeft((v) => v + 120)}
+            aria-label="Scroll right"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 15l6-6 6 6" />
+            </svg>
+          </button>
+          <div className="h-8 w-px bg-border" aria-hidden="true" />
+          <div
+            className="scrollbar-hide"
+            onScroll={(e) => setScrollLeft((e.target as HTMLDivElement).scrollLeft)}
+            style={{ scrollBehavior: "smooth", msOverflowStyle: "auto" }}
+          >
+            <div className="min-w-max">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/40 text-left">
+                    <th className="px-4 py-2.5 font-medium">Code</th>
+                    <th className="px-4 py-2.5 font-medium">Site</th>
+                    <th className="hidden px-4 py-2.5 font-medium md:table-cell">County</th>
+                    <th className="hidden px-4 py-2.5 font-medium md:table-cell">Operator</th>
+                    <th className="px-4 py-2.5 font-medium">Status</th>
+                    <th className="px-4 py-3 text-right sm:table-cell">Open actions</th>
+                    <th className="px-4 py-3 text-right md:table-cell">Risk</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {sites.map((s) => {
+                    const r = risk?.[s._id];
+                    return (
+                      <tr
+                        key={s._id}
+                        className="cursor-pointer transition-colors hover:bg-accent/50"
+                        onClick={() => navigate(`/portal/sites/${s._id}`)}
+                      >
+                        <td className="px-4 py-3 font-mono text-xs">{s.code}</td>
+                        <td className="px-4 py-3">
+                          <div className="font-medium">{s.name}</div>
+                          <div className="text-xs text-muted-foreground md:hidden">
+                            {s.county} · {s.operatorName}
+                          </div>
+                        </td>
+                        <td className="hidden px-4 py-3 md:table-cell">{s.county}</td>
+                        <td className="hidden px-4 py-3 md:table-cell">{s.operatorName}</td>
+                        <td className="px-4 py-3">
+                          <span className={`stamp ${STATUS_STYLES[s.status] ?? ""}`}>
+                            {s.status.replace(/_/g, " ")}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right sm:table-cell">
+                          <Button
+                            asChild
+                            size="sm"
+                            variant="ghost"
+                            className="px-2 py-1 text-xs"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/portal/sites/${s._id}`);
+                            }}
+                          >
+                            Open
+                          </Button>
+                        </td>
+                        <td className="px-4 py-3 text-right md:table-cell">
+                          <Button
+                            asChild
+                            size="sm"
+                            variant="ghost"
+                            className="px-2 py-1 text-xs"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/portal/sites/${s._id}`);
+                            }}
+                          >
+                            <span className="stat-figure text-xs">{r?.score ?? 0}</span>
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -120,15 +173,9 @@ function RegisterSiteDialog() {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
-    name: "",
-    operatorName: "",
-    county: "",
-    district: "",
-    community: "",
-    mineralType: "",
-    latitude: "",
-    longitude: "",
-    notes: "",
+    name: "", operatorName: "", county: "",
+    district: "", community: "", mineralType: "",
+    latitude: "", longitude: "", notes: "",
   });
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -173,8 +220,8 @@ function RegisterSiteDialog() {
         <DialogHeader>
           <DialogTitle>Register mining site</DialogTitle>
           <DialogDescription>
-            Creates a registry entry with a generated site code, initially pending
-            verification. The action is audit logged.
+            Creates a registry entry with a generated site code, initially
+            pending verification. The action is audit logged.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -190,9 +237,7 @@ function RegisterSiteDialog() {
             <Label>County *</Label>
             <Input value={form.county} onChange={set("county")} placeholder="Nimba" list="mg-counties" />
             <datalist id="mg-counties">
-              {COUNTIES.map((c) => (
-                <option key={c} value={c} />
-              ))}
+              {COUNTIES.map((c) => <option key={c} value={c} />)}
             </datalist>
           </div>
           <div className="space-y-1.5">
