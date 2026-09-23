@@ -1,25 +1,81 @@
 rules_version = '2';
 
 // ---------------------------------------------------------------------------
-// MINEGUARD LIBERIA — STORAGE SECURITY RULES
+// MINEGUARD LIBERIA — STORAGE SECURITY RULES (Priority 0.3 fix)
 //
-// Evidence files (photos, video, audio, documents) live under evidence/.
-// Only signed-in users may upload; staff may read. Paths are namespaced by
-// uploading uid. Size and content-type guards mirror the data layer.
+// Evidence files (photos, video, audio, documents) live under
+// evidence/{uid}/{evidenceDocId}__{fileName}.
+//
+// READ is no longer role-blind. Storage rules cannot see Firestore roles
+// directly, so they re-derive the caller's role and tenant from the live
+// /users/{uid} profile via firestore.get() — mirroring the corrected
+// Firestore rules for /evidence:
+//
+//   staff (admin/supervisor/inspector)      → any evidence object
+//   operator                                → only evidence whose metadata
+//                                             doc's siteId resolves to a site
+//                                             operated by their organization
+//   other / unassigned / unauthenticated    → denied
+//
+// Every evidence object path embeds the Firestore metadata doc id
+// ("{evidenceDocId}__{fileName}"), which lets these rules join the object to
+// its metadata and re-check the same siteVisible() logic the Firestore rules
+// use. A signed-in user who knows the path but fails the join/role/tenant
+// check is denied.
+//
+// This is the documented interim measure pending a Cloud-Function
+// signed-URL proxy (docs/04_SECURITY_ARCHITECTURE.MD, "File access").
 // ---------------------------------------------------------------------------
 
 service firebase.storage {
   match /b/{bucket}/o {
+
     function signedIn() {
       return request.auth != null;
     }
 
-    match /evidence/{uid}/{fileName} {
-      allow read: if signedIn();
+    function profile() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isStaff() {
+      return signedIn() && profile().role in ['admin', 'supervisor', 'inspector'];
+    }
+
+    match /evidence/{uid}/{idAndFile} {
+
+      // idAndFile = "{evidenceDocId}__{fileName}" — the metadata doc id is
+      // everything before the separator. (The data layer guarantees this
+      // naming; see evidence.upload in src/lib/backend.ts.)
+      function metaId() {
+        return idAndFile.split('__')[0];
+      }
+
+      function meta() {
+        return firestore.get(/databases/(default)/documents/evidence/$(metaId()));
+      }
+
+      function siteVisible() {
+        return (
+          profile().role == 'admin'
+          || (isStaff() && profile().scope == 'national')
+          || (isStaff() && profile().scope == 'county'
+              && firestore.get(/databases/(default)/documents/sites/$(meta().data.siteId)).data.county == profile().county)
+          || (profile().role == 'operator'
+              && firestore.get(/databases/(default)/documents/sites/$(meta().data.siteId)).data.operatorName == profile().operatorName)
+        );
+      }
+
+      allow read: if signedIn()
+        && (isStaff() || profile().role == 'operator')
+        && siteVisible()
+        && meta().data.uploadedById == uid;
+
       allow write: if signedIn()
         && request.auth.uid == uid
-        && request.resource.size < 26214400 // 25MB
+        && request.resource.size < 26214400 // 25MB cap mirrors the data layer
         && request.resource.contentType.matches('.*');
+
       allow delete: if false; // governance removal via admin tooling only
     }
 

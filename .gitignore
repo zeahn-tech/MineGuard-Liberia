@@ -8,6 +8,8 @@ dist
 .env
 .env.local
 .env.*.local
+.env.keys
+.env.keys*
 
 # generated
 src/convex/_generated

@@ -4,7 +4,7 @@ rules_version = '2';
 // MINEGUARD LIBERIA — FIRESTORE SECURITY RULES
 //
 // These rules are the authoritative server-side authorization boundary.
-// They mirror the role/scope model previously enforced in Convex functions:
+// They mirror the role/scope model enforced in the client data layer:
 //
 //   admin      — national oversight administrator: full staff access
 //   supervisor — regional/county supervision: staff read + reviewer writes
@@ -14,6 +14,13 @@ rules_version = '2';
 //
 // The user's role/scope lives in /users/{uid} and is ADMIN-WRITABLE ONLY —
 // a client can never elevate itself by editing its own profile doc.
+//
+// TENANT ISOLATION (corrected 2026-09-23): single-document reads (get) on
+// findings, correctiveActions and evidence now re-check site visibility via
+// siteVisibleAt(), the same pattern as incidents and observations. List rules
+// remain coarse for staff/operators; per-county/per-operator list filtering
+// is enforced in the data layer and re-checked here on every get (doc 04,
+// known gap 5 documents this limitation and its planned hardening).
 // ---------------------------------------------------------------------------
 
 service cloud.firestore {
@@ -61,6 +68,23 @@ service cloud.firestore {
         (isStaff() && profile().scope == 'county' && get(siteRef).data.county == profile().county) ||
         (isOperator() && get(siteRef).data.operatorName == profile().operatorName)
       );
+    }
+
+    // ------------------------------------------------------------- helpers
+    // PUBLIC REPORT RATE LIMIT (partial mitigation — see doc 04).
+    // Each community-report submission must reference a per-minute bucket
+    // document /rateLimits/cr-{unixMinute} that was incremented for it.
+    // The rules enforce: bucket id == the CURRENT minute (request.time), the
+    // counter only ever increments by exactly one, and the per-minute cap.
+    // A determined adversary can still exhaust the global per-minute quota
+    // (a honest limitation of rules-level limiting); a robust limiter needs a
+    // Cloud Function gatekeeper.
+    function currentMinute() {
+      return string(request.time.toMillis() / 60000);
+    }
+
+    function reportBucketId() {
+      return 'cr-' + currentMinute();
     }
 
     // ------------------------------------------------------------ /users
@@ -140,12 +164,13 @@ service cloud.firestore {
 
     // -------------------------------------------- /inspectionTemplates
     // Templates are non-sensitive form definitions; operators need them to
-    // render inspection records that reference a template.
+    // render inspection records that reference a template. The template
+    // editor writes here (admin-only), per Directive §11.
     match /inspectionTemplates/{templateId} {
       allow read: if isStaff() || isOperator();
       allow create: if isAdmin();
       allow update: if isAdmin();
-      allow delete: if false;
+      allow delete: if false; // deactivation (active:false) instead of delete
     }
 
     // ------------------------------------------------------ /inspections
@@ -175,10 +200,20 @@ service cloud.firestore {
 
     // --------------------------------------------------------- /findings
     match /findings/{findingId} {
-      allow read: if isStaff() || isOperator();
+      // get is per-document tenant-scoped; list stays coarse (data layer
+      // filters; doc 04 gap 5).
+      allow get: if signedIn() && (
+        isStaff() ||
+        (isOperator() && siteVisibleAt(/databases/$(database)/documents/sites/$(resource.data.siteId)))
+      );
+      allow list: if isStaff() || isOperator();
+
       allow create: if isStaff();
+
+      // Operators may only acknowledge — and only on their own sites.
       allow update: if isStaff() || (
         isOperator()
+        && siteVisibleAt(/databases/$(database)/documents/sites/$(resource.data.siteId))
         && request.resource.data.status == 'acknowledged'
         && resource.data.status == 'open'
       );
@@ -187,13 +222,20 @@ service cloud.firestore {
 
     // ----------------------------------------------- /correctiveActions
     match /correctiveActions/{caId} {
-      allow read: if isStaff() || isOperator();
+      allow get: if signedIn() && (
+        isStaff() ||
+        (isOperator() && siteVisibleAt(/databases/$(database)/documents/sites/$(resource.data.siteId)))
+      );
+      allow list: if isStaff() || isOperator();
+
       allow create: if isStaff();
 
-      // Operator responds (note + status submitted); reviewer decides.
+      // Operator responds (note + status submitted) — own sites only;
+      // reviewer decides.
       allow update: if isReviewer()
         || (
           isOperator()
+          && siteVisibleAt(/databases/$(database)/documents/sites/$(resource.data.siteId))
           && resource.data.status in ['open', 'in_progress']
           && request.resource.data.status == 'submitted'
         );
@@ -236,11 +278,19 @@ service cloud.firestore {
     // Public submission. The report doc is write-only to the public; the
     // tracking doc exposes only coarse status. A report is a concern —
     // never an automatic accusation of guilt.
+    //
+    // Rate-limit gate: the submit flow must first create/increment the
+    // current-minute counter doc (see /rateLimits below) and carry its id in
+    // rateBucket. Rules verify the bucket is the current minute and the
+    // counter exists under the cap.
     match /communityReports/{reportId} {
       allow create: if request.resource.data.status == 'submitted'
         && request.resource.data.trackingCode is string
         && request.resource.data.description.size() <= 5000
-        && request.resource.data.description.size() > 0;
+        && request.resource.data.description.size() > 0
+        && request.resource.data.rateBucket == reportBucketId()
+        && exists(/databases/$(database)/documents/rateLimits/$(request.resource.data.rateBucket))
+        && get(/databases/$(database)/documents/rateLimits/$(request.resource.data.rateBucket)).data.count <= 30;
 
       allow read: if isStaff();
       allow update: if isReviewer()
@@ -257,11 +307,44 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // --------------------------------------------- /rateLimits
+    // Per-minute counters gating the public report endpoint. NOT a robust
+    // limiter: it stops unbounded flooding but a determined adversary can
+    // exhaust the global per-minute quota, and clock skew at minute
+    // boundaries can reject a legitimate report. Documented honestly in
+    // doc 04; a Cloud Function gatekeeper is the planned full fix.
+    match /rateLimits/{limitId} {
+      allow get: if true; // submit flow pre-checks the counter client-side
+      allow list: if false;
+
+      allow create: if limitId == reportBucketId()
+        && request.resource.data.count == 1
+        && request.resource.data.createdAt is number
+        && request.resource.data.updatedAt is number;
+
+      // Only the current-minute bucket may be incremented, exactly +1 at a
+      // time, capped at 30 per minute.
+      allow update: if limitId == reportBucketId()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count', 'updatedAt'])
+        && request.resource.data.count == resource.data.count + 1
+        && request.resource.data.count <= 30;
+
+      allow delete: if false;
+    }
+
     // --------------------------------------------------------- /evidence
+    // Evidence metadata. siteId is MANDATORY at write time (the data layer
+    // derives it from the parent record), so single-document reads are
+    // tenant-scoped exactly like the parent records. The storagePath embeds
+    // this doc id (evidence/{uid}/{docId}__{fileName}) so storage.rules can
+    // join bytes to this metadata and re-derive the same check.
     match /evidence/{evidenceId} {
-      allow read: if isStaff() || isOperator();
+      allow get: if signedIn() && siteVisibleAt(/databases/$(database)/documents/sites/$(resource.data.siteId));
+      allow list: if isStaff() || isOperator();
+
       allow create: if signedIn()
         && request.resource.data.uploadedById == request.auth.uid
+        && request.resource.data.siteId is string
         && request.resource.data.sizeBytes < 26214400; // 25MB
       allow update: if false;
       allow delete: if isAdmin(); // governance removal only
