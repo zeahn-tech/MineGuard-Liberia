@@ -273,6 +273,50 @@ export function isStaffRole(role?: Role | string | null): boolean {
   );
 }
 
+/**
+ * The single source of truth for per-user LIST scoping. Firestore evaluates
+ * `list` rules per returned document AND rejects a query whose safety it
+ * cannot prove — so the data layer must constrain its queries with exactly the
+ * constraint this returns (doc 04 gap 5: county/operator list scoping is now
+ * enforced by the rules, not merely by client-side filtering).
+ *
+ *   "all"      admin / national scope — unconstrained (rules allow any doc)
+ *   { field }  county-scoped staff (county) or operator (operatorName)
+ *   "none"     unassigned / scope-less account — no readable records
+ */
+export type ScopeConstraint =
+  | "all"
+  | { field: "county" | "operatorName"; value: string }
+  | "none";
+
+export function scopeConstraintForUser(
+  user: Pick<UserProfile, "role" | "scope" | "county" | "operatorName">,
+): ScopeConstraint {
+  if (user.role === ROLES.ADMIN) return "all";
+  if (isStaffRole(user.role)) {
+    if (user.scope === "national") return "all";
+    if (user.scope === "county" && user.county)
+      return { field: "county", value: user.county };
+    return "none";
+  }
+  if (user.role === ROLES.OPERATOR && user.operatorName) {
+    return { field: "operatorName", value: user.operatorName };
+  }
+  return "none";
+}
+
+/** Denormalized scope fields stamped on every site-scoped record at write
+ *  time. They are what makes rules-level list scoping possible (doc 04 gap 5). */
+export function siteScopeStamp(site: {
+  county?: string;
+  operatorName?: string;
+}): { county: string; operatorName: string } {
+  return {
+    county: site.county ?? "Unknown",
+    operatorName: site.operatorName ?? "Unknown",
+  };
+}
+
 export function canAccessSite(
   user: Pick<UserProfile, "role" | "scope" | "county" | "operatorName">,
   site: Pick<Site, "county" | "operatorName">,

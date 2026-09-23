@@ -66,7 +66,12 @@ export default function CommunitySubmit() {
       setResult(r);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Submission failed");
+      const msg = err instanceof Error ? err.message : "";
+      toast.error(
+        msg.includes("RATE_LIMITED")
+          ? "Too many reports right now — please try again in a minute."
+          : msg || "Submission failed",
+      );
     } finally {
       setBusy(false);
     }

@@ -18,12 +18,12 @@ Built with React 19 + Vite + TypeScript, a **Papery** editorial design system (p
 | Mining-site registry | Admin-authored sites with codes (`MGL-<COUNTY>-0001`), status lifecycle, explainable risk scores |
 | Field inspections | Configurable templates, GPS capture with accuracy, draft → review → approve/reject lifecycle |
 | Offline queue | localStorage drafts + submission queue for inspections, incidents and environmental observations; auto-sync on reconnect; server-side `clientRef` dedupe; nothing silently dropped |
-| Evidence | Photo/video/audio/document attachments (≤25MB) on inspections with thumbnails, captions and access-controlled downloads |
+| Evidence | Photo/video/audio/document attachments (≤25MB) with thumbnails, captions and access-controlled downloads, on inspection, incident and observation detail pages; **offline attach** queues bytes on-device (IndexedDB) and uploads on reconnect |
 | Incidents | Configurable types (fatality, injury, near-miss, environmental, …), severity, status workflow |
 | Environment | Observations with explicit verification states: observed / measured / verified / unverified / alleged |
 | Community reports | Public submission (no account), tracking code, human triage workflow — a report is never an automatic accusation |
 | Audit log | Append-only trail of every consequential action, visible in-app |
-| Access control | 4 roles (admin / supervisor / inspector / operator), geographic scope, operator tenant isolation — enforced by Firestore rules *and* re-derived per call |
+| Access control | 4 roles (admin / supervisor / inspector / operator), geographic scope, operator tenant isolation — enforced by Firestore rules (including per-document list scoping) *and* re-derived per call |
 | PWA | Installable, offline app shell, theme-colored, maskable icons |
 
 ## Quick start
@@ -82,6 +82,7 @@ src/
     types.ts           Domain types + client-side authorization mirror
     compat-types.ts    Id<T>/Doc<T> compatibility shims
     offline-queue.ts   Field queue: local persistence, retry, idempotent sync
+    offline-evidence.ts Evidence byte queue (IndexedDB) for offline attachments
   pages/               Landing, Auth, Portal (Command Center, Sites, Map,
                        Inspections, Incidents, Environment, Community, Audit)
   components/ui/       shadcn/ui primitives
@@ -100,7 +101,7 @@ The `docs/` directory is the authoritative engineering record (master directive,
 - Firebase web config is a public client identifier by design; **all access control lives in the security rules**, never in config secrecy
 - Role/scope live in `/users/{uid}` and are admin-writable only; self-elevation is impossible (rules + data layer both enforce)
 - Audit log is append-only (create permitted, update/delete denied)
-- Community report submissions are rate-guarded at the rule level; a report is a concern, never an accusation of guilt
+- Community report submissions are rate-guarded server-side by a per-minute counter (the client performs the matching handshake); a report is a concern, never an accusation of guilt
 
 ## License
 

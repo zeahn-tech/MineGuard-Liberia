@@ -23,6 +23,7 @@ import {
   updateDoc,
   where,
   type DocumentReference,
+  type Query,
   type Unsubscribe,
 } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
@@ -32,6 +33,9 @@ import {
   isStaffRole,
   makeTrackingCode,
   nextSiteCodeFrom,
+  scopeConstraintForUser,
+  siteScopeStamp,
+  type ScopeConstraint,
   type AuditEntry,
   type CommunityReport,
   type CorrectiveAction,
@@ -60,6 +64,38 @@ export interface QueryHandle<T> {
   subscribe(cb: (value: T | undefined) => void): Unsubscribe;
 }
 
+// Collections whose LIST rules check a per-document scope field (county /
+// operatorName) rather than a coarse role check. Watching them unconstrained
+// is rejected by Firestore for county/operator callers, so the watcher must
+// carry the caller's scope constraint — the same one the scoped read uses.
+const SCOPED_COLLECTIONS = new Set([
+  "sites",
+  "inspections",
+  "findings",
+  "correctiveActions",
+  "incidents",
+  "environmentalObservations",
+]);
+
+// Collections whose list rule keys on the PARENT record (not a field on the
+// document), so the generic collection watcher cannot be made rules-safe. A
+// raw watcher would be rejected for every non-admin caller; skip it. The
+// evidence UI refreshes with its own post-upload nonce instead.
+const WATCH_SKIP = new Set(["evidence"]);
+
+// Last scope derived for the signed-in user (set by requireAuthed). Read by
+// live()'s watcher so push updates keep working under scoped list rules.
+let currentScope: ScopeConstraint | undefined;
+
+/** The constrained collection query a scoped watcher must use, or null when
+ *  the collection is unscoped or the caller can read it unconstrained. */
+function scopedCollectionQuery(name: string): Query | null {
+  if (!SCOPED_COLLECTIONS.has(name)) return null;
+  const c = currentScope;
+  if (!c || c === "all" || c === "none") return null;
+  return fsQuery(collection(db, name), where(c.field, "==", c.value));
+}
+
 // PERF CONTRACT (performance fix):
 //  - The fetcher runs ONCE on subscribe, then at most once per burst of
 //    snapshot events (300ms trailing debounce), and never concurrently
@@ -81,6 +117,47 @@ function live<T>(
       let inFlight = false;
       let dirty = false;
       let timer: ReturnType<typeof setTimeout> | null = null;
+      const unsubs: Unsubscribe[] = [];
+      let watchersReady = false;
+
+      const onWatchEvent = () => {
+        if (cancelled) return;
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          timer = null;
+          void run();
+        }, 300);
+      };
+
+      // Watchers are established AFTER the first fetch resolves, because it is
+      // the fetch (requireAuthed) that derives the caller's scope. List rules
+      // are per-document scoped, so an unconstrained collection watcher is
+      // REJECTED for county/operator callers — the watcher must carry the same
+      // constraint as the scoped read, or push updates silently stop.
+      const setupWatchers = () => {
+        if (watchersReady || cancelled) return;
+        watchersReady = true;
+        for (const name of watch) {
+          // Parent-joined collections (evidence) can't be watched safely by a
+          // generic collection watcher — see WATCH_SKIP above.
+          if (WATCH_SKIP.has(name)) continue;
+          try {
+            const unsub = onSnapshot(
+              scopedCollectionQuery(name) ?? collection(db, name),
+              onWatchEvent,
+              (err) => {
+                // Denied LIST (e.g. role-scoped collections) must not become an
+                // unhandled rejection; the initial fetch already surfaced state.
+                console.warn(`[backend] watcher for "${name}" denied:`, err.code);
+              },
+            );
+            unsubs.push(unsub);
+          } catch {
+            // Collection watcher is best-effort; initial fetch already ran.
+          }
+        }
+      };
+
       const run = async () => {
         if (inFlight) {
           dirty = true;
@@ -95,6 +172,7 @@ function live<T>(
           if (!cancelled) cb(undefined);
         } finally {
           inFlight = false;
+          if (!cancelled) setupWatchers();
           if (dirty && !cancelled) {
             dirty = false;
             timer = setTimeout(() => {
@@ -105,30 +183,6 @@ function live<T>(
         }
       };
       void run();
-      const unsubs: Unsubscribe[] = [];
-      for (const name of watch) {
-        try {
-          const unsub = onSnapshot(
-            collection(db, name),
-            () => {
-              if (cancelled) return;
-              if (timer) clearTimeout(timer);
-              timer = setTimeout(() => {
-                timer = null;
-                void run();
-              }, 300);
-            },
-            (err) => {
-              // Denied LIST (e.g. role-scoped collections) must not become an
-              // unhandled rejection; the initial fetch already surfaced state.
-              console.warn(`[backend] watcher for "${name}" denied:`, err.code);
-            },
-          );
-          unsubs.push(unsub);
-        } catch {
-          // Collection watcher is best-effort; initial fetch already ran.
-        }
-      }
       return () => {
         cancelled = true;
         if (timer) clearTimeout(timer);
@@ -212,6 +266,8 @@ async function requireAuthed(cached = false): Promise<UserProfile> {
     ? await getProfileCached(u.uid)
     : await getProfile(u.uid);
   if (!profile) throw new Error("UNREGISTERED_USER");
+  // Publish the caller's scope for live()'s scoped watchers.
+  currentScope = scopeConstraintForUser(profile);
   return profile;
 }
 
@@ -257,17 +313,13 @@ async function getSite(siteId: string): Promise<Site | null> {
   return snap.exists() ? withId<Site>(snap.id, snap.data()) : null;
 }
 
-/** Site list scoped to the caller. Staff see their scope (all sites; the UI
- *  layers county filters on top); operators see ONLY sites operated by their
- *  organization — enforced at the rules level via an operatorName query;
- *  unassigned accounts see none instead of an authorization error (a denied
- *  read would otherwise leave the UI loading forever). */
+/** Site list scoped to the caller. Admin/national staff read all sites;
+ *  county staff are constrained to their county; operators to their
+ *  organization — the constraint mirrors the /sites LIST rule exactly, so the
+ *  server enforces it. Unassigned accounts get none instead of a denial that
+ *  would leave the UI loading forever. */
 async function sitesForUser(user: UserProfile): Promise<Site[]> {
-  if (isStaffRole(user.role)) return all<Site>("sites");
-  if (user.role === ROLES.OPERATOR && user.operatorName) {
-    return whereAll<Site>("sites", "operatorName", "==", user.operatorName);
-  }
-  return [];
+  return scopedAll<Site>("sites", user);
 }
 
 async function all<T>(name: string): Promise<T[]> {
@@ -287,6 +339,45 @@ async function whereAll<T>(
   return snap.docs.map((d) => withId<T>(d.id, d.data()));
 }
 
+/**
+ * Scope-aware collection read (doc 04 gap 5, closed).
+ *
+ * Every site-scoped record carries denormalized `county` + `operatorName`
+ * (stamped at write time from its site). This helper applies EXACTLY the
+ * constraint the LIST rules require, so county/operator scoping is enforced by
+ * the server: Firestore rejects an unconstrained query for a county-scoped or
+ * operator caller instead of silently returning foreign records.
+ *
+ * Note: records written before scope stamping (or by an external tool) lack
+ * the fields and are therefore invisible to county/operator callers until the
+ * admin backfill (stats.backfillScopeFields) stamps them. Admin/national
+ * callers are unaffected.
+ */
+async function scopedAll<T>(name: string, user: UserProfile): Promise<T[]> {
+  const c = scopeConstraintForUser(user);
+  if (c === "all") return all<T>(name);
+  if (c === "none") return [];
+  return whereAll<T>(name, c.field, "==", c.value);
+}
+
+/** Scope-aware single-field query: a base equality filter (e.g. parentId,
+ *  inspectionId, findingId) PLUS the caller's scope constraint. Used for
+ *  child collections (findings, corrective actions, evidence) whose list rules
+ *  apply the same per-document scope check. */
+async function scopedWhereAll<T>(
+  name: string,
+  baseField: string,
+  baseValue: unknown,
+  user: UserProfile,
+): Promise<T[]> {
+  const c = scopeConstraintForUser(user);
+  if (c === "none") return [];
+  const constraints = [where(baseField, "==", baseValue)];
+  if (c !== "all") constraints.push(where(c.field, "==", c.value));
+  const snap = await getDocs(fsQuery(collection(db, name), ...constraints));
+  return snap.docs.map((d) => withId<T>(d.id, d.data()));
+}
+
 /** Does any staff user exist yet? (First-run admin bootstrap.)
  *  Uses the meta/hasStaff sentinel doc so the check works under security
  *  rules for users who are not yet staff (they cannot query /users). */
@@ -299,6 +390,11 @@ async function anyStaffExists(): Promise<boolean> {
 // minute so bursty writes (bulk inspection submission, seeding) don't multiply
 // read volume. The seed path forces a refresh.
 const PUBLIC_STATS_MIN_INTERVAL_MS = 60_000;
+
+// Public community-report cap per minute. Mirrors the /rateLimits rule guard
+// (30/min). The client checks it to fail fast with a friendly message, but the
+// authoritative enforcement is the rule-level per-minute counter.
+const PUBLIC_REPORT_PER_MINUTE = 30;
 let lastPublicStatsAt = 0;
 
 /** Recompute public aggregate counts (landing page). Never exposes content.
@@ -453,7 +549,7 @@ export const api = {
         if (!user.role) return [];
         const [sites, cas] = await Promise.all([
           sitesForUser(user),
-          all<CorrectiveAction>("correctiveActions"),
+          scopedAll<CorrectiveAction>("correctiveActions", user),
         ]);
         const openBySite = new Map<string, number>();
         for (const ca of cas) {
@@ -545,10 +641,10 @@ export const api = {
           if (!user.role) return {};
           const [sites, findings, cas, incidents, env] = await Promise.all([
             sitesForUser(user),
-            all<Finding>("findings"),
-            all<CorrectiveAction>("correctiveActions"),
-            all<Incident>("incidents"),
-            all<EnvironmentalObservation>("environmentalObservations"),
+            scopedAll<Finding>("findings", user),
+            scopedAll<CorrectiveAction>("correctiveActions", user),
+            scopedAll<Incident>("incidents", user),
+            scopedAll<EnvironmentalObservation>("environmentalObservations", user),
           ]);
           const now = Date.now();
           // Configurable weights — tuned by the program owner, not hardcoded law.
@@ -683,8 +779,8 @@ export const api = {
         // triggering a rules denial that would leave the tab loading forever.
         if (!user.role) return [];
         const [inspections, sites] = await Promise.all([
-          all<Inspection>("inspections"),
-          all<Site>("sites"),
+          scopedAll<Inspection>("inspections", user),
+          sitesForUser(user),
         ]);
         const byId = new Map(sites.map((s) => [s._id, s]));
         const out = [];
@@ -748,11 +844,11 @@ export const api = {
 
       // Offline dedupe: same clientRef returns the existing record.
       if (args.clientRef) {
-        const existing = await whereAll<Inspection>(
+        const existing = await scopedWhereAll<Inspection>(
           "inspections",
           "clientRef",
-          "==",
           args.clientRef,
+          user,
         );
         if (existing.length > 0) return existing[0]._id;
       }
@@ -763,6 +859,7 @@ export const api = {
         inspectorId: user.uid,
         status: "draft",
         clientRef: args.clientRef ?? null,
+        ...siteScopeStamp(site), // denormalized county/operatorName (list scoping)
         createdAt: Date.now(),
       });
       await logAudit({
@@ -859,11 +956,11 @@ export const api = {
         const insp = withId<Inspection>(snap.id, snap.data());
         const site = await getSite(insp.siteId);
         if (!site || !canAccessSite(user, site)) throw new Error("FORBIDDEN");
-        return await whereAll<Finding>(
+        return await scopedWhereAll<Finding>(
           "findings",
           "inspectionId",
-          "==",
           args.inspectionId,
+          user,
         );
       }, ["findings"]),
 
@@ -877,6 +974,8 @@ export const api = {
       const snap = await getDoc(doc(db, "inspections", args.inspectionId));
       if (!snap.exists()) throw new Error("NOT_FOUND");
       const insp = withId<Inspection>(snap.id, snap.data());
+      const site = await getSite(insp.siteId);
+      if (!site) throw new Error("NOT_FOUND");
       const refDoc = await addDoc(collection(db, "findings"), {
         inspectionId: args.inspectionId,
         siteId: insp.siteId,
@@ -885,6 +984,7 @@ export const api = {
         severity: args.severity,
         status: "open",
         createdById: user.uid,
+        ...siteScopeStamp(site), // denormalized county/operatorName (list scoping)
         createdAt: Date.now(),
       });
       await logAudit({
@@ -940,11 +1040,11 @@ export const api = {
         const finding = withId<Finding>(snap.id, snap.data());
         const site = await getSite(finding.siteId);
         if (!site || !canAccessSite(user, site)) throw new Error("FORBIDDEN");
-        return await whereAll<CorrectiveAction>(
+        return await scopedWhereAll<CorrectiveAction>(
           "correctiveActions",
           "findingId",
-          "==",
           args.findingId,
+          user,
         );
       }, ["correctiveActions"]),
 
@@ -953,11 +1053,11 @@ export const api = {
         const user = await requireAuthed();
         const site = await getSite(args.siteId);
         if (!site || !canAccessSite(user, site)) return [];
-        return await whereAll<CorrectiveAction>(
+        return await scopedWhereAll<CorrectiveAction>(
           "correctiveActions",
           "siteId",
-          "==",
           args.siteId,
+          user,
         );
       }, ["correctiveActions"]),
 
@@ -970,6 +1070,8 @@ export const api = {
       const snap = await getDoc(doc(db, "findings", args.findingId));
       if (!snap.exists()) throw new Error("NOT_FOUND");
       const finding = withId<Finding>(snap.id, snap.data());
+      const site = await getSite(finding.siteId);
+      if (!site) throw new Error("NOT_FOUND");
       const refDoc = await addDoc(collection(db, "correctiveActions"), {
         findingId: args.findingId,
         siteId: finding.siteId,
@@ -977,6 +1079,7 @@ export const api = {
         status: "open",
         dueAt: args.dueAt,
         openedById: user.uid,
+        ...siteScopeStamp(site), // denormalized county/operatorName (list scoping)
         createdAt: Date.now(),
       });
       await logAudit({
@@ -1047,8 +1150,8 @@ export const api = {
         const user = await requireAuthed(true);
         if (!user.role) return [];
         const [incidents, sites] = await Promise.all([
-          all<Incident>("incidents"),
-          all<Site>("sites"),
+          scopedAll<Incident>("incidents", user),
+          sitesForUser(user),
         ]);
         const byId = new Map(sites.map((s) => [s._id, s]));
         const out: Incident[] = [];
@@ -1070,6 +1173,23 @@ export const api = {
         return out;
       }, ["incidents", "sites"]),
 
+    getIncident: (args: { incidentId: string }) =>
+      live<Incident | null>(async () => {
+        const user = await requireAuthed();
+        const snap = await getDoc(doc(db, "incidents", args.incidentId));
+        if (!snap.exists()) throw new Error("NOT_FOUND");
+        const inc = withId<Incident>(snap.id, snap.data());
+        const site = await getSite(inc.siteId);
+        // Null (not a throw) so the detail page can render its denied state.
+        if (!site || !canAccessSite(user, site)) return null;
+        return {
+          ...inc,
+          siteCode: site.code,
+          siteName: site.name,
+          county: site.county,
+        };
+      }, ["incidents", "sites"]),
+
     reportIncident: async (args: {
       siteId: string;
       type: Incident["type"];
@@ -1084,11 +1204,11 @@ export const api = {
       // Offline dedupe: the same queued submission replayed after reconnect
       // must not create a second incident record (same contract as createDraft).
       if (args.clientRef) {
-        const existing = await whereAll<Incident>(
+        const existing = await scopedWhereAll<Incident>(
           "incidents",
           "clientRef",
-          "==",
           args.clientRef,
+          user,
         );
         if (existing.length > 0) return existing[0]._id;
       }
@@ -1107,6 +1227,7 @@ export const api = {
         clientRef: args.clientRef ?? null,
         reportedById: user.uid,
         reportSource: user.role === ROLES.OPERATOR ? "operator" : "inspector",
+        ...siteScopeStamp(site), // denormalized county/operatorName (list scoping)
         createdAt: Date.now(),
       });
       await logAudit({
@@ -1144,8 +1265,8 @@ export const api = {
         const user = await requireAuthed(true);
         if (!user.role) return [];
         const [obs, sites] = await Promise.all([
-          all<EnvironmentalObservation>("environmentalObservations"),
-          all<Site>("sites"),
+          scopedAll<EnvironmentalObservation>("environmentalObservations", user),
+          sitesForUser(user),
         ]);
         const byId = new Map(sites.map((s) => [s._id, s]));
         const out: EnvironmentalObservation[] = [];
@@ -1164,6 +1285,25 @@ export const api = {
         return out;
       }, ["environmentalObservations", "sites"]),
 
+    getObservation: (args: { observationId: string }) =>
+      live<EnvironmentalObservation | null>(async () => {
+        const user = await requireAuthed();
+        const snap = await getDoc(
+          doc(db, "environmentalObservations", args.observationId),
+        );
+        if (!snap.exists()) throw new Error("NOT_FOUND");
+        const obs = withId<EnvironmentalObservation>(snap.id, snap.data());
+        const site = await getSite(obs.siteId);
+        // Null (not a throw) so the detail page can render its denied state.
+        if (!site || !canAccessSite(user, site)) return null;
+        return {
+          ...obs,
+          siteCode: site.code,
+          siteName: site.name,
+          county: site.county,
+        };
+      }, ["environmentalObservations", "sites"]),
+
     reportObservation: async (args: {
       siteId: string;
       category: EnvironmentalObservation["category"];
@@ -1177,11 +1317,11 @@ export const api = {
       const user = await requireAuthed();
       // Offline dedupe (same contract as createDraft/reportIncident).
       if (args.clientRef) {
-        const existing = await whereAll<EnvironmentalObservation>(
+        const existing = await scopedWhereAll<EnvironmentalObservation>(
           "environmentalObservations",
           "clientRef",
-          "==",
           args.clientRef,
+          user,
         );
         if (existing.length > 0) return existing[0]._id;
       }
@@ -1201,6 +1341,7 @@ export const api = {
           status: "open",
           clientRef: args.clientRef ?? null,
           reportedById: user.uid,
+          ...siteScopeStamp(site), // denormalized county/operatorName (list scoping)
           createdAt: Date.now(),
         },
       );
@@ -1240,7 +1381,9 @@ export const api = {
         // instead of a denial that would leave the UI loading forever.
         const user = await requireAuthed();
         if (!isStaffRole(user.role)) return [];
-        const allR = await all<CommunityReport>("communityReports");
+        // County-scoped staff triage only their county's reports (rules enforce
+        // the same condition on report read).
+        const allR = await scopedAll<CommunityReport>("communityReports", user);
         allR.sort((a, b) => b.createdAt - a.createdAt);
         return allR;
       }, ["communityReports"]),
@@ -1256,16 +1399,40 @@ export const api = {
       longitude?: number;
       contactPhone?: string;
     }) => {
+      const now = Date.now();
+      // ---------------------------------------------------- rate-limit handshake
+      // The /communityReports create rule requires the report to carry the
+      // CURRENT per-minute bucket id AND for a counter doc at
+      // /rateLimits/cr-{unixMinute} to already exist under the cap. That bucket
+      // is the authoritative server-side limiter; the client must perform this
+      // half (create-or-increment) or the create is denied outright. Rules
+      // recompute the id from SERVER request time, so a submission straddling a
+      // minute boundary can be rejected — an honest limitation documented in
+      // doc 04, where a Cloud Function gatekeeper is the planned full fix.
+      const bucketId = `cr-${Math.floor(now / 60000)}`;
+      const bucketRef = doc(db, "rateLimits", bucketId);
+      const bucketSnap = await getDoc(bucketRef);
+      if (!bucketSnap.exists()) {
+        // Rules pin create to count == 1 with numeric timestamps.
+        await setDoc(bucketRef, { count: 1, createdAt: now, updatedAt: now });
+      } else {
+        const count = Number(bucketSnap.data().count ?? 0);
+        if (count >= PUBLIC_REPORT_PER_MINUTE) throw new Error("RATE_LIMITED");
+        // Rules allow only count (+1 exactly) and updatedAt to change.
+        await updateDoc(bucketRef, { count: count + 1, updatedAt: now });
+      }
+
       const trackingCode = makeTrackingCode();
       const refDoc = await addDoc(collection(db, "communityReports"), {
         ...args,
         trackingCode,
         status: "submitted",
-        createdAt: Date.now(),
+        rateBucket: bucketId,
+        createdAt: now,
       });
       await setDoc(
         doc(db, "reportTracking", trackingCode),
-        { trackingCode, status: "submitted", createdAt: Date.now() },
+        { trackingCode, status: "submitted", createdAt: now },
       );
       await logAudit({
         actorLabel: "public",
@@ -1361,15 +1528,15 @@ export const api = {
         const [sites, inspections, findings, cas, incidents, env, reports] =
           await Promise.all([
             sitesForUser(user),
-            all<Inspection>("inspections"),
-            all<Finding>("findings"),
-            all<CorrectiveAction>("correctiveActions"),
-            all<Incident>("incidents"),
-            all<EnvironmentalObservation>("environmentalObservations"),
+            scopedAll<Inspection>("inspections", user),
+            scopedAll<Finding>("findings", user),
+            scopedAll<CorrectiveAction>("correctiveActions", user),
+            scopedAll<Incident>("incidents", user),
+            scopedAll<EnvironmentalObservation>("environmentalObservations", user),
             // Community reports are staff-readable only (rules). Operators
             // legitimately see zeros for these figures.
             staff
-              ? all<CommunityReport>("communityReports")
+              ? scopedAll<CommunityReport>("communityReports", user)
               : Promise.resolve([] as CommunityReport[]),
           ]);
         const now = Date.now();

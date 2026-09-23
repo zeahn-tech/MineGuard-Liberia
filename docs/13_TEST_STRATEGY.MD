@@ -1,13 +1,31 @@
 # 13 — Test Strategy
 
-**Status:** no automated tests exist yet in this repository. This document fixes
-the strategy and priority order. [PLANNED]
+**Status:** the first suites exist (2026-09-23): `tests/offline-queue.test.ts`
+(13) and `tests/offline-evidence.test.ts` (5), run by `bun test` and wired into
+CI. This document keeps the strategy and priority order for the remaining
+layers. [PARTIALLY IMPLEMENTED]
 
 ## Principles
 
 1. Authorization is tested server-side first — UI tests never substitute.
 2. Offline sync is tested across the queue lifecycle, including failure.
 3. Tests never depend on seeded demo data.
+
+## Implemented [2026-09-23]
+
+`bun test` (bun:test) — 18 passing, run in CI between typecheck and build:
+
+- `tests/offline-queue.test.ts` — site-code generation, tracking-code format,
+  the client authorization mirror (`canAccessSite`), queue persistence +
+  `clientRef` dedupe, failure-retry semantics (nothing silently dropped),
+  missing-handler handling, and inspection sync ordering.
+- `tests/offline-evidence.test.ts` — offline evidence byte queue: persistence,
+  per-parent scoping, sync-removes-on-success, sync-keeps-on-failure, removal.
+  It runs against the queue's in-memory fallback (Bun has no IndexedDB); the
+  browser path uses the same API over IndexedDB.
+
+Authorization rules tests (Firebase Emulator Suite) and the UI smoke layer
+remain [PLANNED].
 
 ## Priority 1 — Authorization unit tests (highest value)
 
@@ -59,7 +77,9 @@ Emulator Suite.
 
 ## Tooling plan
 
-- `bun test` + Vitest for the data layer; Firebase Emulator Suite for rules.
+- `bun test` (bun:test) for the data layer and pure helpers; Firebase Emulator
+  Suite for rules.
 - Vitest + happy-dom for `offline-queue` and pure UI helpers.
 - Playwright for the smoke layer.
-- A `bun run test` aggregate script once the first suite lands.
+- `bun test` runs the current suite; a broader aggregate is added as later
+  layers land.

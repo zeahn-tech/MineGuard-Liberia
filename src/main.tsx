@@ -16,7 +16,9 @@ const NationalMap = lazy(() => import("./pages/NationalMap.tsx"));
 const Inspections = lazy(() => import("./pages/Inspections.tsx"));
 const InspectionDetail = lazy(() => import("./pages/InspectionDetail.tsx"));
 const Incidents = lazy(() => import("./pages/Incidents.tsx"));
+const IncidentDetail = lazy(() => import("./pages/IncidentDetail.tsx"));
 const Environment = lazy(() => import("./pages/Environment.tsx"));
+const ObservationDetail = lazy(() => import("./pages/ObservationDetail.tsx"));
 const Community = lazy(() => import("./pages/Community.tsx"));
 const CommunitySubmit = lazy(() => import("./pages/CommunitySubmit.tsx"));
 const CommunityTrack = lazy(() => import("./pages/CommunityTrack.tsx"));
@@ -136,7 +138,9 @@ createRoot(document.getElementById("root")!).render(
               <Route path="inspections/local/:clientRef" element={<InspectionsLocal />} />
               <Route path="inspections/:inspectionId" element={<InspectionDetail />} />
               <Route path="incidents" element={<Incidents />} />
+              <Route path="incidents/:incidentId" element={<IncidentDetail />} />
               <Route path="environment" element={<Environment />} />
+              <Route path="environment/:observationId" element={<ObservationDetail />} />
               <Route path="community" element={<Community />} />
               <Route path="audit" element={<Audit />} />
             </Route>

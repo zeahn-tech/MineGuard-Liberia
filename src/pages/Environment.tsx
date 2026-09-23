@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router";
 import { useMutation, useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { Button } from "@/components/ui/button";
@@ -87,7 +88,12 @@ export default function Environment() {
           {observations.map((o) => (
             <li key={o._id} className="p-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <p className="text-sm font-medium">{o.category.replace(/_/g, " ")}</p>
+                <Link
+                  to={`/portal/environment/${o._id}`}
+                  className="text-sm font-medium hover:underline"
+                >
+                  {o.category.replace(/_/g, " ")}
+                </Link>
                 <div className="flex items-center gap-2">
                   <span className={`stamp ${VERIF_STYLE[o.verification]}`}>{o.verification}</span>
                   <span className="stamp">{o.status}</span>

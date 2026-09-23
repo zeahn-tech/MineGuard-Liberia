@@ -16,11 +16,22 @@ rules_version = '2';
 // a client can never elevate itself by editing its own profile doc.
 //
 // TENANT ISOLATION (corrected 2026-09-23): single-document reads (get) on
-// findings, correctiveActions and evidence now re-check site visibility via
-// siteVisibleAt(), the same pattern as incidents and observations. List rules
-// remain coarse for staff/operators; per-county/per-operator list filtering
-// is enforced in the data layer and re-checked here on every get (doc 04,
-// known gap 5 documents this limitation and its planned hardening).
+// findings, correctiveActions and evidence re-check site visibility via
+// siteVisibleAt(), the same pattern as incidents and observations.
+//
+// LIST SCOPING (2026-09-23, closes doc 04 gap 5): list rules now enforce
+// county/operator scope PER DOCUMENT using siteVisible(), which reads the
+// denormalized county/operatorName stamped on every site-scoped record at
+// write time. Firestore validates the query against these rules, so the data
+// layer constrains county/operator queries with the matching filter
+// (scopeConstraintForUser in src/lib/types.ts) — the constraint lives in one
+// place and both layers enforce it.
+//
+// Evidence is the one exception to denormalization: its metadata is
+// append-only (allow update: false), so county/operatorName cannot be stamped
+// onto pre-existing rows. Its list rule therefore joins to the PARENT record
+// (parentType + parentId, both constrained by the caller's query) and
+// re-checks the parent site's visibility — fail-closed for foreign parents.
 // ---------------------------------------------------------------------------
 
 service cloud.firestore {
@@ -67,6 +78,28 @@ service cloud.firestore {
         (isStaff() && profile().scope == 'national') ||
         (isStaff() && profile().scope == 'county' && get(siteRef).data.county == profile().county) ||
         (isOperator() && get(siteRef).data.operatorName == profile().operatorName)
+      );
+    }
+
+    // Evidence LIST join. Evidence metadata is append-only (allow update:
+    // false), so unlike the other site-scoped collections it cannot carry a
+    // denormalized county/operatorName stamp on rows that already exist. Its
+    // list rule therefore joins parentType + parentId — the two fields the
+    // caller's query is REQUIRED to constrain (evidence.listForParent filters
+    // on exactly these, and Firestore rejects a query whose safety the rule
+    // cannot prove) — to the parent record, then re-checks the parent site's
+    // visibility. A caller who knows a foreign evidence doc's parent still
+    // fails the site join, and a missing parent fails closed (get() error →
+    // deny). Admin short-circuits first so admin tooling can read unconstrained.
+    function parentEvidenceVisible() {
+      return (
+        isAdmin() ||
+        (resource.data.parentType == 'inspection' &&
+          siteVisibleAt(/databases/$(database)/documents/sites/$(get(/databases/$(database)/documents/inspections/$(resource.data.parentId)).data.siteId))) ||
+        (resource.data.parentType == 'incident' &&
+          siteVisibleAt(/databases/$(database)/documents/sites/$(get(/databases/$(database)/documents/incidents/$(resource.data.parentId)).data.siteId))) ||
+        (resource.data.parentType == 'observation' &&
+          siteVisibleAt(/databases/$(database)/documents/sites/$(get(/databases/$(database)/documents/environmentalObservations/$(resource.data.parentId)).data.siteId)))
       );
     }
 
@@ -151,11 +184,10 @@ service cloud.firestore {
     // ------------------------------------------------------------- /sites
     match /sites/{siteId} {
       allow get: if signedIn() && siteVisible();
-      // Operators may list, but every returned doc must match their own
-      // operatorName (rules-enforced tenant isolation; the query must filter
-      // on operatorName). Staff list per their scope.
-      allow list: if isStaff()
-        || (isOperator() && resource.data.operatorName == profile().operatorName);
+      // List enforces county/operator scope per document (doc 04 gap 5):
+      // county-scoped staff must filter `county ==` and operators
+      // `operatorName ==`; admins/national staff are unconstrained.
+      allow list: if signedIn() && siteVisible();
 
       allow create: if isAdmin();
       allow update: if isAdmin();
@@ -179,7 +211,8 @@ service cloud.firestore {
         isStaff() ||
         (isOperator() && siteVisibleAt(/databases/$(database)/documents/sites/$(resource.data.siteId)))
       );
-      allow list: if isStaff() || isOperator();
+      // List: county/operator scope enforced per document (doc 04 gap 5).
+      allow list: if signedIn() && siteVisible();
 
       allow create: if isStaff()
         && request.resource.data.status == 'draft'
@@ -206,7 +239,8 @@ service cloud.firestore {
         isStaff() ||
         (isOperator() && siteVisibleAt(/databases/$(database)/documents/sites/$(resource.data.siteId)))
       );
-      allow list: if isStaff() || isOperator();
+      // List: county/operator scope enforced per document (doc 04 gap 5).
+      allow list: if signedIn() && siteVisible();
 
       allow create: if isStaff();
 
@@ -226,7 +260,8 @@ service cloud.firestore {
         isStaff() ||
         (isOperator() && siteVisibleAt(/databases/$(database)/documents/sites/$(resource.data.siteId)))
       );
-      allow list: if isStaff() || isOperator();
+      // List: county/operator scope enforced per document (doc 04 gap 5).
+      allow list: if signedIn() && siteVisible();
 
       allow create: if isStaff();
 
@@ -246,7 +281,8 @@ service cloud.firestore {
     // -------------------------------------------------------- /incidents
     match /incidents/{incidentId} {
       allow get: if signedIn() && siteVisibleAt(/databases/$(database)/documents/sites/$(resource.data.siteId));
-      allow list: if isStaff() || isOperator();
+      // List: county/operator scope enforced per document (doc 04 gap 5).
+      allow list: if signedIn() && siteVisible();
 
       allow create: if signedIn()
         && request.resource.data.status == 'reported'
@@ -261,9 +297,8 @@ service cloud.firestore {
     // ------------------------- /environmentalObservations
     match /environmentalObservations/{obsId} {
       allow get: if signedIn() && siteVisibleAt(/databases/$(database)/documents/sites/$(resource.data.siteId));
-      // Operators may list; the data layer filters to sites they operate
-      // (same pattern as /incidents).
-      allow list: if isStaff() || isOperator();
+      // List: county/operator scope enforced per document (doc 04 gap 5).
+      allow list: if signedIn() && siteVisible();
 
       allow create: if signedIn()
         && siteVisibleAt(/databases/$(database)/documents/sites/$(request.resource.data.siteId));
@@ -340,7 +375,12 @@ service cloud.firestore {
     // join bytes to this metadata and re-derive the same check.
     match /evidence/{evidenceId} {
       allow get: if signedIn() && siteVisibleAt(/databases/$(database)/documents/sites/$(resource.data.siteId));
-      allow list: if isStaff() || isOperator();
+      // LIST scoping without denormalized fields: evidence metadata is
+      // append-only, so the caller's scope is derived by joining to the PARENT
+      // record (parentType + parentId are both constrained by the caller's
+      // query) and re-checking that parent's site visibility. A caller who
+      // knows a foreign evidence doc's parent still fails the site join.
+      allow list: if signedIn() && parentEvidenceVisible();
 
       allow create: if signedIn()
         && request.resource.data.uploadedById == request.auth.uid

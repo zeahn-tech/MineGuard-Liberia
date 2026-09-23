@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router";
 import { useMutation, useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { useAuth } from "@/hooks/use-auth";
@@ -94,7 +95,14 @@ export default function Incidents() {
                     {new Date(i.occurredAt).toLocaleDateString()}
                   </td>
                   <td className="px-4 py-3">{i.type.replace(/_/g, " ")}</td>
-                  <td className="max-w-md px-4 py-3">{i.description}</td>
+                  <td className="max-w-md px-4 py-3">
+                    <Link
+                      to={`/portal/incidents/${i._id}`}
+                      className="hover:underline"
+                    >
+                      {i.description}
+                    </Link>
+                  </td>
                   <td className="hidden px-4 py-3 md:table-cell">
                     <span className="font-mono text-xs">{i.siteCode}</span>
                   </td>

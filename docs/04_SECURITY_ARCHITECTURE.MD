@@ -43,19 +43,34 @@ but a leaked download URL remains valid until expiry.
 
 ## Known gaps [PLANNED / REQUIRES GOVERNMENT CONFIRMATION]
 
-1. Rate limiting on the public report endpoint (basic size/count guards exist;
-   dedicated limiter planned).
+1. Rate limiting on the public report endpoint. A per-minute counter is now
+   enforced server-side by the `/rateLimits` rules (the report's `rateBucket`
+   must equal the current server minute; the counter increments by exactly one
+   and is capped at 30/min), and the submission flow performs the matching
+   client handshake. Honest limits: the bucket is keyed on server time while
+   the client keys on device time (a minute-boundary straddle can be rejected),
+   and the cap is global per minute, so a flood can still exhaust it. A robust
+   per-source limiter (Cloud Function + App Check) remains planned and needs
+   the Blaze plan.
 2. Account recovery and MFA beyond password sign-in.
 3. Encryption at rest is inherited from the Firebase platform; field-level
    encryption for sensitive attachments is planned.
 4. Role assignment currently requires the target user to have signed in once
    (provisioning by email); a full account-lifecycle workflow requires
    organizational confirmation.
-5. Rules cannot fully express county-scoped list queries (rules authorize
-   get/list coarsely for staff; county filtering is enforced in the data layer
-   and re-checked by siteVisible() on single-document gets). A hardened
-   variant should split county-scoped users into per-county collections or use
-   Cloud Functions for privileged reads.
+5. County/operator LIST scoping is now enforced by the RULES, not merely the
+   data layer: every site-scoped record (sites, inspections, findings,
+   correctiveActions, incidents, environmentalObservations) carries a
+   denormalized `county` + `operatorName` stamped at write time, the `list`
+   rules check them per document via `siteVisible()`, and the data layer
+   constrains its queries with the same value (`scopeConstraintForUser` in
+   `src/lib/types.ts`) — a mismatch is rejected by Firestore, not silently
+   filtered. Two honest caveats remain: (a) records written outside the data
+   layer (console/CI/external tooling) miss the stamp and are therefore
+   invisible to county/operator callers until an admin backfill stamps them
+   (admin/national reads are unaffected); (b) evidence is the one exception —
+   its metadata is append-only, so its list rule joins `parentType`+`parentId`
+   to the parent record instead of using a denormalized field.
 
 ## Frontend security notes
 

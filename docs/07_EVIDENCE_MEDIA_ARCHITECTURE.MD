@@ -1,7 +1,8 @@
 # 07 — Evidence & Media Architecture
 
 **Status:** backend + field attachment UI implemented (2026-09-23); offline
-attach and batch upload remain planned.
+attach implemented (on-device queue, 2026-09-23); camera capture and batch
+upload remain planned.
 
 ## Data model [IMPLEMENTED]
 
@@ -34,7 +35,9 @@ attach and batch upload remain planned.
 ## Rules [IMPLEMENTED]
 
 1. Bytes exist in Cloud Storage before the metadata record is readable; a
-   device-local URI is never persisted as a media reference.
+   device-local URI is never persisted as a media reference. Offline captures
+   are held in an on-device IndexedDB queue and only become evidence records
+   after the real upload succeeds (see Field UI).
 2. Size limit of 25 MB enforced in the data layer *and* server-side.
 3. Uploads and metadata writes are authenticated; the uploader identity and
    timestamp are stored server-side (provenance).
@@ -44,16 +47,26 @@ attach and batch upload remain planned.
 
 ## Field UI [IMPLEMENTED 2026-09-23]
 
-`src/components/EvidenceSection.tsx`, attached to inspection detail pages
-(incident and observation detail surfaces reuse the same component next):
+`src/components/EvidenceSection.tsx`, wired into all three record detail
+pages — inspection (`/portal/inspections/:id`), incident
+(`/portal/incidents/:id`) and environmental observation
+(`/portal/environment/:id`):
 - Attach photo/video/audio/document (max 25MB) with optional caption.
 - Thumbnail grid with kind, size, timestamp, caption; click-to-open via
   `evidence.getUrl`.
 - Visible to staff and to operators on their own sites' records; upload
   hidden for unassigned accounts (server still re-checks).
+- **Offline attach [IMPLEMENTED 2026-09-23]** — when offline, or on a
+  connectivity failure (never on a policy denial), the file bytes are saved in
+  an on-device IndexedDB queue (`src/lib/offline-evidence.ts`) and rendered as
+  "queued for upload". The queue replays on the `online` event and on mount;
+  successful uploads are removed from the queue and the list refreshes, while
+  a failed replay stays queued with retry info — nothing is silently dropped.
+  Because the evidence list rule is parent-joined and cannot be watched safely
+  by a generic collection listener, the section refreshes via a post-upload
+  nonce rather than a live watcher.
 
-[PLANNED] Offline attach (bytes held locally, uploaded on sync), camera
-capture UX, batch upload with per-file retry.
+[PLANNED] Camera capture UX, batch upload with per-file progress.
 
 ## Serving and ACL [IMPLEMENTED — interim]
 

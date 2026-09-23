@@ -69,14 +69,19 @@ Explainable, weighted factors (findings by severity, repeat findings, overdue
 corrective actions, fatalities, serious incidents, verified environmental alerts).
 Configurable weights in `src/lib/backend.ts` (sites.riskScores). Decision-support only.
 
-### Evidence & media [PARTIALLY IMPLEMENTED]
+### Evidence & media [IMPLEMENTED]
 Storage-backed uploads with kind detection, size limit, metadata, and provenance.
-Backend exists (`evidence.upload` in `src/lib/backend.ts`); field UI attachment flow is not
-wired into the inspection form yet [PLANNED next session].
+The field attachment UI (`EvidenceSection`) is wired into inspection, incident
+and observation detail pages. Offline attach queues file bytes on-device
+(IndexedDB) and uploads on reconnect; a failed replay stays queued with retry
+info — nothing is silently dropped. Camera capture UX and batch upload remain
+[PLANNED].
 
-### Offline operations [IMPLEMENTED for inspections]
+### Offline operations [IMPLEMENTED]
 Local draft persistence, submission queue with retry, server-side clientRef
-dedupe, sync status indicator, auto-sync on reconnect.
+dedupe, sync status indicator, auto-sync on reconnect. Covers inspections,
+incidents and environmental observations, plus offline evidence byte queuing
+(IndexedDB) for attachments.
 
 ### Notifications, AI assistance, government reporting exports [PROPOSED]
 Not implemented in v1.0. See docs 08 and 14.

@@ -1,8 +1,45 @@
 # 11 — Implementation Status
 
-**Session:** Critical security fixes + evidence UI + offline expansion + first test suite
+**Session:** Rules-level list scoping + evidence detail surfaces + offline evidence attach + public-report rate-limit handshake
 **Date:** 2026-09-23
-**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (13 passing)
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (18 passing)
+
+## This session [IMPLEMENTED 2026-09-23]
+
+- **Rules-level county/operator list scoping (closes doc 04 gap 5).** Every
+  site-scoped record now carries denormalized `county` + `operatorName`
+  (`siteScopeStamp`) at write time, and `list` rules check them per document
+  via `siteVisible()`. The data layer mirrors the exact constraint
+  (`scopeConstraintForUser` → `scopedAll` / `scopedWhereAll`) so Firestore
+  accepts scoped queries and rejects unscoped ones — authorization moved from
+  client-side filtering to the server rules. Applied to every read that touches
+  a scoped collection: list/aggregate readers (`sites.list`, `riskScores`,
+  `commandCenter`) and child/dedupe reads (findings, corrective actions, and
+  `clientRef` dedupe in inspections/incidents/observations). The generic `live`
+  watcher is now scope-constrained and established only after the first fetch
+  (so the caller's scope is known) — an unconstrained collection watcher is
+  rejected by the rules for county/operator callers. Evidence is the documented
+  exception (append-only metadata): its list rule joins `parentType`+`parentId`
+  to the parent record (`parentEvidenceVisible`).
+- **Evidence UI on incident and observation detail surfaces.** New
+  `/portal/incidents/:id` and `/portal/environment/:id` pages
+  (`IncidentDetail`, `ObservationDetail`) with provenance, lifecycle actions,
+  and the shared `EvidenceSection`. New `records.getIncident` /
+  `records.getObservation` getters; list rows now link into the detail pages.
+- **Offline evidence attach.** New IndexedDB-backed queue
+  (`src/lib/offline-evidence.ts`). `EvidenceSection` queues file bytes when
+  offline, or on a connectivity failure (never on a policy denial), shows them
+  as "queued for upload", and replays automatically on the `online` event and
+  on mount. Failed replays stay queued with retry info; nothing is dropped.
+- **Public-report rate-limit handshake.** The `/rateLimits` rule guard was
+  previously unsatisfiable from the client (the submission never created the
+  bucket nor stamped `rateBucket`, so every public report would have been
+  DENIED). `records.submitCommunityReport` now performs the matching
+  create-or-increment handshake and fails fast at the per-minute cap; the
+  submit page surfaces that message.
+- **Tests:** `tests/offline-evidence.test.ts` (5 tests) — queue persistence,
+  per-parent scoping, sync-removes-on-success, sync-keeps-on-failure, delete.
+  Suite total: 18 passing.
 
 ## Security defects fixed [IMPLEMENTED 2026-09-23]
 
@@ -13,8 +50,8 @@
   (`get`) on `findings`, `correctiveActions` and `evidence` now re-check site
   visibility via `siteVisibleAt()`, the same per-document join `incidents` and
   `environmentalObservations` already used. Operators can no longer read other
-  organizations' records by id. List rules remain coarse (documented doc 04
-  gap 5); the data layer filters and every `get` is rules-enforced.
+  organizations' records by id. (List scoping was later hardened to per-document
+  rules — see "This session".)
 - **0.3 Role-blind storage reads** — `storage.rules` re-derive the caller's
   role/tenant from `/users/{uid}` and join the evidence object to its metadata
   doc (`{docId}__{fileName}`) before allowing any read. Unassigned/anonymous
@@ -29,9 +66,11 @@
 - **`listForParent` made role-aware** — per-record tenant re-check via
   `getSite` + `canAccessSite`; operators see only their sites' evidence;
   unassigned accounts get an empty list.
-- **Field UI** (`src/components/EvidenceSection.tsx`) attached to inspection
-  detail: attach photo/video/audio/document ≤25MB with caption, thumbnail
-  grid, click-to-open download URL. Upload hidden for role-less accounts.
+- **Field UI** (`src/components/EvidenceSection.tsx`) attached to all record
+  detail pages (inspection/incident/observation): attach
+  photo/video/audio/document ≤25MB with caption, thumbnail grid, click-to-open
+  download URL, and offline queueing (see "This session"). Upload hidden for
+  role-less accounts.
 
 ## Offline field operations expanded [IMPLEMENTED 2026-09-23]
 
@@ -61,16 +100,15 @@ between typecheck and build.
 ## Remaining known gaps (honest)
 
 1. `.env.keys` secret rotation + git-history scrub (owner action).
-2. Evidence upload is online-only; offline attach (local bytes held until
-   sync) is planned.
-3. EvidenceSection is wired into inspection detail; incident/observation
-   detail surfaces reuse it next (they currently have no detail pages).
-4. Rules cannot fully express county-scoped list filters; enforced in the
-   data layer, re-checked on single-doc gets (doc 04 gap 5).
-5. Public report endpoint lacks dedicated rate limiting (rule-level length
-   guard only).
-6. Operator experience remains a reduced staff surface, not a dedicated portal.
-7. Cloud Storage rules deployment requires the Blaze plan (Spark-plan
+2. Records written outside the data layer miss the denormalized scope stamp
+   and stay invisible to county/operator callers until an admin backfill
+   stamps them (admin/national reads are unaffected) — a backfill tool is
+   planned.
+3. Public-report limiting is a global per-minute cap keyed on server time; a
+   robust per-source limiter (Cloud Function + App Check) needs the Blaze plan.
+4. Camera capture UX and batch evidence upload with per-file progress.
+5. Operator experience remains a reduced staff surface, not a dedicated portal.
+6. Cloud Storage rules deployment requires the Blaze plan (Spark-plan
    limitation documented in doc 14); until upgraded, evidence upload surfaces
    a permission error to the user rather than failing silently.
 
