@@ -1078,8 +1078,20 @@ export const api = {
       occurredAt: number;
       fatalities?: number;
       injured?: number;
+      clientRef?: string;
     }) => {
       const user = await requireAuthed();
+      // Offline dedupe: the same queued submission replayed after reconnect
+      // must not create a second incident record (same contract as createDraft).
+      if (args.clientRef) {
+        const existing = await whereAll<Incident>(
+          "incidents",
+          "clientRef",
+          "==",
+          args.clientRef,
+        );
+        if (existing.length > 0) return existing[0]._id;
+      }
       const site = await getSite(args.siteId);
       if (!site) throw new Error("NOT_FOUND");
       if (!canAccessSite(user, site)) throw new Error("FORBIDDEN");
@@ -1092,6 +1104,7 @@ export const api = {
         fatalities: args.fatalities ?? null,
         injured: args.injured ?? null,
         status: "reported",
+        clientRef: args.clientRef ?? null,
         reportedById: user.uid,
         reportSource: user.role === ROLES.OPERATOR ? "operator" : "inspector",
         createdAt: Date.now(),
@@ -1159,8 +1172,19 @@ export const api = {
       observedAt: number;
       latitude?: number;
       longitude?: number;
+      clientRef?: string;
     }) => {
       const user = await requireAuthed();
+      // Offline dedupe (same contract as createDraft/reportIncident).
+      if (args.clientRef) {
+        const existing = await whereAll<EnvironmentalObservation>(
+          "environmentalObservations",
+          "clientRef",
+          "==",
+          args.clientRef,
+        );
+        if (existing.length > 0) return existing[0]._id;
+      }
       const site = await getSite(args.siteId);
       if (!site) throw new Error("NOT_FOUND");
       if (!canAccessSite(user, site)) throw new Error("FORBIDDEN");
@@ -1175,6 +1199,7 @@ export const api = {
           latitude: args.latitude ?? null,
           longitude: args.longitude ?? null,
           status: "open",
+          clientRef: args.clientRef ?? null,
           reportedById: user.uid,
           createdAt: Date.now(),
         },
@@ -1568,31 +1593,55 @@ export const api = {
 
   // -------------------------------------------------------------- evidence
   evidence: {
-    /** Upload bytes to Storage, then record the evidence doc. Returns the doc id. */
+    /**
+     * Upload bytes to Storage, then record the evidence doc.
+     *
+     * STORAGE RULES CONTRACT (storage.rules): the object path MUST be
+     * evidence/{uid}/{evidenceDocId}__{fileName} — the storage rules parse
+     * the doc id out of the file name and join it to this Firestore metadata
+     * doc to re-derive role + tenant. siteId is MANDATORY (rules require a
+     * string; the caller derives it from the parent record before calling).
+     */
     upload: async (args: {
       file: Blob;
       fileName: string;
       mimeType: string;
       parentType: Evidence["parentType"];
       parentId: string;
-      siteId?: string;
+      siteId: string;
       caption?: string;
       capturedAt?: number;
     }) => {
       const user = await requireAuthed();
+      if (!args.siteId) throw new Error("EVIDENCE_REQUIRES_SITE");
       if (args.file.size > 25 * 1024 * 1024)
         throw new Error("FILE_TOO_LARGE");
+      // The site must exist and be visible to the uploader — evidence can
+      // only ever be attached to a record in the caller's scope.
+      const site = await getSite(args.siteId);
+      if (!site || !canAccessSite(user, site)) throw new Error("FORBIDDEN");
       const kind = evidenceKindByMime(args.mimeType);
-      const path = `evidence/${user.uid}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${args.fileName}`;
-      const storageRef = ref(fbStorage(), path);
-      await uploadBytes(storageRef, args.file, {
+      // 1. Generate the metadata doc id FIRST (no write yet) so the storage
+      //    object name can embed it — {docId}__{fileName} is the join key
+      //    storage.rules parse to re-check role + tenant on every read.
+      //    Order matters: rules forbid evidence updates (append-only by
+      //    design), so the metadata doc must be created exactly once with the
+      //    final storagePath already known.
+      const refDoc = doc(collection(db, "evidence"));
+      const storagePath = `evidence/${user.uid}/${refDoc.id}__${args.fileName}`;
+      // 2. Upload bytes under the rules-contract path (uid folder + 25MB cap
+      //    re-checked server-side by storage.rules).
+      await uploadBytes(ref(fbStorage(), storagePath), args.file, {
         contentType: args.mimeType,
       });
-      const refDoc = await addDoc(collection(db, "evidence"), {
-        storagePath: path,
+      // 3. Create the metadata doc (create, not update) — reads only work
+      //    once this exists, so a failed write here leaves no orphaned
+      //    readable bytes.
+      await setDoc(refDoc, {
+        storagePath,
         parentType: args.parentType,
         parentId: args.parentId,
-        siteId: args.siteId ?? null,
+        siteId: args.siteId,
         kind,
         fileName: args.fileName,
         mimeType: args.mimeType,
@@ -1608,14 +1657,15 @@ export const api = {
         action: "evidence.upload",
         entityType: "evidence",
         entityId: refDoc.id,
-        summary: `${kind} evidence attached to ${args.parentType}`,
+        summary: `${kind} evidence attached to ${args.parentType} at site ${site.code}`,
       });
       return refDoc.id;
     },
 
     listForParent: (args: { parentType: Evidence["parentType"]; parentId: string }) =>
       live<Evidence[]>(async () => {
-        await requireStaffUser();
+        const user = await requireAuthed();
+        if (!user.role) return [];
         const snap = await getDocs(
           fsQuery(
             collection(db, "evidence"),
@@ -1623,7 +1673,17 @@ export const api = {
             where("parentId", "==", args.parentId),
           ),
         );
-        return snap.docs.map((d) => withId<Evidence>(d.id, d.data()));
+        // Tenant re-check per record (doc 04 gap 5: list rules are coarse;
+        // single-doc gets are rules-enforced via siteVisibleAt). Skips records
+        // with no siteId so operators never see site-less legacy metadata.
+        const out: Evidence[] = [];
+        for (const d of snap.docs) {
+          const ev = withId<Evidence>(d.id, d.data());
+          if (!ev.siteId) continue;
+          const site = await getSite(ev.siteId);
+          if (site && canAccessSite(user, site)) out.push(ev);
+        }
+        return out;
       }, ["evidence"]),
 
     /** Signed-read proxy: returns a fresh download URL for an evidence doc. */

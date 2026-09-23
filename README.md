@@ -17,7 +17,8 @@ Built with React 19 + Vite + TypeScript, a **Papery** editorial design system (p
 | Command Center | Live statistics computed from real data — never hardcoded |
 | Mining-site registry | Admin-authored sites with codes (`MGL-<COUNTY>-0001`), status lifecycle, explainable risk scores |
 | Field inspections | Configurable templates, GPS capture with accuracy, draft → review → approve/reject lifecycle |
-| Offline queue | localStorage drafts + submission queue; auto-sync on reconnect; server-side `clientRef` dedupe; nothing silently dropped |
+| Offline queue | localStorage drafts + submission queue for inspections, incidents and environmental observations; auto-sync on reconnect; server-side `clientRef` dedupe; nothing silently dropped |
+| Evidence | Photo/video/audio/document attachments (≤25MB) on inspections with thumbnails, captions and access-controlled downloads |
 | Incidents | Configurable types (fatality, injury, near-miss, environmental, …), severity, status workflow |
 | Environment | Observations with explicit verification states: observed / measured / verified / unverified / alleged |
 | Community reports | Public submission (no account), tracking code, human triage workflow — a report is never an automatic accusation |
@@ -31,6 +32,7 @@ Built with React 19 + Vite + TypeScript, a **Papery** editorial design system (p
 bun install          # or npm install / pnpm install
 bun run dev          # local dev server on :5173
 bun run typecheck    # tsc -b --noEmit
+bun test             # run the automated test suite (bun:test)
 bun run build        # typecheck + production build to dist/
 ```
 

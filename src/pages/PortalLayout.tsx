@@ -91,13 +91,17 @@ export default function PortalLayout() {
   const syncCreateDraft = useMutation(api.inspections.createDraft);
   const syncUpdateDraft = useMutation(api.inspections.updateDraft);
   const syncSubmit = useMutation(api.inspections.submit);
+  const syncReportIncident = useMutation(api.records.reportIncident);
+  const syncReportObservation = useMutation(api.records.reportObservation);
   const syncApi = useMemo(
     () => ({
       createDraft: syncCreateDraft,
       updateDraft: syncUpdateDraft,
       submit: syncSubmit,
+      reportIncident: syncReportIncident,
+      reportObservation: syncReportObservation,
     }),
-    [syncCreateDraft, syncUpdateDraft, syncSubmit],
+    [syncCreateDraft, syncUpdateDraft, syncSubmit, syncReportIncident, syncReportObservation],
   );
 
   // Profile completion gate: EVERY signed-in user must complete a profile

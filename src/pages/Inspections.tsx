@@ -331,8 +331,7 @@ export function LocalInspectionForm() {
         createDraft: (args) => syncCreateDraft(args as never) as unknown as Promise<string>,
         updateDraft: (args) => syncUpdateDraft(args as never) as unknown as Promise<void>,
         submit: (args) => syncSubmit(args as never) as unknown as Promise<void>,
-      });
-      toast.success(
+      });      toast.success(
         draft.latitude != null ? "Submitted with GPS captured" : "Submitted",
       );
       navigate("/portal/inspections");

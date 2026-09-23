@@ -7,10 +7,11 @@
 //  - Local drafts live in their own store, keyed by a clientRef that the server
 //    uses for idempotent dedupe on sync.
 //  - A local file (blob:) URI is NEVER treated as a permanent media reference;
-//    evidence bytes must be uploaded before the evidence record exists.
+//    evidence bytes must be uploaded before the evidence record exists
+//    (evidence upload is online-only by contract, doc 05).
 // ---------------------------------------------------------------------------
 
-export type QueueKind = "inspectionDraft" | "inspectionSubmit";
+export type QueueKind = "inspectionDraft" | "inspectionSubmit" | "incidentReport" | "observationReport";
 
 export type QueueItem = {
   id: string; // queue id (uuid)
@@ -21,16 +22,29 @@ export type QueueItem = {
   lastError?: string;
   lastAttemptAt?: number;
   status: "pending" | "syncing" | "failed" | "done";
-  // Payload
+  // Inspection payload (inspectionSubmit kind); templateId/answers are
+  // omitted on incidentReport/observationReport items.
   siteId: string;
   siteCode: string;
-  templateId: string;
-  answers: Record<string, unknown>;
+  templateId?: string;
+  answers?: Record<string, unknown>;
   notes?: string;
   latitude?: number;
   longitude?: number;
   gpsAccuracyM?: number;
   capturedAt?: number;
+  // Incident / observation payload (incidentReport / observationReport kinds)
+  payload?: {
+    type?: string;
+    category?: string;
+    severity?: string;
+    verification?: string;
+    description?: string;
+    occurredAt?: number;
+    observedAt?: number;
+    fatalities?: number;
+    injured?: number;
+  };
 };
 
 export type LocalDraft = {
@@ -97,7 +111,7 @@ export function deleteDraft(clientRef: string) {
   safeWrite(DRAFTS_KEY, drafts);
 }
 
-/** Enqueue a submission. Persists BEFORE any network attempt. */
+/** Enqueue an inspection submission. Persists BEFORE any network attempt. */
 export function enqueueInspectionSubmission(item: {
   clientRef: string;
   siteId: string;
@@ -126,6 +140,72 @@ export function enqueueInspectionSubmission(item: {
   return entry;
 }
 
+/** Enqueue an incident report. Persists BEFORE any network attempt. */
+export function enqueueIncidentReport(item: {
+  clientRef: string;
+  siteId: string;
+  siteCode: string;
+  type: string;
+  severity: string;
+  description: string;
+  occurredAt: number;
+  fatalities?: number;
+  injured?: number;
+}): QueueItem {
+  const queue = readQueue();
+  const existing = queue.find((q) => q.clientRef === item.clientRef);
+  if (existing) return existing;
+  const { clientRef, siteId, siteCode, ...payload } = item;
+  const entry: QueueItem = {
+    id: newClientRef(),
+    kind: "incidentReport",
+    status: "pending",
+    attempts: 0,
+    createdAt: Date.now(),
+    clientRef,
+    siteId,
+    siteCode,
+    payload,
+  };
+  queue.push(entry);
+  safeWrite(QUEUE_KEY, queue);
+  return entry;
+}
+
+/** Enqueue an environmental observation. Persists BEFORE any network attempt. */
+export function enqueueObservationReport(item: {
+  clientRef: string;
+  siteId: string;
+  siteCode: string;
+  category: string;
+  verification: string;
+  description: string;
+  observedAt: number;
+  latitude?: number;
+  longitude?: number;
+}): QueueItem {
+  const queue = readQueue();
+  const existing = queue.find((q) => q.clientRef === item.clientRef);
+  if (existing) return existing;
+  const { clientRef, siteId, siteCode, latitude, longitude, ...payload } = item;
+  const entry: QueueItem = {
+    id: newClientRef(),
+    kind: "observationReport",
+    status: "pending",
+    attempts: 0,
+    createdAt: Date.now(),
+    clientRef,
+    siteId,
+    siteCode,
+    latitude,
+    longitude,
+    payload,
+  };
+  queue.push(entry);
+  safeWrite(QUEUE_KEY, queue);
+  return entry;
+}
+
 export function updateQueueItem(id: string, patch: Partial<QueueItem>) {
   const queue = readQueue().map((q) => (q.id === id ? { ...q, ...patch } : q));
   safeWrite(QUEUE_KEY, queue);
@@ -147,15 +227,19 @@ export function pendingCount(): number {
 // ---------------------------------------------------------------------------
 
 // Kept structurally loose: callers bind backend mutations whose ID types are
-// opaque strings (Firestore document IDs).
+// opaque strings (Firestore document IDs). Every handler is optional — a
+// caller binds only what it needs (the incidents page binds reportIncident,
+// the inspections form binds the three inspection handlers). A queued item
+// whose handler is missing is treated as a per-item failure, never a silent
+// drop; it stays queued with a NO_SYNC_HANDLER error.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Api = {
-  createDraft: (args: {
+  createDraft?: (args: {
     siteId: any;
     templateId: any;
     clientRef: string;
   }) => Promise<string>;
-  updateDraft: (args: {
+  updateDraft?: (args: {
     inspectionId: any;
     answers?: Record<string, unknown>;
     notes?: string;
@@ -163,12 +247,15 @@ type Api = {
     longitude?: number;
     gpsAccuracyM?: number;
   }) => Promise<any>;
-  submit: (args: { inspectionId: any }) => Promise<any>;
+  submit?: (args: { inspectionId: any }) => Promise<any>;
+  reportIncident?: (args: Record<string, unknown>) => Promise<any>;
+  reportObservation?: (args: Record<string, unknown>) => Promise<any>;
 };
 
 /**
  * Attempt to sync the queue. Returns the number of items successfully synced.
- * Server-side clientRef dedupe makes replays safe (idempotent).
+ * Server-side clientRef dedupe makes replays safe (idempotent): a partially
+ * completed item is re-entried by the server rather than duplicated.
  */
 export async function syncQueue(api: Api): Promise<{
   synced: number;
@@ -181,20 +268,48 @@ export async function syncQueue(api: Api): Promise<{
   for (const item of queue) {
     updateQueueItem(item.id, { status: "syncing" });
     try {
-      const inspectionId = await api.createDraft({
-        siteId: item.siteId,
-        templateId: item.templateId,
-        clientRef: item.clientRef,
-      });
-      await api.updateDraft({
-        inspectionId,
-        answers: item.answers,
-        notes: item.notes,
-        latitude: item.latitude,
-        longitude: item.longitude,
-        gpsAccuracyM: item.gpsAccuracyM,
-      });
-      await api.submit({ inspectionId });
+      if (item.kind === "inspectionSubmit") {
+        if (!api.createDraft || !api.updateDraft || !api.submit)
+          throw new Error("NO_SYNC_HANDLER");
+        const inspectionId = await api.createDraft({
+          siteId: item.siteId,
+          templateId: item.templateId,
+          clientRef: item.clientRef,
+        });
+        await api.updateDraft({
+          inspectionId,
+          answers: item.answers,
+          notes: item.notes,
+          latitude: item.latitude,
+          longitude: item.longitude,
+          gpsAccuracyM: item.gpsAccuracyM,
+        });
+        await api.submit({ inspectionId });
+      } else if (item.kind === "incidentReport") {
+        if (!api.reportIncident) throw new Error("NO_SYNC_HANDLER");
+        await api.reportIncident({
+          siteId: item.siteId,
+          type: item.payload?.type,
+          severity: item.payload?.severity,
+          description: item.payload?.description,
+          occurredAt: item.payload?.occurredAt,
+          fatalities: item.payload?.fatalities,
+          injured: item.payload?.injured,
+          clientRef: item.clientRef,
+        });
+      } else if (item.kind === "observationReport") {
+        if (!api.reportObservation) throw new Error("NO_SYNC_HANDLER");
+        await api.reportObservation({
+          siteId: item.siteId,
+          category: item.payload?.category,
+          verification: item.payload?.verification,
+          description: item.payload?.description,
+          observedAt: item.payload?.observedAt,
+          latitude: item.latitude,
+          longitude: item.longitude,
+          clientRef: item.clientRef,
+        });
+      }
       removeQueueItem(item.id);
       deleteDraft(item.clientRef);
       synced++;

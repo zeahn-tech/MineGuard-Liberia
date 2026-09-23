@@ -17,7 +17,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus } from "lucide-react";
+import { CloudOff, Plus } from "lucide-react";
+import { enqueueIncidentReport, newClientRef, syncQueue } from "@/lib/offline-queue";
 
 const TYPES = [
   { value: "fatality", label: "Fatality" },
@@ -162,16 +163,24 @@ function ReportDialog() {
     }
     setSaving(true);
     try {
-      await report({
-        siteId: form.siteId as never,
-        type: form.type as (typeof TYPES)[number]["value"],
-        severity: form.severity as (typeof SEVERITIES)[number],
+      // Offline-first: enqueue BEFORE any network attempt. If online the item
+      // syncs immediately; if offline it stays queued and syncs on reconnect
+      // with server-side clientRef dedupe (nothing is lost or duplicated).
+      const clientRef = newClientRef();
+      enqueueIncidentReport({
+        clientRef,
+        siteId: form.siteId,
+        siteCode: sites?.find((s) => s._id === form.siteId)?.code ?? "site",
+        type: form.type,
+        severity: form.severity,
         description: form.description.trim(),
         occurredAt: new Date(form.occurredAt).getTime(),
         fatalities: form.fatalities ? Number(form.fatalities) : undefined,
         injured: form.injured ? Number(form.injured) : undefined,
       });
-      toast.success("Incident recorded");
+      const result = await syncQueue({ reportIncident: report });
+      if (result.synced > 0) toast.success("Incident recorded");
+      else toast.info("Saved and queued — will sync when online.");
       setOpen(false);
       setForm({ ...form, siteId: "", description: "", fatalities: "", injured: "" });
     } catch (e) {
@@ -275,7 +284,15 @@ function ReportDialog() {
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
           <Button onClick={submit} disabled={saving}>
-            {saving ? "Recording…" : "Record incident"}
+            {navigator.onLine === false ? (
+              <>
+                <CloudOff className="size-4" /> Queue for sync
+              </>
+            ) : saving ? (
+              "Recording…"
+            ) : (
+              "Record incident"
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

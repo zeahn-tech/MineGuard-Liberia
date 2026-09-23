@@ -15,7 +15,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus } from "lucide-react";
+import { CloudOff, Plus } from "lucide-react";
+import { enqueueObservationReport, newClientRef, syncQueue } from "@/lib/offline-queue";
 
 const CATEGORIES = [
   { value: "water_pollution", label: "Water pollution" },
@@ -153,16 +154,23 @@ function ObservationDialog() {
     }
     setSaving(true);
     try {
-      await report({
-        siteId: form.siteId as never,
-        category: form.category as (typeof CATEGORIES)[number]["value"],
-        verification: form.verification as (typeof VERIFICATION)[number]["value"],
+      // Offline-first: enqueue BEFORE any network attempt; syncs immediately
+      // when online, or on reconnect with server-side clientRef dedupe.
+      const clientRef = newClientRef();
+      enqueueObservationReport({
+        clientRef,
+        siteId: form.siteId,
+        siteCode: sites?.find((s) => s._id === form.siteId)?.code ?? "site",
+        category: form.category,
+        verification: form.verification,
         description: form.description.trim(),
         observedAt: new Date(form.observedAt).getTime(),
         latitude: form.latitude ? Number(form.latitude) : undefined,
         longitude: form.longitude ? Number(form.longitude) : undefined,
       });
-      toast.success("Observation recorded");
+      const result = await syncQueue({ reportObservation: report });
+      if (result.synced > 0) toast.success("Observation recorded");
+      else toast.info("Saved and queued — will sync when online.");
       setOpen(false);
       setForm({ ...form, siteId: "", description: "", latitude: "", longitude: "" });
     } catch (e) {
@@ -253,7 +261,15 @@ function ObservationDialog() {
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
           <Button onClick={submit} disabled={saving}>
-            {saving ? "Recording…" : "Record observation"}
+            {navigator.onLine === false ? (
+              <>
+                <CloudOff className="size-4" /> Queue for sync
+            </>
+            ) : saving ? (
+              "Recording…"
+            ) : (
+              "Record observation"
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

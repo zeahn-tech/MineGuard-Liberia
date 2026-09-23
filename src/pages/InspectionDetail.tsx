@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import type { Doc, Id } from "@/lib/compat-types";
 import { isStaffRole } from "@/lib/types";
+import EvidenceSection from "@/components/EvidenceSection";
 
 const SEV_STYLES: Record<string, string> = {
   low: "text-muted-foreground",
@@ -62,7 +63,6 @@ export default function InspectionDetail() {
 
   const template = templates?.find((t) => t._id === inspection.templateId);
   const answers = (inspection.answers ?? {}) as Record<string, unknown>;
-
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     try {
       await fn();
@@ -212,6 +212,13 @@ export default function InspectionDetail() {
           </div>
         )}
       </section>
+
+      {/* Evidence — online-only uploads, tenant-scoped by rules + data layer */}
+      <EvidenceSection
+        parentType="inspection"
+        parentId={inspection._id}
+        siteId={inspection.siteId}
+      />
 
       {/* Findings */}
       <section>

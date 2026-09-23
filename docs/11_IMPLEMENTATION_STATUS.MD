@@ -1,5 +1,83 @@
 # 11 — Implementation Status
 
+**Session:** Critical security fixes + evidence UI + offline expansion + first test suite
+**Date:** 2026-09-23
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (13 passing)
+
+## Security defects fixed [IMPLEMENTED 2026-09-23]
+
+- **0.1 Committed secret** — `.env.keys` added to `.gitignore`. The key value
+  must still be rotated by the project owner and scrubbed from git history
+  (owner action; the repo cannot do this retroactively).
+- **0.2 Tenant-isolation hole** — `firestore.rules` single-document reads
+  (`get`) on `findings`, `correctiveActions` and `evidence` now re-check site
+  visibility via `siteVisibleAt()`, the same per-document join `incidents` and
+  `environmentalObservations` already used. Operators can no longer read other
+  organizations' records by id. List rules remain coarse (documented doc 04
+  gap 5); the data layer filters and every `get` is rules-enforced.
+- **0.3 Role-blind storage reads** — `storage.rules` re-derive the caller's
+  role/tenant from `/users/{uid}` and join the evidence object to its metadata
+  doc (`{docId}__{fileName}`) before allowing any read. Unassigned/anonymous
+  accounts are denied.
+
+## Evidence capture [IMPLEMENTED 2026-09-23]
+
+- **Upload flow re-contracted** (`src/lib/backend.ts` `evidence.upload`) to
+  match `storage.rules`: metadata doc id generated first, storage object named
+  `evidence/{uid}/{docId}__{fileName}`, single `setDoc` create (rules forbid
+  updates), `siteId` mandatory, site visibility re-derived before write.
+- **`listForParent` made role-aware** — per-record tenant re-check via
+  `getSite` + `canAccessSite`; operators see only their sites' evidence;
+  unassigned accounts get an empty list.
+- **Field UI** (`src/components/EvidenceSection.tsx`) attached to inspection
+  detail: attach photo/video/audio/document ≤25MB with caption, thumbnail
+  grid, click-to-open download URL. Upload hidden for role-less accounts.
+
+## Offline field operations expanded [IMPLEMENTED 2026-09-23]
+
+The offline queue (doc 05) now covers three of four field workflows:
+
+- **Incidents** — the report dialog persists to the queue BEFORE any network
+  attempt; syncs immediately when online, or on reconnect. Server-side
+  `clientRef` dedupe added to `records.reportIncident`.
+- **Environmental observations** — same pattern; `records.reportObservation`
+  gained `clientRef` dedupe.
+- **Inspections** — unchanged (already offline).
+- Queue header/indicator in the portal covers all queue kinds (existing).
+- **Community reports (public)** remain online-only by design (public
+  unauthenticated flow; anti-abuse constraints in rules).
+- New tests cover queue persistence, dedupe, failure retry, and handler
+  routing (see below).
+
+## First automated test suite [IMPLEMENTED 2026-09-23]
+
+`tests/offline-queue.test.ts` (bun:test, `bun test` / `npm test`): 13 tests
+covering the site-code generator, tracking codes, the client-side
+authorization mirror (`canAccessSite`), queue persistence + clientRef dedupe,
+failure retry semantics (nothing silently dropped), missing-handler handling,
+and inspection sync ordering. Wired into CI (`.github/workflows/deploy-pages.yml`)
+between typecheck and build.
+
+## Remaining known gaps (honest)
+
+1. `.env.keys` secret rotation + git-history scrub (owner action).
+2. Evidence upload is online-only; offline attach (local bytes held until
+   sync) is planned.
+3. EvidenceSection is wired into inspection detail; incident/observation
+   detail surfaces reuse it next (they currently have no detail pages).
+4. Rules cannot fully express county-scoped list filters; enforced in the
+   data layer, re-checked on single-doc gets (doc 04 gap 5).
+5. Public report endpoint lacks dedicated rate limiting (rule-level length
+   guard only).
+6. Operator experience remains a reduced staff surface, not a dedicated portal.
+7. Cloud Storage rules deployment requires the Blaze plan (Spark-plan
+   limitation documented in doc 14); until upgraded, evidence upload surfaces
+   a permission error to the user rather than failing silently.
+
+---
+
+# Prior session log
+
 **Session:** Firebase backend migration + GitHub deployment readiness
 **Date:** 2026-09-21
 **Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun run build` ✓ (clean production build)
