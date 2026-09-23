@@ -27,16 +27,9 @@
     content="Mining oversight, safety, compliance and environmental monitoring. Government-ready architecture, designed for potential government adoption." />
   <meta name="twitter:card" content="summary" />
 
-  <script>
-    // Register the offline service worker (relative scope works at any base path).
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", function () {
-        navigator.serviceWorker.register("./sw.js").catch(function () {
-          /* offline support is progressive enhancement — ignore failures */
-        });
-      });
-    }
-  </script>
+  <!-- Service worker registration is handled in src/main.tsx so it can be
+       limited to production builds: in dev/preview a previously installed
+       worker's cache-first strategy would serve stale modules. -->
 </head>
 
 <body>

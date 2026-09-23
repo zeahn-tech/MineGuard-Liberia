@@ -70,6 +70,35 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
+// ---------------------------------------------------------------------------
+// SERVICE WORKER HYGIENE
+//  - production: register the offline app shell (relative scope works at any
+//    base path, including GitHub Pages project sites).
+//  - dev/preview: unregister any previously installed worker and drop its
+//    caches, so an earlier session's cache-first worker can never serve stale
+//    modules into the preview (a common cause of a blank/broken preview).
+// ---------------------------------------------------------------------------
+if ("serviceWorker" in navigator) {
+  if (import.meta.env.PROD) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./sw.js").catch(() => {
+        /* offline support is progressive enhancement — ignore failures */
+      });
+    });
+  } else {
+    navigator.serviceWorker
+      .getRegistrations()
+      .then((regs) => Promise.all(regs.map((r) => r.unregister())))
+      .catch(() => {});
+    if ("caches" in window) {
+      caches
+        .keys()
+        .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+        .catch(() => {});
+    }
+  }
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <RootErrorBoundary>

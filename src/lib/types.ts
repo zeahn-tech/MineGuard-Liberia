@@ -286,9 +286,17 @@ export function canAccessSite(
   return false;
 }
 
+// Public community-report tracking code. Uniqueness matters: the code is the
+// ONLY key a reporter has to look up their report, so a collision would expose
+// the wrong record's status. Time component (base36 ms) + 8 high-entropy
+// characters (crypto-backed when available) keeps collisions negligible.
 export function makeTrackingCode(): string {
   const t = Date.now().toString(36).toUpperCase();
-  const r = Math.floor(Math.random() * 36).toString(36).toUpperCase();
+  const c = globalThis.crypto as Crypto | undefined;
+  const r =
+    c && typeof c.randomUUID === "function"
+      ? c.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()
+      : Math.random().toString(36).slice(2, 10).toUpperCase();
   return `CR-${t}${r}`;
 }
 
