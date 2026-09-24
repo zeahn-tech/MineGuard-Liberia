@@ -1,6 +1,6 @@
 {
   "name": "mineguard-liberia",
-  "description": "National mining oversight, safety, compliance, environmental monitoring and intelligence platform (Firebase backend). Designed for potential government adoption — not an official Government of Liberia system.",
+  "description": "National mining oversight, safety, compliance, environmental monitoring and intelligence platform (Supabase backend). Designed for potential government adoption — not an official Government of Liberia system.",
   "private": true,
   "version": "1.0.0",
   "type": "module",

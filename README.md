@@ -6,7 +6,7 @@
 
 MineGuard Liberia gives authorized oversight personnel a unified platform for the mining-site registry, field inspections, incident management, the compliance chain (inspection → finding → corrective action → verification), environmental observations, community reporting with public tracking, an explainable site-risk engine, and a national GIS map. Field operations are **offline-first**: submissions are persisted on-device before any network attempt and sync with idempotent dedupe.
 
-Built with React 19 + Vite + TypeScript, a **Papery** editorial design system (paper `#F0EEE6`, ink accents, serif hierarchy), and **Google Firebase** (Firestore, Authentication, Cloud Storage) with security rules as the server-side authorization boundary.
+Built with React 19 + Vite + TypeScript, a **Papery** editorial design system (paper `#F0EEE6`, ink accents, serif hierarchy), and **Supabase** (Postgres + Row Level Security, Auth, Storage, Realtime) with RLS policies + guard triggers + security-definer RPCs as the server-side authorization boundary.
 
 ---
 
@@ -36,13 +36,13 @@ bun test             # run the automated test suite (bun:test)
 bun run build        # typecheck + production build to dist/
 ```
 
-### Firebase setup (one-time, project owner)
+### Supabase setup (one-time, project owner)
 
-1. Create a Firebase project, then **Firestore Database** (Build → Firestore Database)
-2. Enable **Email/Password** and **Anonymous** sign-in (Build → Authentication)
-3. Publish `firestore.rules` into Firestore → Rules, and `storage.rules` into Storage → Rules (or `npx firebase deploy --only firestore:rules,storage`)
-4. Set the web config in `src/lib/firebase.ts`
-5. First email account to complete a staff profile becomes the **administrator** (one-time bootstrap, guarded by `meta/hasStaff`)
+1. Project URL + anon key are already configured in `src/lib/supabase.ts` (public client identifiers by design — authorization lives in the database, not in secret config)
+2. Run **`supabase/migrations/0001_initial_schema.sql`** in the Supabase SQL editor (Dashboard → SQL Editor → paste → Run). It creates every table, enum, RLS policy, guard trigger, security-definer RPC, the private `evidence` storage bucket, and the realtime publication in one pass
+3. Enable **Email** sign-in (Authentication → Providers) and **Anonymous** sign-in (for the public guest mode)
+4. First email account to complete a staff profile becomes the **administrator** (one-time bootstrap inside `complete_staff_profile`; only when no admin exists)
+5. Never share the service-role key — the client uses only the anon key
 
 ## Deployment
 
@@ -76,9 +76,9 @@ The build is repository-aware: on GitHub Pages it automatically serves from `/<r
 ```
 src/
   lib/
-    firebase.ts        Firebase init (Auth, Firestore, Storage)
+    supabase.ts        Supabase client + auth state store
     backend.ts         Data layer: the whole API surface, authz re-derived per call
-    backend-react.ts   Convex-style useQuery/useMutation hooks over Firestore
+    backend-react.ts   Convex-style useQuery/useMutation hooks over Supabase
     types.ts           Domain types + client-side authorization mirror
     compat-types.ts    Id<T>/Doc<T> compatibility shims
     offline-queue.ts   Field queue: local persistence, retry, idempotent sync
@@ -86,8 +86,8 @@ src/
   pages/               Landing, Auth, Portal (Command Center, Sites, Map,
                        Inspections, Incidents, Environment, Community, Audit)
   components/ui/       shadcn/ui primitives
-firestore.rules        Server-side authorization (authoritative)
-storage.rules          Evidence media rules
+supabase/migrations/   Postgres schema: tables, RLS policies, guard triggers,
+                       security-definer RPCs, storage policies
 docs/00–16             Full engineering documentation set
 scripts/               Icon generator (dev-only)
 ```
@@ -98,10 +98,11 @@ The `docs/` directory is the authoritative engineering record (master directive,
 
 ## Security notes
 
-- Firebase web config is a public client identifier by design; **all access control lives in the security rules**, never in config secrecy
-- Role/scope live in `/users/{uid}` and are admin-writable only; self-elevation is impossible (rules + data layer both enforce)
-- Audit log is append-only (create permitted, update/delete denied)
-- Community report submissions are rate-guarded server-side by a per-minute counter (the client performs the matching handshake); a report is a concern, never an accusation of guilt
+- Supabase URL + anon key are public client identifiers by design; **all access control lives in Postgres RLS policies, guard triggers and security-definer RPCs** (`supabase/migrations/0001_initial_schema.sql`), never in config secrecy
+- Role/scope live in `public.profiles` and are admin-writable only; self-elevation is impossible (profile guard trigger + data layer both enforce)
+- Audit log is append-only (insert policy exists; no update/delete policy — Postgres denies by default under RLS)
+- Community report submissions are rate-limited server-side inside the `submit_community_report` RPC (30/minute global bucket); a report is a concern, never an accusation of guilt
+- Evidence bytes sit in a **private** storage bucket; the read policy re-derives role/tenant from `profiles` and joins the metadata row by path before any read
 
 ## License
 

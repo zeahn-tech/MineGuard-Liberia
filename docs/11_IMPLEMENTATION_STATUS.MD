@@ -1,5 +1,81 @@
 # 11 — Implementation Status
 
+**Session:** Supabase backend migration (Firebase → Supabase, storage-upgrade
+constraint) + authoritative database schema
+**Date:** 2026-09-24
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) — schema applied manually
+in the Supabase SQL editor by the project owner (see setup steps below)
+
+## This session [IMPLEMENTED 2026-09-24]
+
+- **Why:** Cloud Storage rules deployment remained blocked on the Firebase
+  Blaze plan (prior gap 6). The project owner supplied a Supabase project
+  (URL + anon key); the entire backend was re-platformed onto Postgres.
+- **`src/lib/supabase.ts`** — client init, auth state store (mirrors the
+  former `onAuthStateChanged` semantics), error-shaping to the stable UI
+  message tokens (FORBIDDEN / NOT_FOUND / RATE_LIMITED / …).
+- **`src/lib/backend.ts`** — the entire API surface mirrored
+  function-for-function on Supabase: sites (list/get/create/setStatus/
+  riskScores), inspections (templates, list, get, drafts, submit, review,
+  findings, corrective actions), records (incidents, observations, community
+  submit/track/triage), stats (command center, publicStats, audit log, role
+  management, provisioning, profile completion), evidence (upload to private
+  bucket + metadata row, scoped list RPC, signed URLs, footprint), seed.
+  Timestamp contract: epoch-ms in the UI ↔ timestamptz in Postgres, mapped at
+  this edge. Column contract: snake_case rows ↔ camelCase domain types.
+- **`src/lib/backend-react.ts`** — Convex-compatible `useQuery`/`useMutation`
+  hooks retained; subscriptions now push-refresh via Postgres realtime
+  (`postgres_changes`) with the same debounce/keepalive perf contract.
+- **`supabase/migrations/0001_initial_schema.sql`** [NEW — authoritative
+  boundary] — every table + Postgres enum, RLS policies on all 14 tables,
+  guard triggers (profile role-writes, site registry admin-only, inspection
+  lifecycle, finding transitions, CA decisions, report triage),
+  `mg_can_access_site()` as the single site-visibility function used by every
+  scoped policy, scope-stamp triggers (county/operator_name denormalized at
+  write time, refreshed on site updates — the RLS equivalent of rules-level
+  list scoping), security-definer RPCs (`submit_community_report` with a
+  30/min `rate_limits` bucket, `triage_community_report`,
+  `complete_staff_profile` with first-admin bootstrap,
+  `provision_user_by_email`, `evidence_for_parent`, `refresh_public_stats`),
+  append-only `audit_log` (insert policy only), private `evidence` bucket with
+  uid-folder upload policy and a read policy that joins metadata by path and
+  re-checks site visibility (structurally closes the prior 0.2/0.3 defect
+  classes), realtime publication for all watched tables, and UNIQUE
+  constraints on `sites.code` + all `client_ref` columns (database-level
+  offline dedupe).
+- **Docs synchronized:** 02 (stack/topology), 03 (tables/integrity),
+  04 (principles/file access/gaps), 11 (this entry), README.
+
+## Setup required from the project owner (one-time)
+
+1. Run `supabase/migrations/0001_initial_schema.sql` in the Supabase SQL
+   editor (Dashboard → SQL Editor → paste → Run).
+2. Authentication → Providers → Email: enabled. Anonymous sign-in: enabled
+   (public guest mode).
+3. Sign up → complete a staff profile → first account becomes admin
+   (bootstrap inside `complete_staff_profile`, only when no admin exists).
+4. Optional: run the in-app seed (Command Center → admin controls) to insert
+   synthetic demo records.
+
+## Remaining known gaps (honest)
+
+1. The prior Firebase-era `.env.keys` rotation/history scrub remains an owner
+   action for that repository history (no Supabase equivalent exists; nothing
+   sensitive ships in this codebase).
+2. Public-report rate limiting is a global 30/minute bucket (server-time
+   keyed) inside the RPC; a per-source limiter (edge function + proxy IP) is
+   planned.
+3. Camera capture UX and batch evidence upload with per-file progress.
+4. Operator experience remains a reduced staff surface, not a dedicated portal.
+5. `refresh_public_stats()` is invoked by the data layer after consequential
+   writes; a scheduled/cron variant is planned so externally-written rows are
+   also counted.
+6. A leaked 1h signed evidence URL remains valid until expiry.
+
+---
+
+# Prior session log
+
 **Session:** Rules-level list scoping + evidence detail surfaces + offline evidence attach + public-report rate-limit handshake
 **Date:** 2026-09-23
 **Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (18 passing)

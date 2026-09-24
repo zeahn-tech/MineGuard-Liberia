@@ -2,75 +2,85 @@
 
 **Status:** implemented controls below; gaps listed honestly.
 
+**Backend note (2026-09-24):** the authorization boundary moved from Firebase
+security rules to PostgreSQL RLS + guard triggers + security-definer RPCs in
+`supabase/migrations/0001_initial_schema.sql`. The model below is unchanged in
+intent; the enforcement technology is now Postgres. The prior committed-secret
+(0.1), tenant-isolation (0.2) and role-blind storage (0.3) defects from the
+Firebase era are structurally closed: profiles are admin-writable only via
+trigger, every evidence/finding/CA read goes through `mg_can_access_site()`,
+and storage reads join the metadata row by path before granting access.
+
 ## Principles applied [IMPLEMENTED]
 
-- **Least privilege.** Four roles; access helpers in both the security rules and
-  the data layer (`requireStaffUser`, `requireReviewerUser`, `requireAdminUser`,
-  operator isolation).
-- **Defense in depth.** Route guard (RequireAuth) + Firestore/Storage security
-  rules (authoritative server boundary) + identical checks re-derived in
-  `src/lib/backend.ts` before every operation + scope filtering inside queries
-  + audit logging.
-- **Server-side authorization.** `firestore.rules` derives every permission from
-  `/users/{uid}` (admin-writable only). The client never grants access; hiding
-  UI is cosmetic only.
+- **Least privilege.** Four roles; access helpers in both the database
+  (`mg_is_staff()`, `mg_is_reviewer()`, `mg_is_admin()`, `mg_can_access_site()`)
+  and the data layer (`requireStaffUser`, `requireReviewerUser`,
+  `requireAdminUser`, operator isolation).
+- **Defense in depth.** Route guard (RequireAuth) + Postgres RLS policies and
+  guard triggers (authoritative server boundary) + identical checks re-derived
+  in `src/lib/backend.ts` before every operation + scope filtering inside
+  queries + audit logging.
+- **Server-side authorization.** RLS derives every permission from
+  `public.profiles` (admin-writable only via the `profiles_guard` trigger). The
+  client never grants access; hiding UI is cosmetic only.
 - **Geographic access control.** County-scoped staff can only read/write records
-  in their county (`siteVisible()` / `siteVisibleAt()` in the rules; mirrored in
+  in their county (`mg_can_access_site()` in every scoped policy; mirrored in
   the data layer).
-- **Tenant isolation.** Operators match sites by exact `operatorName`; they can
+- **Tenant isolation.** Operators match sites by exact `operator_name`; they can
   only acknowledge findings and respond to corrective actions on their own
-  sites, enforced by rules and data layer alike.
-- **Secure sessions.** Firebase Authentication (email/password + anonymous
-  guest); session tokens managed by the platform.
-- **Audit logging.** Append-only `auditLog` written by the data layer inside
-  every consequential mutation; rules permit create-only (no update, no delete).
+  sites, enforced by guard triggers and data layer alike.
+- **Secure sessions.** Supabase Auth (email/password + anonymous guest); session
+  tokens managed by the platform (GoTrue), `auth.uid()` available to every RLS
+  policy and RPC.
+- **Audit logging.** Append-only `audit_log` written by the data layer inside
+  every consequential mutation; insert policy only — no update/delete policy
+  exists, so Postgres denies by default under RLS.
 - **Input validation.** TypeScript-typed function arguments in the data layer;
-  rule-level guards on public writes (report description length, status
-  literals, evidence size); closed enums for statuses, severities, categories,
-  verification states.
-- **No secrets in client code.** Firebase web config is public by design;
-  authorization never depends on its secrecy. No service credentials in the
-  frontend; any future server keys go through Cloud Functions with env-based
-  secret management.
+  Postgres enums for statuses, severities, categories, verification states (the
+  database rejects anything outside the closed unions); check constraint caps
+  evidence at 25MB; the public RPC rate-limits submissions.
+- **No secrets in client code.** Supabase URL + anon key are public by design;
+  authorization never depends on their secrecy. The service-role key never
+  reaches the frontend; any future privileged work goes through security-definer
+  RPCs.
 
-## File access [PARTIAL]
+## File access [IMPLEMENTED — scoped reads]
 
-Evidence bytes live in Cloud Storage under `evidence/{uid}/`; storage rules
-require sign-in for read and restrict writes to the owning user's namespace
-(25MB cap). Per-record ACL enforcement at the download-URL layer is [PLANNED] —
-`evidence.getUrl` requires authentication and the metadata list is staff-only,
-but a leaked download URL remains valid until expiry.
+Evidence bytes live in a **private** Supabase Storage bucket `evidence` under
+`{uid}/{evidenceRowId}__{fileName}`. The upload policy requires the first path
+folder to equal `auth.uid()` and the account to hold a role; the read policy
+re-derives the caller's role/tenant from `public.profiles` and joins the
+evidence metadata row by `storage_path` through `mg_can_access_site()` before
+granting access — role-blind reads (prior audit defect 0.3) are structurally
+impossible. Signed URLs remain short-lived (1h); a leaked URL is a residual
+risk documented honestly below.
 
 ## Known gaps [PLANNED / REQUIRES GOVERNMENT CONFIRMATION]
 
-1. Rate limiting on the public report endpoint. A per-minute counter is now
-   enforced server-side by the `/rateLimits` rules (the report's `rateBucket`
-   must equal the current server minute; the counter increments by exactly one
-   and is capped at 30/min), and the submission flow performs the matching
-   client handshake. Honest limits: the bucket is keyed on server time while
-   the client keys on device time (a minute-boundary straddle can be rejected),
-   and the cap is global per minute, so a flood can still exhaust it. A robust
-   per-source limiter (Cloud Function + App Check) remains planned and needs
-   the Blaze plan.
-2. Account recovery and MFA beyond password sign-in.
-3. Encryption at rest is inherited from the Firebase platform; field-level
+1. Rate limiting on the public report endpoint. A 30-reports-per-minute global
+   rolling bucket is enforced server-side inside the `submit_community_report`
+   security-definer RPC (`rate_limits` table, keyed on server time). Honest
+   limits: the bucket is global per minute, so a distributed flood can still
+   exhaust it for everyone, and it is not per-source. A per-IP/per-source
+   limiter (edge function + proxy headers) remains planned.
+2. Account recovery and MFA beyond password sign-in (Supabase supports MFA
+   enrollment — configuration pending).
+3. Encryption at rest is inherited from the Supabase platform; field-level
    encryption for sensitive attachments is planned.
 4. Role assignment currently requires the target user to have signed in once
-   (provisioning by email); a full account-lifecycle workflow requires
+   (`provision_user_by_email` matches on the profiles row); a full
+   account-lifecycle workflow (invite emails, admin-created accounts) requires
    organizational confirmation.
-5. County/operator LIST scoping is now enforced by the RULES, not merely the
-   data layer: every site-scoped record (sites, inspections, findings,
-   correctiveActions, incidents, environmentalObservations) carries a
-   denormalized `county` + `operatorName` stamped at write time, the `list`
-   rules check them per document via `siteVisible()`, and the data layer
-   constrains its queries with the same value (`scopeConstraintForUser` in
-   `src/lib/types.ts`) — a mismatch is rejected by Firestore, not silently
-   filtered. Two honest caveats remain: (a) records written outside the data
-   layer (console/CI/external tooling) miss the stamp and are therefore
-   invisible to county/operator callers until an admin backfill stamps them
-   (admin/national reads are unaffected); (b) evidence is the one exception —
-   its metadata is append-only, so its list rule joins `parentType`+`parentId`
-   to the parent record instead of using a denormalized field.
+5. County/operator LIST scoping is enforced by RLS per document, not merely the
+   data layer: every site-scoped record carries a denormalized `county` +
+   `operator_name` stamped by triggers at write time (and refreshed by
+   `sites_rescope` when a site's county/operator changes), and every scoped
+   read policy evaluates `mg_can_access_site(site_id)`. A residual caveat:
+   rows written directly via SQL before this schema existed would need a
+   backfill; rows written through the API are always stamped.
+6. A leaked 1h signed URL remains valid until expiry (short-TTL tradeoff
+   documented; revocation requires rotating the bucket or shortening TTL).
 
 ## Frontend security notes
 
