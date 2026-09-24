@@ -57,22 +57,29 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     }
   }, [authLoading, isAuthenticated, navigate, redirect]);
 
-  const firebaseMessage = (err: unknown, fallback: string) => {
-    const code =
-      err instanceof Error && "code" in err
-        ? String((err as { code: string }).code)
-        : "";
-    if (code.includes("invalid-credential") || code.includes("wrong-password"))
+  // Auth errors arrive as plain-message Errors from the Supabase layer
+  // (src/lib/backend.ts authErrorMessage) — match on message text.
+  const authMessage = (err: unknown, fallback: string) => {
+    const msg = err instanceof Error ? err.message : "";
+    if (
+      msg.includes("Incorrect email or password") ||
+      msg.includes("invalid login credentials")
+    )
       return "Incorrect email or password.";
-    if (code.includes("user-not-found")) return "No account with that email.";
-    if (code.includes("email-already-in-use"))
+    if (msg.includes("No account with that email"))
+      return "No account with that email.";
+    if (msg.includes("already exists"))
       return "An account already exists with that email — sign in instead.";
-    if (code.includes("weak-password"))
+    if (msg.includes("too weak"))
       return "Password is too weak (use at least 6 characters).";
-    if (code.includes("too-many-requests"))
+    if (msg.includes("Too many attempts") || msg.includes("rate limit"))
       return "Too many attempts — please wait a moment and try again.";
-    if (code.includes("operation-not-allowed"))
-      return "Email sign-in is not enabled for this Firebase project yet.";
+    if (msg.includes("Email not confirmed"))
+      return "Email not confirmed yet. Check your inbox.";
+    if (msg.includes("CONFIRM_EMAIL:"))
+      return msg.replace("CONFIRM_EMAIL: ", "");
+    if (msg.includes("ANON_DISABLED:"))
+      return "Guest sign-in is not enabled for this project.";
     return fallback;
   };
 
@@ -89,7 +96,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       navigate(redirect);
     } catch (err) {
       console.error("Sign-in error:", err);
-      setError(firebaseMessage(err, "Failed to sign in. Please try again."));
+      setError(authMessage(err, "Failed to sign in. Please try again."));
       setIsLoading(false);
     }
   };
@@ -114,7 +121,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       navigate(redirect);
     } catch (err) {
       console.error("Sign-up error:", err);
-      setError(firebaseMessage(err, "Failed to create the account."));
+      setError(authMessage(err, "Failed to create the account."));
       setIsLoading(false);
     }
   };
@@ -128,7 +135,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     } catch (err) {
       console.error("Guest login error:", err);
       setError(
-        firebaseMessage(err, "Failed to sign in as guest. Anonymous sign-in may not be enabled for this Firebase project."),
+        authMessage(err, "Failed to sign in as guest."),
       );
       setIsLoading(false);
     }

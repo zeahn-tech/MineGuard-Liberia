@@ -1,9 +1,9 @@
 import {
   api,
-  fbSignInEmail,
-  fbSignInGuest,
-  fbSignOut,
-  fbSignUpEmail,
+  signInEmail,
+  signInGuest,
+  signOut,
+  signUpEmail,
 } from "@/lib/backend";
 import { useIsAuthenticated, useQuery } from "@/lib/backend-react";
 
@@ -32,15 +32,15 @@ export function useAuth() {
       // flexible so legacy call sites compile.
       if (typeof emailOrOpts === "object" && emailOrOpts !== null) {
         if (emailOrOpts.email && emailOrOpts.password) {
-          return fbSignInEmail(emailOrOpts.email, emailOrOpts.password);
+          return signInEmail(emailOrOpts.email, emailOrOpts.password);
         }
-        return fbSignInGuest();
+        return signInGuest();
       }
-      return fbSignInGuest();
+      return signInGuest();
     },
-    signInEmail: fbSignInEmail,
-    signUpEmail: fbSignUpEmail,
-    signInGuest: fbSignInGuest,
-    signOut: fbSignOut,
+    signInEmail,
+    signUpEmail,
+    signInGuest,
+    signOut,
   };
 }

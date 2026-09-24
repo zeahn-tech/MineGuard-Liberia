@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// CONVEX-COMPATIBLE REACT HOOKS OVER FIREBASE
+// CONVEX-COMPATIBLE REACT HOOKS OVER SUPABASE
 //
 // useQuery(fn, args) — subscribes to live data, returns undefined while
 // loading (identical semantics to convex/react's useQuery). `fn` is a
@@ -8,20 +8,23 @@
 //
 // PERFORMANCE MODEL (this is what makes tab switches instant):
 //  1. Subscriptions are SHARED per (query function, args). Twenty components
-//     reading the same query = one Firestore read loop, not twenty.
+//     reading the same query = one network loop, not twenty.
 //  2. Cache entries outlive unmount (KEEPALIVE_MS). Navigating to another tab
 //     and back replays the last value SYNCHRONOUSLY, then refreshes in the
 //     background — no loading flash, no re-download.
-//  3. Auth state is a module-level store; sign-in/out bumps a single epoch
-//     that auth-bound subscriptions re-derive from. Document subscriptions
-//     not tied to identity (e.g. public stats) survive across epochs.
+//  3. Auth state is a module-level store (src/lib/supabase.ts); sign-in/out
+//     bumps a single epoch that auth-bound subscriptions re-derive from.
+//     Non-auth-bound subscriptions (public stats, tracking) survive epochs.
 //  4. useSyncExternalStore drives re-renders straight from the cache — no
 //     per-component state copies, no extra render passes.
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
-import { onAuthStateChanged, type User } from "firebase/auth";
-import { auth } from "./firebase";
+import {
+  authUserId,
+  isAuthReady,
+  onAuthStateChangedSupabase,
+} from "./supabase";
 import type { QueryHandle } from "./backend";
 
 type Listener = () => void;
@@ -136,20 +139,22 @@ function lastActiveAt(key: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// AUTH STATE — module-level, shared, no per-component subscriptions
+// AUTH STATE — module-level, shared, no per-component subscriptions.
+// Backed by the Supabase auth store in ./supabase.ts (mirrors the former
+// Firebase onAuthStateChanged wiring).
 // ---------------------------------------------------------------------------
 
 let authEpoch = 0;
-let authUser: User | null = null;
-let authReady = false;
+let authReadySeen = false;
 const epochListeners = new Set<Listener>();
 
-onAuthStateChanged(auth, (u) => {
-  const changed = u?.uid !== authUser?.uid;
-  authUser = u;
-  authReady = true;
-  if (changed) authEpoch++;
-  for (const l of epochListeners) l();
+onAuthStateChangedSupabase((uid) => {
+  authReadySeen = isAuthReady();
+  // Any identity change (including signed-out → anonymous guest) invalidates
+  // auth-bound subscriptions; emits only fire on the supabase store's own
+  // change events, so identical states don't loop.
+  authEpoch++;
+  void uid;
 });
 
 function useAuthEpoch(): number {
@@ -263,7 +268,7 @@ export function useIsAuthenticated(): {
 } {
   useAuthEpoch();
   return {
-    isLoading: !authReady,
-    isAuthenticated: authUser !== null,
+    isLoading: !authReadySeen,
+    isAuthenticated: authUserId() !== null,
   };
 }

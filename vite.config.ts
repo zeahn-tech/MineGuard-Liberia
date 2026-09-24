@@ -38,12 +38,7 @@ export default defineConfig(({ command }) => {
         output: {
           manualChunks: {
             "react-vendor": ["react", "react-dom", "react-router"],
-            "firebase-vendor": [
-              "firebase/app",
-              "firebase/auth",
-              "firebase/firestore",
-              "firebase/storage",
-            ],
+            "supabase-vendor": ["@supabase/supabase-js"],
             "radix-ui": [
               "@radix-ui/react-accordion",
               "@radix-ui/react-alert-dialog",
@@ -93,9 +88,7 @@ export default defineConfig(({ command }) => {
         "react-dom",
         "react-dom/client",
         "react-router",
-        "firebase/app",
-        "firebase/auth",
-        "firebase/firestore",
+        "@supabase/supabase-js",
         "framer-motion",
       ],
     },
