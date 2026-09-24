@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useMutation, useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
-import { Plus, MapPin } from "lucide-react";
+import { Plus, MapPin, ChevronLeft, ChevronRight } from "lucide-react";
 
 const COUNTIES = [
   "Bomi", "Bong", "Gbarpolu", "Grand Bassa", "Grand Cape Mount", "Grand Gedeh",
@@ -37,7 +37,31 @@ export default function Sites() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  const [scrollLeft, setScrollLeft] = useState(0);
+
+  // Horizontal panning for the wide sites table on small screens. The scroll
+  // container is native-touch-scrollable; the edge buttons pan it for mouse
+  // users and give an explicit affordance that more columns exist.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateScrollState = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  }, []);
+
+  const pan = (dir: -1 | 1) => {
+    scrollRef.current?.scrollBy({ left: dir * 220, behavior: "smooth" });
+  };
+
+  // Re-evaluate arrow visibility when data arrives or the viewport resizes.
+  useEffect(() => {
+    updateScrollState();
+    window.addEventListener("resize", updateScrollState);
+    return () => window.removeEventListener("resize", updateScrollState);
+  }, [updateScrollState, sites, risk]);
 
   return (
     <div className="space-y-6">
@@ -63,33 +87,34 @@ export default function Sites() {
           </p>
         </div>
       ) : (
-        <div className="relative overflow-x-auto rounded-sm border border-border">
-          {/* Left/right pan buttons (hidden on wide screens) */}
-          <button
-            type="button"
-            className="absolute right-2 top-1/2 z-20 -translate-y-1/2 flex size-10 items-center justify-center rounded-full border border-border bg-background text-sm shadow-sm transition-opacity hover:opacity-80 sm:right-4"
-            onClick={() => setScrollLeft((v) => Math.max(0, v - 120))}
-            aria-label="Scroll left"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M11 15l-6-6 6-6" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="absolute left-2 top-1/2 z-20 -translate-y-1/2 flex size-10 items-center justify-center rounded-full border border-border bg-background text-sm shadow-sm transition-opacity hover:opacity-80 sm:left-4"
-            onClick={() => setScrollLeft((v) => v + 120)}
-            aria-label="Scroll right"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M5 15l6-6 6 6" />
-            </svg>
-          </button>
-          <div className="h-8 w-px bg-border" aria-hidden="true" />
+        <div className="relative overflow-hidden rounded-sm border border-border">
+          {/* Edge-pan buttons: shown only while more content exists in that
+              direction. On touch devices native horizontal swipe also works. */}
+          {canScrollLeft && (
+            <button
+              type="button"
+              className="absolute left-1 top-1/2 z-20 flex size-9 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-background/90 shadow-sm backdrop-blur transition-colors hover:bg-accent"
+              onClick={() => pan(-1)}
+              aria-label="Scroll table left"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+          )}
+          {canScrollRight && (
+            <button
+              type="button"
+              className="absolute right-1 top-1/2 z-20 flex size-9 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-background/90 shadow-sm backdrop-blur transition-colors hover:bg-accent"
+              onClick={() => pan(1)}
+              aria-label="Scroll table right"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          )}
           <div
-            className="scrollbar-hide"
-            onScroll={(e) => setScrollLeft((e.target as HTMLDivElement).scrollLeft)}
-            style={{ scrollBehavior: "smooth", msOverflowStyle: "auto" }}
+            ref={scrollRef}
+            className="scrollbar-hide overflow-x-auto"
+            onScroll={updateScrollState}
+            style={{ WebkitOverflowScrolling: "touch" }}
           >
             <div className="min-w-max">
               <table className="w-full text-sm">
@@ -100,8 +125,8 @@ export default function Sites() {
                     <th className="hidden px-4 py-2.5 font-medium md:table-cell">County</th>
                     <th className="hidden px-4 py-2.5 font-medium md:table-cell">Operator</th>
                     <th className="px-4 py-2.5 font-medium">Status</th>
-                    <th className="px-4 py-3 text-right sm:table-cell">Open actions</th>
-                    <th className="px-4 py-3 text-right md:table-cell">Risk</th>
+                    <th className="px-4 py-3 text-right">Open actions</th>
+                    <th className="px-4 py-3 text-right">Risk</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -127,12 +152,11 @@ export default function Sites() {
                             {s.status.replace(/_/g, " ")}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-right sm:table-cell">
+                        <td className="px-4 py-3 text-right">
                           <Button
-                            asChild
                             size="sm"
                             variant="ghost"
-                            className="px-2 py-1 text-xs"
+                            className="px-2 py-1 text-xs underline-offset-2 hover:underline"
                             onClick={(e) => {
                               e.stopPropagation();
                               navigate(`/portal/sites/${s._id}`);
@@ -141,9 +165,8 @@ export default function Sites() {
                             Open
                           </Button>
                         </td>
-                        <td className="px-4 py-3 text-right md:table-cell">
+                        <td className="px-4 py-3 text-right">
                           <Button
-                            asChild
                             size="sm"
                             variant="ghost"
                             className="px-2 py-1 text-xs"

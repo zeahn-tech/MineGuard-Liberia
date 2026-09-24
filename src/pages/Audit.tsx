@@ -25,7 +25,7 @@ export default function Audit() {
           No audit entries yet.
         </div>
       ) : (
-        <div className="overflow-hidden rounded-sm border border-border">
+        <div className="scrollbar-hide overflow-x-auto rounded-sm border border-border">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-left">

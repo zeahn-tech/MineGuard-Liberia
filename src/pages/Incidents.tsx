@@ -75,14 +75,14 @@ export default function Incidents() {
           No incidents recorded in your scope.
         </div>
       ) : (
-        <div className="overflow-hidden rounded-sm border border-border">
+        <div className="scrollbar-hide overflow-x-auto rounded-sm border border-border">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-left">
                 <th className="px-4 py-2.5 font-medium">Occurred</th>
                 <th className="px-4 py-2.5 font-medium">Type</th>
                 <th className="px-4 py-2.5 font-medium">Description</th>
-                <th className="hidden px-4 py-2.5 font-medium md:table-cell">Site</th>
+                <th className="px-4 py-2.5 font-medium">Site</th>
                 <th className="px-4 py-2.5 font-medium">Severity</th>
                 <th className="px-4 py-2.5 font-medium">Status</th>
                 {isStaff && <th className="px-4 py-2.5" />}
@@ -103,7 +103,7 @@ export default function Incidents() {
                       {i.description}
                     </Link>
                   </td>
-                  <td className="hidden px-4 py-3 md:table-cell">
+                  <td className="px-4 py-3">
                     <span className="font-mono text-xs">{i.siteCode}</span>
                   </td>
                   <td className="px-4 py-3">

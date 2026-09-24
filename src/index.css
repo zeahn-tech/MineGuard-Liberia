@@ -232,6 +232,15 @@
     font-variant-numeric: tabular-nums;
     font-weight: 600;
   }
+  /* Wide data tables pan horizontally on phones; hide the scrollbar chrome
+     while keeping native touch scrolling and edge-pan buttons usable. */
+  .scrollbar-hide {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* Map (Leaflet) — match Papery */
