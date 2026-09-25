@@ -31,11 +31,13 @@ export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON
 // ---------------------------------------------------------------------------
 
 type AuthListener = (userId: string | null) => void;
+type ProfileListener = () => void;
 
 let currentUserId: string | null = null;
 let authReady = false;
 let profileVersion = 0; // bumped after profile writes so queries re-derive
 const listeners = new Set<AuthListener>();
+const profileListeners = new Set<ProfileListener>();
 
 function setUserId(id: string | null) {
   const changed = id !== currentUserId;
@@ -73,6 +75,15 @@ export function isAuthReady(): boolean {
  *  subscriptions re-derive scope/role without a full sign-out/in. */
 export function bumpProfileVersion() {
   profileVersion++;
+  // Notify epoch observers (backend-react.ts) so the React cache re-derives
+  // auth-bound subscriptions — role/scope changes surface without a reload.
+  for (const l of profileListeners) l();
+}
+
+/** Observe profile-version changes (used by the React cache epoch). */
+export function onProfileVersionChanged(cb: ProfileListener): () => void {
+  profileListeners.add(cb);
+  return () => profileListeners.delete(cb);
 }
 
 export function getProfileVersion(): number {
@@ -90,24 +101,54 @@ export async function getSessionToken(): Promise<string | null> {
 // ---------------------------------------------------------------------------
 
 export function backendError(err: unknown): Error {
-  if (err instanceof Error) {
-    const msg = err.message;
+  // PostgREST/Supabase errors arrive as PLAIN OBJECTS ({ code, message,
+  // details, hint }), not Error instances — String(err) on those yields
+  // "[object Object]", which is the literal bug users saw in every toast.
+  // The call sites in backend.ts do `error.message`, which is undefined on
+  // them, so the token mapping below never fired. Extract the message from
+  // whatever shape arrived BEFORE the instanceof branch.
+  const message =
+    err instanceof Error
+      ? err.message
+      : typeof err === "object" && err !== null && "message" in err
+        ? String((err as { message: unknown }).message ?? "")
+        : typeof err === "string"
+          ? err
+          : "";
+
+  if (message) {
     if (
-      msg.includes("FORBIDDEN_ROLE_CHANGE") ||
-      msg.includes("row-level security") ||
-      msg.includes("42501")
+      message.includes("FORBIDDEN_ROLE_CHANGE") ||
+      message.includes("row-level security") ||
+      message.includes("42501")
     ) {
       return new Error("FORBIDDEN");
     }
-    if (msg.includes("RATE_LIMITED")) return new Error("RATE_LIMITED");
-    if (msg.includes("NOT_FOUND")) return new Error("NOT_FOUND");
-    if (msg.includes("UNAUTHENTICATED")) return new Error("UNAUTHENTICATED");
-    if (msg.includes("GUEST_ACCOUNT")) return new Error(msg);
-    if (msg.includes("USER_NOT_FOUND")) return new Error(msg);
-    if (msg.includes("PGRST116") || msg.includes("No rows")) {
+    if (message.includes("RATE_LIMITED")) return new Error("RATE_LIMITED");
+    if (message.includes("NOT_FOUND")) return new Error("NOT_FOUND");
+    if (message.includes("UNAUTHENTICATED")) return new Error("UNAUTHENTICATED");
+    if (message.includes("UNREGISTERED_USER"))
+      return new Error(
+        "Your account has no profile row yet — reload the page and try again.",
+      );
+    if (message.includes("GUEST_ACCOUNT")) return new Error(message);
+    if (message.includes("USER_NOT_FOUND"))
+      return new Error(
+        "No account with that email — the person must sign up first.",
+      );
+    if (message.includes("PGRST116") || message.includes("No rows")) {
       return new Error("NOT_FOUND");
     }
-    return err;
   }
-  return new Error(String(err));
+  if (err instanceof Error) return err;
+  // Last resort: never emit the literal "[object Object]" — JSON round-trip
+  // whatever we got so the user sees the server's actual code/hint.
+  if (typeof err === "object" && err !== null) {
+    try {
+      return new Error(JSON.stringify(err));
+    } catch {
+      /* fall through */
+    }
+  }
+  return new Error(String(err) || "Unknown backend error");
 }

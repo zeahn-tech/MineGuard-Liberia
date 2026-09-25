@@ -566,6 +566,10 @@ create trigger community_reports_guard
 
 -- Profiles: role/scope/operator are admin-writable only. The complete_staff_
 -- profile RPC handles the self-service fields + first-admin bootstrap.
+-- KNOWN DEFECT (fixed by migration 0004_profile_guard_parity.sql): this
+-- original guard also rejected the documented first-admin bootstrap and any
+-- complete_staff_profile field change made by a non-admin — see 0004's header
+-- for the live-proven redesign (SECURITY INVOKER + current_user check).
 create or replace function public.mg_guard_profile_update()
 returns trigger
 language plpgsql

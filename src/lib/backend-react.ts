@@ -24,6 +24,7 @@ import {
   authUserId,
   isAuthReady,
   onAuthStateChangedSupabase,
+  onProfileVersionChanged,
 } from "./supabase";
 import type { QueryHandle } from "./backend";
 
@@ -155,6 +156,13 @@ onAuthStateChangedSupabase((uid) => {
   // change events, so identical states don't loop.
   authEpoch++;
   void uid;
+});
+
+// Profile writes (completeProfile, role assignment) change what auth-bound
+// queries are allowed to see; fold those into the same epoch so scope/role
+// changes re-derive without a sign-out/in cycle.
+onProfileVersionChanged(() => {
+  authEpoch++;
 });
 
 function useAuthEpoch(): number {

@@ -528,11 +528,18 @@ function ProfileForm({ onDone, defaultScope }: { onDone: () => void; defaultScop
       toast.success("Profile saved");
       onDone();
     } catch (e) {
-      toast.error(
-        e instanceof Error
-          ? e.message
-          : "Failed to save profile — please try again.",
-      );
+      const msg = e instanceof Error ? e.message : String(e);
+      const friendly =
+        msg === "FORBIDDEN"
+          ? "You don't have permission to complete this profile. Contact a program administrator."
+          : msg === "UNAUTHENTICATED"
+            ? "Your session has expired — please sign in again."
+            : msg.startsWith("Your account has no profile row")
+              ? msg
+              : msg.includes("row-level security") || msg.includes("42501")
+                ? "Server rejected the profile update (permission boundary)."
+                : msg || "Failed to save profile — please try again.";
+      toast.error(friendly);
     } finally {
       setSaving(false);
     }
