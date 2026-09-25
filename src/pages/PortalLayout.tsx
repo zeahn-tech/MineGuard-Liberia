@@ -528,7 +528,11 @@ function ProfileForm({ onDone, defaultScope }: { onDone: () => void; defaultScop
       toast.success("Profile saved");
       onDone();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      // Normalized via backendError(), but belt-and-braces: a non-Error
+      // rejection (plain PostgREST object, network failure, …) stringifies as
+      // "[object Object]" — never show that to the user.
+      const raw = e instanceof Error ? e.message : String(e);
+      const msg = !raw || raw === "[object Object]" ? "" : raw;
       const friendly =
         msg === "FORBIDDEN"
           ? "You don't have permission to complete this profile. Contact a program administrator."
@@ -538,7 +542,11 @@ function ProfileForm({ onDone, defaultScope }: { onDone: () => void; defaultScop
               ? msg
               : msg.includes("row-level security") || msg.includes("42501")
                 ? "Server rejected the profile update (permission boundary)."
-                : msg || "Failed to save profile — please try again.";
+                : msg.includes("UNREGISTERED_USER")
+                  ? "Your account has no profile row yet — reload the page and try again."
+                  : msg.includes("GUEST_ACCOUNT")
+                    ? "Guest accounts cannot complete a staff profile. Sign up with an email account."
+                    : msg || "Failed to save profile — please try again.";
       toast.error(friendly);
     } finally {
       setSaving(false);

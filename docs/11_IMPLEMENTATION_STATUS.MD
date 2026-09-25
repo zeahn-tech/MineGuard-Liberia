@@ -1,13 +1,74 @@
 # 11 — Implementation Status
 
-**Session:** Forensic re-audit remediation + mechanical verification (clean-apply
-migration suite, RLS role matrix, always-on live anon probe)
+**Session:** Live hotfix — `complete_staff_profile` WHERE-less UPDATE (profile
+completion `[object Object]` error)
 **Date:** 2026-09-25
 **Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (57 passing
 across 5 files, including 4 probes against the live Supabase project using only
-the public anon key) · live project additionally probed via the Management API
-(policies and function security attributes match the hardened state)
+the public anon key) · live function verified by Management API query after the
+fix, and end-to-end as a signed-in test account (HTTP 204 on the exact RPC
+payload the app sends); test artifacts fully reverted (see below)
 
+## This session [2026-09-25 — live hotfix: profile completion failing]
+
+**Reported defect:** completing the staff profile in the portal showed
+`[object Object]` and the profile never saved.
+
+**Root cause (live deployment, confirmed by reproduction):** the live
+`public.complete_staff_profile` function (a divergent version of the one in
+0001) performed its `update public.profiles set …` with **no WHERE clause**,
+relying on the caller's RLS visibility to target the row. The project database
+has the `safeupdate` extension enabled, which rejects any UPDATE without a
+WHERE clause with SQLSTATE `21000` ("UPDATE requires a WHERE clause"). The
+defect lived entirely in the live function body — the repository lineage
+(0001, and the corrected version now applied live) always had `where id =
+auth.uid()`. It reproduced exactly with the client's own payload
+(`p_job_title/p_organization/p_scope/p_county/p_operator_name`), signed in.
+
+**Fix applied to the live project** (Management API SQL endpoint, token from
+the owner): function recreated with identical signature and behavior — same
+guest-account refusal, same first-admin bootstrap via the `role is not null`
+probe, same audit entry — plus two hardening changes:
+
+1. `where id = auth.uid()` on the UPDATE (the fix; satisfies safeupdate and
+   makes the row target explicit rather than RLS-incidental);
+2. `if not found then raise exception 'UNREGISTERED_USER' end if;` after the
+   UPDATE, so a signed-in account without a profile row fails loudly with the
+   message the UI already maps to friendly text, instead of silently doing
+   nothing.
+
+A mechanical scan of **all 23 functions in schema public** for other
+WHERE-less UPDATE/DELETE statements found none — this was the only instance
+of the defect class (`provision_user_by_email` uses `ON CONFLICT DO UPDATE`
+and `triage_community_report` targets rows explicitly; neither is subject to
+safeupdate).
+
+**Verification:** after the hotfix the exact RPC call returned HTTP 204 and
+the profile row showed `profile_complete = true`. The signed-in test account
+used for verification claimed the one-time first-admin bootstrap as a side
+effect; both diagnostic auth users and their audit_log entry were then
+deleted from the live project, restoring the pre-test state (the real
+account, which has not yet completed its profile, will bootstrap as first
+admin on its first completion, as documented).
+
+**Client hardening (same session):** `ProfileForm` in
+`src/pages/PortalLayout.tsx` now filters `[object Object]`/empty messages to
+a generic fallback and maps the `UNREGISTERED_USER` and `GUEST_ACCOUNT`
+tokens to friendly text, so no backend rejection can render the literal
+string `[object Object]` in the profile toast again.
+
+**Known limitation of this fix:** the repository migrations and the live
+project remain two lineages (see the 2026-09-24/25 audit notes below). This
+hotfix was applied directly to the live function; the repository lineage was
+already correct, so no migration file is added. If the live project is ever
+rebuilt from migrations, the corrected body is the one in
+0001 + this session's `not found` guard semantics.
+
+---
+
+**Prior session:** Forensic re-audit remediation + mechanical verification (clean-apply
+migration suite, RLS role matrix, always-on live anon probe)
+**Date:** 2026-09-25
 ## This session [2026-09-25 — audit verification, remediation, and one new defect]
 
 The 2026-09-24 forensic re-audit (preserved below) found two CRITICAL defects.
