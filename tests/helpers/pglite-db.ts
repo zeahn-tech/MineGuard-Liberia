@@ -154,8 +154,48 @@ function lit(v: unknown): string {
 }
 
 async function runIn(db: PGlite, sql: string, params?: unknown[]): Promise<Row[]> {
-  const res = await db.query(sql, params);
-  return res.rows as Row[];
+  // Every statement runs inside its own SAVEPOINT: tests are allowed to
+  // catch an expected RLS/guard denial and keep going, and without this the
+  // aborted transaction would poison every later statement in the block
+  // ("current transaction is aborted").
+  //
+  // Transaction/session-control statements (BEGIN/COMMIT/ROLLBACK/SAVEPOINT,
+  // SET/RESET, …) pass through untouched: wrapping them in a savepoint would
+  // either fail outright or corrupt the transaction state that `withRole`
+  // deliberately manages itself (e.g. a test's own `rollback` in `finally`).
+  const head = sql
+    .trim()
+    .replace(/;+\s*$/, "")
+    .split(/\s/)[0]
+    ?.toUpperCase();
+  if (
+    head &&
+    [
+      "BEGIN",
+      "COMMIT",
+      "END",
+      "ROLLBACK",
+      "SAVEPOINT",
+      "RELEASE",
+      "SET",
+      "RESET",
+      "PREPARE",
+      "DEALLOCATE",
+    ].includes(head)
+  ) {
+    await db.exec(sql);
+    return [];
+  }
+
+  await db.exec("savepoint mg_sp");
+  try {
+    const res = await db.query(sql, params);
+    await db.exec("release savepoint mg_sp");
+    return res.rows as Row[];
+  } catch (e) {
+    await db.exec("rollback to savepoint mg_sp").catch(() => {});
+    throw e;
+  }
 }
 
 /**
@@ -194,6 +234,20 @@ export function asUser<T>(
   fn: (run: Runner) => Promise<T>,
 ): Promise<T> {
   return withRole("authenticated", { sub: userId, role: "authenticated" }, fn);
+}
+
+/**
+ * Affected-row count for `INSERT/UPDATE/DELETE … RETURNING 1`. A write that
+ * RLS or a guard trigger rejects touches ZERO rows — `db.query` then returns
+ * an empty rows array, which is a legitimate denial signal (not a crash), so
+ * it maps to 0. `withRole`'s always-rollback still applies.
+ */
+export async function affectedRows(
+  run: Runner,
+  sql: string,
+): Promise<number> {
+  const rows = await run(sql);
+  return rows.length;
 }
 
 // ---------------------------------------------------------------------------

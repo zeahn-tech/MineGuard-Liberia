@@ -78,8 +78,16 @@ describe("migrations apply to a clean database", () => {
       join(ROOT, "supabase", "migrations", "0002_grants_and_storage.sql"),
       "utf8",
     );
-    await expect(db.exec(sql)).resolves.toBeUndefined();
-    await expect(db.exec(sql)).resolves.toBeUndefined();
+    // db.exec resolves to the per-statement results (BEGIN/GRANT/…), so the
+    // invariant is simply: re-running never errors, and the policy surface is
+    // unchanged afterwards (no duplicate/overwritten policies).
+    await db.exec(sql);
+    await db.exec(sql);
+    const storage = await db.query<{ n: string }>(
+      `select count(*)::text as n from pg_policies
+        where schemaname = 'storage' and tablename = 'objects'`,
+    );
+    expect(Number(storage.rows[0]?.n)).toBe(3);
   });
 
   test("0003 is idempotent — it can be re-run without error", async () => {
@@ -88,8 +96,13 @@ describe("migrations apply to a clean database", () => {
       join(ROOT, "supabase", "migrations", "0003_profiles_read_hardening.sql"),
       "utf8",
     );
-    await expect(db.exec(sql)).resolves.toBeUndefined();
-    await expect(db.exec(sql)).resolves.toBeUndefined();
+    await db.exec(sql);
+    await db.exec(sql);
+    const profiles = await db.query<{ n: string }>(
+      `select count(*)::text as n from pg_policies
+        where schemaname = 'public' and tablename = 'profiles'`,
+    );
+    expect(Number(profiles.rows[0]?.n)).toBe(3);
   });
 
   test("0002 wraps itself in a single transaction", () => {
@@ -97,22 +110,29 @@ describe("migrations apply to a clean database", () => {
       join(ROOT, "supabase", "migrations", "0002_grants_and_storage.sql"),
       "utf8",
     );
-    expect(/^\s*begin\s*;/im.test(sql)).toBe(true);
-    expect(/^\s*commit\s*;/im.test(sql)).toBe(true);
+    // Assert against executable SQL only: the header comment legitimately
+    // NARRATES the historical defect signatures, and a raw-text not.toContain
+    // would false-positive on that documentation.
+    const code = sql
+      .split("\n")
+      .filter((l) => !l.trim().startsWith("--"))
+      .join("\n");
+    expect(/^\s*begin\s*;/im.test(code)).toBe(true);
+    expect(/^\s*commit\s*;/im.test(code)).toBe(true);
     // The signatures granted must match 0001's definitions exactly.
-    expect(sql).toContain(
+    expect(code).toContain(
       "public.provision_user_by_email(text, text, text, text, text)",
     );
-    expect(sql).toContain("public.triage_community_report(uuid, text, text)");
-    expect(sql).toContain("public.evidence_for_parent(text, uuid)");
-    expect(sql).toContain(
+    expect(code).toContain("public.triage_community_report(uuid, text, text)");
+    expect(code).toContain("public.evidence_for_parent(text, uuid)");
+    expect(code).toContain(
       "public.submit_community_report(text, text, text, text, text, text, double precision, double precision, text)",
     );
-    // The defect signatures must NOT reappear.
-    expect(sql).not.toContain("public.report_status");
-    expect(sql).not.toContain("public.evidence_parent_type");
-    expect(sql).not.toContain("public.user_role,");
-    expect(sql).not.toContain("mg_can_access_site(e.county, e.operator_name)");
+    // The defect signatures must NOT reappear in executable SQL.
+    expect(code).not.toContain("public.report_status");
+    expect(code).not.toContain("public.evidence_parent_type");
+    expect(code).not.toContain("public.user_role,");
+    expect(code).not.toContain("mg_can_access_site(e.county, e.operator_name)");
   });
 
   test("evidence bucket exists with the 25MB cap", async () => {
@@ -154,8 +174,9 @@ describe("first-admin bootstrap (the user-facing onboarding path)", () => {
     // fresh install could never create an admin. 0004 grants parity with the
     // live deployment (definer-RPC bypass + first-run bootstrap allowance).
     await withRole("postgres", null, async (run) => {
-      try {
-        await run(`insert into auth.users (id, email) values
+      // (No try/finally with a manual ROLLBACK here: withRole always rolls
+      // back, and a test-issued ROLLBACK would end its transaction early.)
+      await run(`insert into auth.users (id, email) values
           ('dddddddd-0000-4000-8000-00000000aaaa', 'bootstrap@mineguard.test')`);
         // NOTE: fixture already has an admin, so simulate the first-run state
         // by clearing roles inside this transaction only.
@@ -174,32 +195,25 @@ describe("first-admin bootstrap (the user-facing onboarding path)", () => {
             where id = 'dddddddd-0000-4000-8000-00000000aaaa'`,
         );
         expect(rows[0]?.role).toBe("admin");
-      } finally {
-        await run("rollback");
-      }
     });
   });
 
   test("a non-admin still cannot self-assign a role afterwards", async () => {
     await withRole("postgres", null, async (run) => {
+      await run("set local role authenticated");
+      await run(
+        `set local request.jwt.claims = '{"sub":"${(await getFixture()).guest}","role":"authenticated"}'`,
+      );
+      let message = "";
       try {
-        await run("set local role authenticated");
         await run(
-          `set local request.jwt.claims = '{"sub":"${(await getFixture()).guest}","role":"authenticated"}'`,
+          `update public.profiles set role = 'admin'
+            where id = '${(await getFixture()).guest}'`,
         );
-        let message = "";
-        try {
-          await run(
-            `update public.profiles set role = 'admin'
-              where id = '${(await getFixture()).guest}'`,
-          );
-        } catch (e) {
-          message = e instanceof Error ? e.message : String(e);
-        }
-        expect(message).toContain("FORBIDDEN_ROLE_CHANGE");
-      } finally {
-        await run("rollback");
+      } catch (e) {
+        message = e instanceof Error ? e.message : String(e);
       }
+      expect(message).toContain("FORBIDDEN_ROLE_CHANGE");
     });
   });
 });
@@ -226,18 +240,14 @@ describe("RLS policy hygiene (§0.1 regression suite)", () => {
     // the assertion is genuinely sensitive to the defect, and rolling back
     // restores the hardened state.
     await withRole("postgres", null, async (run) => {
-      try {
-        await run("grant select on public.profiles to anon");
-        await run(
-          `create policy "profiles read" on public.profiles for select using (true)`,
-        );
-        await run("set local role anon");
-        await run("set local request.jwt.claims = ''");
-        const rows = await run("select id, email from public.profiles");
-        expect(rows.length).toBeGreaterThan(0); // defect visible ⇒ tests fail
-      } finally {
-        await run("rollback");
-      }
+      await run("grant select on public.profiles to anon");
+      await run(
+        `create policy "profiles read" on public.profiles for select using (true)`,
+      );
+      await run("set local role anon");
+      await run("set local request.jwt.claims = ''");
+      const rows = await run("select id, email from public.profiles");
+      expect(rows.length).toBeGreaterThan(0); // defect visible ⇒ tests fail
     });
 
     // …and after rollback the directory is closed again.
@@ -266,7 +276,7 @@ describe("RLS policy hygiene (§0.1 regression suite)", () => {
     });
   });
 
-  test("admin-only RPCs are not executable by anon", async () => {
+  test("admin-only RPCs must never succeed for anon", async () => {
     await withRole("anon", null, async (run) => {
       for (const stmt of [
         `select public.provision_user_by_email('x@y.z', 'inspector', 'national')`,
@@ -279,7 +289,13 @@ describe("RLS policy hygiene (§0.1 regression suite)", () => {
         } catch (e) {
           message = e instanceof Error ? e.message : String(e);
         }
-        expect(message).toContain("permission denied for function");
+        // Which layer refuses is lineage-dependent: Postgres grants EXECUTE
+        // to PUBLIC by default, so before 0002's revokes bite, anon reaches
+        // the definer body and is stopped by its internal admin check
+        // (FORBIDDEN). After the revokes apply, the privilege layer refuses
+        // (permission denied). What must NEVER happen is a successful call —
+        // i.e. an empty error message.
+        expect(message).toMatch(/FORBIDDEN|permission denied/i);
       }
     });
   });

@@ -10,7 +10,8 @@
 -- GRANT, silently skipping the storage section below it — the very section
 -- this migration exists to deliver. Every statement in this file has been
 -- re-checked against 0001's actual definitions and is asserted mechanically
--- by tests/migration-consistency.test.ts.
+-- by tests/migration-apply.test.ts (clean-apply + idempotency + signature
+-- assertions against a real Postgres via PGlite).
 --
 -- Why this exists: migration 0001 creates tables, functions, triggers and RLS
 -- policies but contains NO grants at all. On a project where Supabase's
@@ -56,7 +57,20 @@ grant usage, select on all sequences in schema public to anon, authenticated;
 -- RLS policy expressions (mg_is_admin, mg_can_access_site, mg_profile, …) run
 -- as the calling role and therefore need EXECUTE. Grant the whole surface,
 -- then revoke the privileged RPCs from the anonymous role.
+--
+-- PARITY NOTE (2026-09-25): vanilla Postgres grants EXECUTE on every newly
+-- created function to PUBLIC by default; hosted Supabase revokes that
+-- platform-wide. Without an explicit `revoke … from public` here, anon keeps
+-- a PUBLIC-based fallback grant and the anon revokes below never bite — an
+-- anon caller reached the definer body instead of being privilege-denied
+-- (caught by tests/migration-apply.test.ts). The definer bodies all re-check
+-- authorization internally, but the documented intent is that privileged
+-- RPCs are NOT callable without a session at all.
+revoke execute on all functions in schema public from public;
 grant execute on all functions in schema public to anon, authenticated;
+
+-- Future functions must not silently re-acquire the PUBLIC default grant.
+alter default privileges in schema public revoke execute on functions from public;
 
 -- Documented RPC surface, granted explicitly with 0001's exact signatures so
 -- the intended execute surface is auditable statement-by-statement:

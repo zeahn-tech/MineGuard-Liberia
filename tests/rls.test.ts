@@ -19,6 +19,7 @@
 
 import { beforeAll, describe, expect, test } from "bun:test";
 import {
+  affectedRows,
   getFixture,
   withRole,
   type Runner,
@@ -32,10 +33,15 @@ async function count(run: Runner, sql: string): Promise<number> {
 }
 
 /** Runs `sql`, returning the number of rows it affected/returned; a denial
- *  (RLS 42501 or a missing privilege) is reported as -1. */
+ *  (RLS 42501 or a missing privilege) is reported as -1. Handles both scalar
+ *  aggregate queries (`select count(*) …` — one row, one column) and bare
+ *  row queries (`select 1 …` — the row count itself is the signal; an empty
+ *  result means zero visible rows). */
 async function countOrDenied(run: Runner, sql: string): Promise<number> {
   try {
-    return await count(run, sql);
+    const rows = await run(sql);
+    if (rows.length === 0) return 0;
+    return Number(Object.values(rows[0])[0]);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (
@@ -208,7 +214,7 @@ describe("operator (tenant-locked)", () => {
         ).toBe(0);
 
         // Direct update against site-B row: 0 rows touched (RLS USING).
-        const updated = await count(
+        const updated = await affectedRows(
           run,
           `update public.findings set status = 'acknowledged'
             where id = '${f.findingB}' returning 1`,
@@ -280,7 +286,7 @@ describe("operator (tenant-locked)", () => {
       { sub: f.opA, role: "authenticated" },
       async (run) => {
         expect(
-          await count(run, `delete from public.sites where id = '${f.siteA}' returning 1`),
+          await affectedRows(run, `delete from public.sites where id = '${f.siteA}' returning 1`),
         ).toBe(0);
       },
     );
@@ -340,13 +346,13 @@ describe("national supervisor (staff)", () => {
       { sub: (await getFixture()).national, role: "authenticated" },
       async (run) => {
         expect(
-          await count(
+          await affectedRows(
             run,
             `update public.audit_log set summary = 'tampered' returning 1`,
           ),
         ).toBe(0);
         expect(
-          await count(run, `delete from public.audit_log returning 1`),
+          await affectedRows(run, `delete from public.audit_log returning 1`),
         ).toBe(0);
       },
     );
@@ -375,10 +381,10 @@ describe("admin", () => {
       async (run) => {
         // Either RLS silently matches nothing (no delete policy) or the
         // sites_guard trigger raises — a delete must never succeed.
-        const deleted = await countOrDenied(
+        const deleted = await affectedRows(
           run,
           `delete from public.sites where id = '${f.siteA}' returning 1`,
-        );
+        ).catch(() => -1);
         expect(deleted).toBeLessThanOrEqual(0);
       },
     );
@@ -444,7 +450,7 @@ describe("evidence storage policies", () => {
       { sub: f.opB, role: "authenticated" },
       async (run) => {
         expect(
-          await count(
+          await affectedRows(
             run,
             `select 1 from storage.objects where bucket_id = 'evidence' and name = '${path}'`,
           ),
@@ -486,7 +492,7 @@ describe("evidence storage policies", () => {
       { sub: f.opB, role: "authenticated" },
       async (run) => {
         expect(
-          await count(
+          await affectedRows(
             run,
             `update storage.objects set name = 'hijacked'
               where bucket_id = 'evidence' and name = '${path}' returning 1`,
@@ -503,7 +509,7 @@ describe("evidence storage policies", () => {
       { sub: f.opA, role: "authenticated" },
       async (run) => {
         expect(
-          await count(
+          await affectedRows(
             run,
             `delete from storage.objects
               where bucket_id = 'evidence'

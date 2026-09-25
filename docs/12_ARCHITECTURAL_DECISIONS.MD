@@ -2,6 +2,34 @@
 
 Short records of the significant choices made in this build, with rationale.
 
+## ADR-11 — Explicit `EXECUTE` management on the public schema (no PUBLIC fallback) [2026-09-25]
+**Decision:** `0002_grants_and_storage.sql` revokes `EXECUTE` on all functions
+in schema `public` from `PUBLIC` before granting it to `anon`/`authenticated`,
+and sets default privileges so future functions never silently re-acquire the
+Postgres default `EXECUTE … TO PUBLIC` grant. Privileged RPCs additionally
+revoke from `anon`.
+**Rationale:** Hosted Supabase revokes the Postgres-wide `EXECUTE TO PUBLIC`
+default platform-wide; vanilla Postgres (the repository migration lineage,
+tested via PGlite) does not. Without the explicit revoke, an anon caller
+reached the body of `complete_staff_profile` instead of being privilege-denied
+— caught by the clean-apply suite; every definer body re-checks authorization
+internally, so the exposure was defense-in-depth-only, but the documented
+intent is that privileged RPCs are not callable without a session at all.
+Which layer refuses is lineage-dependent (privilege layer vs. body check);
+the tested invariant is that anon calls **never succeed**.
+
+## ADR-10 — Forensic remediation verified at both lineages [2026-09-25]
+**Decision:** The two CRITICAL defects from the 2026-09-24 forensic re-audit
+(docs/11 §0.1 world-readable `profiles`, §0.2 broken migration 0002) are fixed
+in the repository lineage (`0003`, corrected `0002`) and were verified as
+already applied to the live Supabase project (Management API policy probe +
+the always-on live anon-key probe suite `tests/live-anon.test.ts`).
+**Rationale:** The repository migrations describe the schema lineage; the live
+project was provisioned earlier and diverged. Fixing only one lineage would
+leave the other exploitable; verifying both closes the gap. The live probe
+suite re-runs on every test pass, so regression detection does not depend on
+manual audits.
+
 ## ADR-09 — Backend migrated from Convex to Firebase [2026-09]
 **Decision:** Replace Convex with Firebase (Firestore + Firebase Auth + Cloud
 Storage + Security Rules) at the project owner's request; the project

@@ -1,5 +1,146 @@
 # 11 — Implementation Status
 
+**Session:** Forensic re-audit remediation + mechanical verification (clean-apply
+migration suite, RLS role matrix, always-on live anon probe)
+**Date:** 2026-09-25
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (57 passing
+across 5 files, including 4 probes against the live Supabase project using only
+the public anon key) · live project additionally probed via the Management API
+(policies and function security attributes match the hardened state)
+
+## This session [2026-09-25 — audit verification, remediation, and one new defect]
+
+The 2026-09-24 forensic re-audit (preserved below) found two CRITICAL defects.
+This session closed them, verified the closure at BOTH schema lineages
+(repository migrations and the divergent live project), and found one further
+defect while doing so. Per §23 (No False Completion), the honest bottom line is
+unchanged: the platform is materially closer to deployable, but still requires
+the owner-side steps listed under "Remaining known gaps" before real government
+or operator data goes anywhere near it.
+
+### Verification of the two CRITICAL findings
+
+- **§0.1 world-readable `profiles` — CONFIRMED live, NOW CLOSED.** The live
+  project originally carried `"profiles read" … for select using (true)` with
+  no role restriction: with the published anon key, zero-authentication REST
+  calls returned the full staff/operator directory (emails, roles, counties).
+  Fixed in the repository lineage by **`0003_profiles_read_hardening.sql`**
+  (canonical self-or-admin SELECT, self INSERT, self-or-admin UPDATE, all `to
+  authenticated`, plus a hard `REVOKE ALL … FROM anon` so a future permissive
+  policy cannot re-expose the directory). **Verified applied on the live
+  project** via Management API probe (exactly the three canonical policies,
+  all role-restricted) and by `tests/live-anon.test.ts` (anonymous REST probe:
+  profiles is privilege-denied 401, not merely filtered; every sensitive
+  table returns zero rows; the public meta/report_tracking mirrors the landing
+  and tracking pages need stay readable).
+- **§0.2 broken `0002_grants_and_storage.sql` — CONFIRMED, NOW CORRECTED.**
+  The original file referenced types and signatures that do not exist in 0001
+  (`report_status`, `evidence_parent_type`, enum-typed RPC params, a
+  two-argument `mg_can_access_site` in the storage read policy) and ran
+  without a transaction — a clean apply would halt mid-file and silently skip
+  the storage section. The corrected file runs in one atomic transaction,
+  matches 0001's actual signatures, drops stale policy variants before
+  recreating them, and is idempotent. The repository lineage is now verified
+  mechanically: **`tests/migration-apply.test.ts` applies every file under
+  `supabase/migrations/` against a completely empty real Postgres** (PGlite,
+  with Supabase platform objects stubbed) and fails on any statement error.
+- **Live-database remediation status.** The live project had already received
+  the §0.1 policy fix and the profile-guard parity fix (0004) before this
+  session's audit pass; the Management API probe confirmed both (policies
+  above; `mg_guard_profile_update` SECURITY INVOKER + definer
+  `mg_any_profile_role` bootstrap probe present). `0002`'s grants/storage
+  section is equivalently satisfied on the live project through Supabase's
+  default privilege wiring plus ad-hoc fixes; repository migrations remain the
+  authoritative lineage for fresh deployments.
+
+### New defect found and fixed this session
+
+- **[FIXED] PUBLIC EXECUTE fallback made anon revokes toothless on the
+  repository lineage (ADR-11).** Vanilla Postgres grants `EXECUTE` on every
+  new function to `PUBLIC` by default; hosted Supabase revokes that
+  platform-wide, and the old `0002` only revoked from `anon` — so on the repo
+  lineage anon kept a PUBLIC-based grant and the revokes never bit (an anon
+  caller reached the body of `complete_staff_profile`, surfacing
+  `UNREGISTERED_USER` instead of a denial; caught by the new suite). Every
+  definer body re-checks authorization internally, so no live exposure
+  resulted — but the documented intent is that privileged RPCs are not
+  callable without a session at all. `0002` now revokes `EXECUTE … FROM
+  PUBLIC` schema-wide before granting to `anon, authenticated`, and sets
+  default privileges so future functions never silently re-acquire the
+  default. Which layer refuses remains lineage-dependent; the tested
+  invariant is that anon calls never succeed.
+- **[FIXED, found by the new suite] First-admin bootstrap dead-end on the
+  repository lineage.** Repo-lineage 0001's `mg_guard_profile_update`
+  rejected every role/scope transition by a non-admin — including the
+  documented first-admin claim — so a fresh install could never create an
+  administrator. **`0004_profile_guard_parity.sql`** brings the repo lineage
+  to the live-proven design: SECURITY INVOKER guard (so the `current_user`
+  check genuinely distinguishes direct updates from definer-RPC updates) plus
+  a first-run bootstrap allowance (while no profile holds a role, the first
+  signed-in account may claim admin, via the RLS-immune definer probe
+  `mg_any_profile_role`). Regression tests assert both the bootstrap path and
+  that later self-escalation still raises `FORBIDDEN_ROLE_CHANGE`.
+
+### Verification infrastructure (new)
+
+- **`tests/helpers/pglite-db.ts`** — a real in-process Postgres (PGlite) with
+  Supabase platform stubs (roles, `auth.uid()`/`auth.role()` reading the JWT
+  GUC, storage schema + `foldername()`, realtime publication), auto-discovery
+  and ordered application of every migration file, a deterministic six-account
+  fixture (admin, two operators, every-scoped staff, role-less guest), and a
+  `withRole()` helper that impersonates any role with any JWT claims inside a
+  transaction that always rolls back.
+- **`tests/migration-apply.test.ts`** (14 tests) — clean-apply of all
+  migrations, idempotency of 0002/0003, atomic-transaction and signature
+  assertions (matched against executable SQL only, not comments), storage
+  bucket/policy surface, first-admin bootstrap, §0.1 regression hygiene
+  (including a sensitivity proof that re-introducing the 0001 defect is
+  detected), and the anon-RPC never-succeeds invariant.
+- **`tests/rls.test.ts`** (21 tests) — the per-role allow/deny matrix from doc
+  04: anonymous, guest (authenticated, unassigned), operator (tenant-locked,
+  cross-tenant reads/writes denied), county inspector, national supervisor,
+  admin, and the evidence storage policies (own-namespace upload, tenant-checked
+  reads, owner-only update, no delete path anywhere).
+- **`tests/live-anon.test.ts`** (4 tests) — the always-on regression net for
+  §0.1, running against the real project with only the public anon key.
+- **Test-harness defects fixed en route** (honest log): `count()` crashed on
+  legitimately-empty `UPDATE/DELETE … RETURNING` results (a correct RLS denial
+  looks like zero rows — new `affectedRows()` helper); idempotency tests
+  asserted `exec()` resolves to `undefined` (it resolves to per-statement
+  results); a signature assertion false-positived on 0002's explanatory header
+  comment (assertions now run on executable SQL only); redundant test-issued
+  `ROLLBACK`s inside `withRole` corrupted transaction state (harness owns the
+  transaction); `countOrDenied` mishandled bare row queries with empty
+  results.
+
+### Directive §5 classification (this session's scope)
+
+- Database/RLS authorization model, evidence storage policies, audit-log
+  append-only, community-report rate limit, public stats mirror, offline
+  queue, tenant isolation — **IMPLEMENTED** (verified by test where noted).
+- First-admin bootstrap — **IMPLEMENTED** (repo lineage via 0004; live lineage
+  pre-existing), with regression tests.
+- Scheduled `refresh_public_stats`, per-source rate limiting, camera-capture
+  UX, operator portal, evidence URL revocation — **PLANNED** (unchanged).
+- Government adoption, official datasets/integrations — **REQUIRES GOVERNMENT
+  CONFIRMATION** (unchanged; nothing fabricated).
+
+### Remaining known gaps (honest, this session's delta)
+
+1. The live project was provisioned from a divergent, earlier lineage. It is
+   verified hardened where it matters (profiles policies, guard design), but a
+   fresh deployment from `supabase/migrations/*.sql` remains the canonical,
+   fully-tested path (docs/03, docs/14). Running the full migration set
+   against the live project is an owner decision for a maintenance window.
+2. Test coverage of the app data layer (`src/lib/backend.ts`) still lags the
+   database layer: the suites verify SQL/RLS deeply, not the HTTP edge's
+   error-shaping (doc 13 planned next step).
+3. Everything previously listed under the 2026-09-24 entry's gaps that has not
+   been closed above remains open (per-source rate limiting, camera UX,
+   operator portal, scheduled stats refresh, signed-URL revocation).
+
+# Prior session log
+
 **Session:** Supabase backend migration (Firebase → Supabase, storage-upgrade
 constraint) + authoritative database schema
 **Date:** 2026-09-24
@@ -71,6 +212,90 @@ in the Supabase SQL editor by the project owner (see setup steps below)
    writes; a scheduled/cron variant is planned so externally-written rows are
    also counted.
 6. A leaked 1h signed evidence URL remains valid until expiry.
+
+---
+
+# Forensic re-audit [2026-09-24 — as drafted; findings verified and closed 2026-09-25]
+
+**Audit date:** 2026-09-24 (second-pass forensic audit)
+**Prior audit:** 2026-09-22, against the Firebase-backed codebase.
+**What changed between audits:** the project owner (or a prior session)
+re-platformed the entire backend from Firebase to **Supabase** (Postgres +
+RLS), added `supabase/migrations/0001_initial_schema.sql` and
+`0002_grants_and_storage.sql`, wired evidence attachment into all three detail
+pages, extended the offline queue to incidents/observations, and added the
+project's first real test files (`bun:test`). This audit verifies those claims
+line-by-line against the actual code and SQL rather than against the project's
+own changelog, and classifies every Master Directive clause per §5
+(IMPLEMENTED / PARTIALLY IMPLEMENTED / PLANNED / PROPOSED / UNKNOWN /
+REQUIRES GOVERNMENT CONFIRMATION).
+
+**Overall verdict at audit time: NOT PRODUCTION READY — and two
+new/undocumented CRITICAL defects were found that the project's own docs and
+README did not mention.** Real progress had been made (tenant isolation on
+findings/corrective actions/evidence was genuinely fixed at the RLS layer;
+evidence upload finally had field UI; a first test suite existed). But that
+session had also shipped a second migration file (`0002_grants_and_storage.sql`)
+that was not mentioned anywhere in the documentation, contained SQL referencing
+non-existent types and function signatures, and the schema had a publicly
+world-readable `profiles` table that no prior document flagged. Per Directive
+§23 ("No False Completion"), the honest position was: a materially better
+codebase than the Firebase-era one, and still not something to deploy against
+real government or operator data. (Both CRITICAL defects are now closed and
+verified — see the 2026-09-25 entry at the top of this document.)
+
+## 0. CRITICAL — verify/fix before anything else
+
+### 0.1 [NEW, UNDOCUMENTED] `profiles` table is readable by anyone on the internet, no login required
+
+`supabase/migrations/0001_initial_schema.sql` defined:
+
+```sql
+create policy "profiles read" on public.profiles
+  for select using (true);
+```
+
+with no `to authenticated` role restriction. Postgres RLS policies with no
+role list apply to **`PUBLIC`**, which includes the `anon` role, and the
+grants required for the REST API to function made the combination fully
+exposed: **anyone with the published, public `anon` key — embedded in the
+client bundle by design and not a secret — could run
+`supabase.from('profiles').select('*')` from a browser console with zero
+authentication and receive every user's `email`, `name`, `role`, `job_title`,
+`organization`, `county`, and `operator_name`.** On a platform explicitly
+designed for "potential government adoption" and national mining oversight, a
+public directory of every inspector, supervisor, admin, and mining-operator
+contact's name and email is a real information-security and personal-safety
+concern (Directive §7 least privilege and §15 data governance both apply
+squarely here). This was not mentioned in the "remaining known gaps" list of
+any prior document.
+
+**Remediation (2026-09-25):** `0003_profiles_read_hardening.sql` — canonical
+policy set all pinned `to authenticated` (self-or-admin SELECT, self INSERT,
+self-or-admin UPDATE) plus a hard `REVOKE ALL ON profiles FROM anon`; verified
+applied on the live project by Management API probe and the always-on
+`tests/live-anon.test.ts` anon-key suite (profiles is privilege-denied 401,
+not merely filtered). Considered-but-not-adopted narrowing (name+role-only
+view) is documented as a future hardening option for the directory.
+
+### 0.2 [NEW, UNDOCUMENTED] `0002_grants_and_storage.sql` referenced types and function signatures that do not exist
+
+The migration's own header said its purpose was to fix a live
+"permission denied for table" failure mode, but the file itself referenced
+`public.report_status`, `public.evidence_parent_type`, enum-typed parameters
+on `provision_user_by_email`/`submit_community_report`, and a two-argument
+`mg_can_access_site(county, operator)` in the storage read policy — none of
+which exist in `0001_initial_schema.sql` — and ran without a transaction, so a
+clean apply would halt at the first bad statement and silently skip the
+storage section it existed to deliver.
+
+**Remediation (2026-09-25):** corrected in place — one atomic transaction,
+0001-exact signatures, stale policy variants dropped before recreation,
+idempotent — and now verified mechanically by
+`tests/migration-apply.test.ts`, which applies every file under
+`supabase/migrations/` against a completely empty real Postgres and fails on
+any statement error. See ADR-11 for the PUBLIC-EXECUTE parity defect the
+suite then caught inside the corrected file.
 
 ---
 

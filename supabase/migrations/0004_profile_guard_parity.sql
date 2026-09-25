@@ -28,8 +28,10 @@
 --    the table unfiltered instead.
 --
 -- 2. mg_guard_profile_update() — recreated as SECURITY INVOKER with the
---    live-proven body (see also supabase/patches/2026-09-25_* applied to the
---    divergent live deployment).
+--    live-proven body (an equivalent hotfix was applied ad hoc to the
+--    divergent live deployment via the Management API SQL endpoint on
+--    2026-09-25 and verified there — see docs/11 forensic audit; no patch
+--    file was kept in the repository).
 --
 -- SECURITY NOTE: the pre-fix live guard was SECURITY DEFINER *with* the
 -- current_user check — inside a security-definer function current_user is

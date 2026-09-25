@@ -58,6 +58,15 @@ risk documented honestly below.
 
 ## Known gaps [PLANNED / REQUIRES GOVERNMENT CONFIRMATION]
 
+0. **Privileged-RPC execute surface is intent, not guarantee, on old lineages.**
+   Repository migrations (0002, ADR-11) explicitly revoke `EXECUTE` from
+   `PUBLIC`/`anon` on admin RPCs. The live project was provisioned before that
+   revoke existed: anon can *invoke* privileged RPCs there and is stopped by
+   the definer bodies' internal admin checks (verified: `FORBIDDEN`, not
+   success). Every RPC must keep its internal authorization check; a
+   future RPC that relies on the privilege layer alone would be anon-callable
+   on lineages provisioned before 2026-09-25. New deployments from the
+   repository migrations get both layers.
 1. Rate limiting on the public report endpoint. A 30-reports-per-minute global
    rolling bucket is enforced server-side inside the `submit_community_report`
    security-definer RPC (`rate_limits` table, keyed on server time). Honest
