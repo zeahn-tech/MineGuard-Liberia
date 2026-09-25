@@ -3,6 +3,9 @@
 //
 // Reusable attach-photos/files UI for a parent record (inspection, incident,
 // observation). Notes:
+//  - Batch upload: multiple files per dialog, with per-file progress rows
+//    (uploading / uploaded / saved on device / failed). A camera input
+//    (capture="environment") gives one-tap photo capture on mobile.
 //  - Bytes must reach Storage before the metadata doc exists, so an upload while
 //    offline is queued locally (IndexedDB via offline-evidence.ts) and replayed
 //    when connectivity returns. A device-local URI is never a permanent media
@@ -38,6 +41,23 @@ import {
 } from "@/lib/offline-evidence";
 
 const MAX_BYTES = 25 * 1024 * 1024; // mirrored in rules + data layer
+
+/** Per-file progress row inside the attach dialog. */
+type BatchStatus = "pending" | "uploading" | "done" | "queued" | "failed";
+interface BatchItem {
+  key: string;
+  name: string;
+  status: BatchStatus;
+  note?: string;
+}
+
+const BATCH_STATUS_LABEL: Record<BatchStatus, string> = {
+  pending: "Waiting…",
+  uploading: "Uploading…",
+  done: "Uploaded",
+  queued: "Saved on device",
+  failed: "Failed",
+};
 
 /** True when a failure looks like a connectivity problem (retryable) rather
  *  than a policy denial (storage/unauthorized) — only the former is queued. */
@@ -79,7 +99,9 @@ export default function EvidenceSection({
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [caption, setCaption] = useState("");
+  const [batch, setBatch] = useState<BatchItem[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
   // Upload is available to any assigned account (staff or operator on their
   // own site); the backend + rules re-derive scope. Guests never have a role.
   const canUpload = !!user?.role;
@@ -116,59 +138,113 @@ export default function EvidenceSection({
     return () => window.removeEventListener("online", onOnline);
   }, [runSync]);
 
+  const resetDialog = useCallback(() => {
+    setOpen(false);
+    setBatch([]);
+    setCaption("");
+    if (fileRef.current) fileRef.current.value = "";
+    if (cameraRef.current) cameraRef.current.value = "";
+  }, []);
+
   const onUpload = async () => {
-    const file = fileRef.current?.files?.[0];
-    if (!file) {
-      toast.error("Choose a file first.");
+    if (saving) return;
+    const files: File[] = [
+      ...Array.from(fileRef.current?.files ?? []),
+      ...Array.from(cameraRef.current?.files ?? []),
+    ];
+    if (files.length === 0) {
+      toast.error("Choose at least one file first.");
       return;
     }
-    if (file.size > MAX_BYTES) {
-      toast.error("File exceeds the 25MB limit.");
-      return;
-    }
+    // Build the progress rows up front so oversized files show their failure
+    // inline instead of aborting the whole batch.
+    const items: BatchItem[] = files.map((f, i) => ({
+      key: `${i}-${f.name}-${f.size}`,
+      name: f.name,
+      status: f.size > MAX_BYTES ? "failed" : "pending",
+      note: f.size > MAX_BYTES ? "Exceeds 25MB" : undefined,
+    }));
+    setBatch(items);
     setSaving(true);
-    const meta = {
-      fileName: file.name,
-      mimeType: file.type || "application/octet-stream",
-      parentType,
-      parentId,
-      siteId,
-      caption: caption || undefined,
-      capturedAt: Date.now(),
-    };
-    // The upload mutation takes `file`; the local queue stores the same bytes
-    // under `blob`.
-    const reset = () => {
-      setOpen(false);
-      setCaption("");
-      if (fileRef.current) fileRef.current.value = "";
-    };
-    try {
-      if (typeof navigator !== "undefined" && navigator.onLine === false) {
-        await enqueuePendingEvidence({ ...meta, blob: file });
-        toast.info("Saved on device — will upload when back online.");
-        reset();
-      } else {
-        await upload({ ...meta, file });
-        toast.success("Evidence attached");
-        setNonce((n) => n + 1);
-        reset();
+
+    const setStatus = (key: string, status: BatchStatus, note?: string) =>
+      setBatch((prev) =>
+        prev.map((b) => (b.key === key ? { ...b, status, note } : b)),
+      );
+
+    const capturedAt = Date.now();
+    let uploaded = 0;
+    let queued = 0;
+    let failed = items.filter((i) => i.status === "failed").length;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const item = items[i];
+      if (item.status === "failed") continue; // oversized — already marked
+      setStatus(item.key, "uploading");
+      const meta = {
+        fileName: file.name,
+        mimeType: file.type || "application/octet-stream",
+        parentType,
+        parentId,
+        siteId,
+        caption: caption || undefined,
+        capturedAt,
+      };
+      try {
+        if (typeof navigator !== "undefined" && navigator.onLine === false) {
+          // The upload mutation takes `file`; the queue stores bytes as `blob`.
+          await enqueuePendingEvidence({ ...meta, blob: file });
+          setStatus(item.key, "queued");
+          queued++;
+        } else {
+          await upload({ ...meta, file });
+          setStatus(item.key, "done");
+          uploaded++;
+        }
+      } catch (e) {
+        if (isNetworkError(e)) {
+          // Never lose the bytes on a connectivity failure — queue and retry.
+          await enqueuePendingEvidence({ ...meta, blob: file });
+          setStatus(item.key, "queued");
+          queued++;
+        } else {
+          setStatus(
+            item.key,
+            "failed",
+            e instanceof Error ? e.message : "Upload failed",
+          );
+          failed++;
+        }
       }
-      await refreshPending();
-    } catch (e) {
-      if (isNetworkError(e)) {
-        // Never lose the bytes on a connectivity failure — queue and retry.
-        await enqueuePendingEvidence({ ...meta, blob: file });
-        toast.info("Network unavailable — saved on device, will upload automatically.");
-        reset();
-        await refreshPending();
-      } else {
-        toast.error(e instanceof Error ? e.message : "Upload failed");
-      }
-    } finally {
-      setSaving(false);
     }
+
+    if (uploaded > 0) setNonce((n) => n + 1);
+    await refreshPending();
+
+    if (uploaded > 0 && queued === 0 && failed === 0) {
+      toast.success(
+        `${uploaded} file${uploaded > 1 ? "s" : ""} attached`,
+      );
+    } else if (uploaded > 0 || queued > 0) {
+      toast.info(
+        `${uploaded} uploaded, ${queued} saved on device` +
+          (failed > 0 ? `, ${failed} failed` : ""),
+      );
+    } else {
+      toast.error("Upload failed — see the per-file errors above.");
+    }
+
+    // Clear the inputs so a follow-up selection starts fresh; the progress
+    // rows stay visible until the dialog is closed.
+    if (fileRef.current) fileRef.current.value = "";
+    if (cameraRef.current) cameraRef.current.value = "";
+    setSaving(false);
   };
+
+  const batchRunning =
+    saving || batch.some((b) => b.status === "pending" || b.status === "uploading");
+  const batchFinished = batch.length > 0 && !batchRunning;
 
   const total = (evidence?.length ?? 0) + pending.length;
 
@@ -211,7 +287,13 @@ export default function EvidenceSection({
         </ul>
       )}
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog
+        open={open}
+        onOpenChange={(v) => {
+          if (!v) resetDialog();
+          else setOpen(true);
+        }}
+      >
         <DialogContent className="paper">
           <DialogHeader>
             <DialogTitle>Attach evidence</DialogTitle>
@@ -223,22 +305,74 @@ export default function EvidenceSection({
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label>File (max 25MB)</Label>
-              <Input ref={fileRef} type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx" />
+              <Label>Files (max 25MB each)</Label>
+              <Input
+                ref={fileRef}
+                type="file"
+                multiple
+                accept="image/*,video/*,audio/*,.pdf,.doc,.docx"
+                disabled={batchRunning}
+              />
             </div>
             <div className="space-y-1.5">
-              <Label>Caption (optional)</Label>
+              <Label>Camera photo</Label>
+              <Input
+                ref={cameraRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                disabled={batchRunning}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Caption (optional — applies to every selected file)</Label>
               <Input
                 value={caption}
                 onChange={(e) => setCaption(e.target.value)}
                 placeholder="What does this show?"
+                disabled={batchRunning}
               />
             </div>
+            {batch.length > 0 && (
+              <ul className="max-h-44 divide-y divide-border overflow-y-auto border border-border">
+                {batch.map((b) => (
+                  <li
+                    key={b.key}
+                    className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs"
+                  >
+                    <span className="min-w-0 truncate">{b.name}</span>
+                    <span
+                      className={
+                        b.status === "done"
+                          ? "shrink-0 text-emerald-600 dark:text-emerald-400"
+                          : b.status === "failed"
+                            ? "shrink-0 text-destructive"
+                            : b.status === "queued"
+                              ? "shrink-0 text-amber-600 dark:text-amber-400"
+                              : "shrink-0 text-muted-foreground"
+                      }
+                      title={b.note}
+                    >
+                      {b.note ?? BATCH_STATUS_LABEL[b.status]}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={onUpload} disabled={saving}>
-              {saving ? "Uploading…" : "Upload"}
+            <Button variant="outline" onClick={resetDialog} disabled={batchRunning && saving && batch.length === 0}>
+              {batchFinished ? "Close" : "Cancel"}
+            </Button>
+            <Button
+              onClick={batchFinished ? resetDialog : onUpload}
+              disabled={batchRunning && !saving ? true : saving && !batchRunning ? false : saving}
+            >
+              {batchFinished
+                ? "Done"
+                : saving
+                  ? `Uploading…${batch.length > 1 ? ` (${batch.filter((b) => b.status === "done").length}/${batch.length})` : ""}`
+                  : "Upload"}
             </Button>
           </DialogFooter>
         </DialogContent>
