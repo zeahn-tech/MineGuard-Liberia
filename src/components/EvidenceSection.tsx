@@ -361,12 +361,15 @@ export default function EvidenceSection({
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={resetDialog} disabled={batchRunning && saving && batch.length === 0}>
+            {/* While a batch is in flight neither button is actionable: closing
+                mid-upload would orphan the progress rows, and a second Upload
+                click would double-send the same files. */}
+            <Button variant="outline" onClick={resetDialog} disabled={batchRunning}>
               {batchFinished ? "Close" : "Cancel"}
             </Button>
             <Button
               onClick={batchFinished ? resetDialog : onUpload}
-              disabled={batchRunning && !saving ? true : saving && !batchRunning ? false : saving}
+              disabled={batchRunning}
             >
               {batchFinished
                 ? "Done"
