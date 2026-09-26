@@ -103,6 +103,11 @@ update public.profiles set role = 'supervisor', scope = 'national',
 reset role;
 set local request.jwt.claims = '';
 
+-- Registry + workflow records: the site/template write guards check
+-- mg_is_admin(), which reads auth.uid() — so these inserts must run inside
+-- the ADMIN session (the same idiom the shared fixture seed uses).
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"${EDGE_IDS.admin}","role":"authenticated"}';
 insert into public.sites
   (id, code, name, operator_name, mineral_type, county, district, community,
    status, latitude, longitude, created_by) values
@@ -280,12 +285,16 @@ const jsonbCols = new Map<string, Set<string>>();
 async function jsonbColumns(table: string): Promise<Set<string>> {
   const hit = jsonbCols.get(table);
   if (hit) return hit;
-  const rows = await adminSql(
+  // Deliberately NOT adminSql(): execWrite runs inside an already-enqueued
+  // request, and adminSql re-enqueues — a self-deadlock. A read-only catalog
+  // lookup can safely run on the connection outside the request mutex.
+  const db = await getEdgeDb();
+  const res = await db.query(
     `select column_name from information_schema.columns
       where table_schema = 'public' and table_name = '${table.replace(/'/g, "''")}'
         and data_type = 'jsonb'`,
   );
-  const set = new Set(rows.map((r) => String(r.column_name)));
+  const set = new Set(res.rows.map((r) => String((r as Row).column_name)));
   jsonbCols.set(table, set);
   return set;
 }
@@ -322,6 +331,7 @@ class WireQuery {
   private orderSql = "";
   private limitSql = "";
   private values: Record<string, unknown> | null = null;
+  private isUpdate = false;
   private onConflictCols: string[] | null = null;
   private ignoreDup = false;
   private wantSingle = false;
@@ -371,6 +381,7 @@ class WireQuery {
 
   update(values: Record<string, unknown>) {
     this.values = values;
+    this.isUpdate = true;
     return this;
   }
 
@@ -431,6 +442,24 @@ class WireQuery {
         return { data: rows, error: null };
       }
 
+      if (this.isUpdate) {
+        if (!this.wheres.length) {
+          return { data: null, error: { message: "BRIDGE_UNSUPPORTED_UPDATE_WITHOUT_WHERE" } };
+        }
+        const assignments: string[] = [];
+        for (const c of Object.keys(this.values!)) {
+          assignments.push(`${c} = ${await typedValue(this.table, c, this.values![c])}`);
+        }
+        const rows = await wireQuery(
+          `update public.${this.table} set ${assignments.join(", ")} where ${this.wheres.join(" and ")} returning 1 as updated`,
+        );
+        // PostgREST semantics: an UPDATE matched to zero rows (stale WHERE or
+        // RLS-visibility) is a 200 with an empty array, NOT an error —
+        // backend.ts only checks `error`. Guard-trigger violations RAISE and
+        // surface through the catch below, exactly like the real wire.
+        return { data: rows, error: null };
+      }
+
       const cols = Object.keys(this.values!);
       const colList = cols.join(", ");
       const valSqls: string[] = [];
@@ -467,11 +496,12 @@ class WireQuery {
         );
         if (rows.length === 0) {
           // RLS/guard-denied insert = zero rows under PostgREST: an error,
-          // never fake success.
+          // never fake success. Message carries the RLS wording so
+          // backendError() shapes it to the FORBIDDEN token like the wire.
           return {
             data: null,
             error: {
-              message: "insert rejected by policy (RLS or guard): zero rows returned",
+              message: "new row violates row-level security policy for table \"" + this.table + "\" (insert rejected by policy)",
               code: "42501",
             },
           };
@@ -522,16 +552,41 @@ async function execRpc(
   }
   const parts = Object.keys(payload).map((k) => `${k} => ${lit(payload[k])}`);
   try {
+    // PostgREST returns setof functions as an ARRAY of rows and scalar
+    // returns as a single value. In a bare target list Postgres expands a
+    // setof-composite into N rows of composite values, which would collapse
+    // to rows[0] here — silently truncating evidence lists. Detect the
+    // return type from pg_catalog and row-ify setof results explicitly.
+    const rt = await rpcReturnType(spec.fn);
+    if (rt.startsWith("setof")) {
+      const rows = await wireQuery(
+        `select to_jsonb(f) as result from public.${spec.fn}(${parts.join(", ")}) f`,
+      );
+      return { data: rows.map((r) => r.result), error: null };
+    }
     const rows = await wireQuery(
       `select public.${spec.fn}(${parts.join(", ")}) as result`,
     );
     const raw = rows[0]?.result ?? null;
-    // PostgREST returns scalars as-is and setof rows as arrays; the backend
-    // consumes scalar jsonb and setof evidence — both pass through here.
     return { data: raw, error: null };
   } catch (e) {
     return { data: null, error: pgErrorObject(e) };
   }
+}
+
+const rpcReturnCache = new Map<string, string>();
+async function rpcReturnType(fn: string): Promise<string> {
+  const hit = rpcReturnCache.get(fn);
+  if (hit) return hit;
+  const db = await getEdgeDb();
+  const res = await db.query(
+    `select prorettype::regtype::text as rt from pg_proc p
+       join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = '${fn.replace(/'/g, "''")}'`,
+  );
+  const rt = String((res.rows[0] as Row | undefined)?.rt ?? "");
+  rpcReturnCache.set(fn, rt);
+  return rt;
 }
 
 // ---------------------------------------------------------------------------
@@ -555,7 +610,13 @@ async function storageInsert(
       `insert into storage.objects (bucket_id, name, owner) values (${lit(bucket)}, ${lit(path)}, ${lit(owner)}) returning 1 as inserted`,
     );
     if (rows.length === 0) {
-      return { data: null, error: { message: "storage upload rejected by policy" } };
+      return {
+        data: null,
+        error: {
+          message: "new row violates row-level security policy for table \"objects\" (storage upload rejected by policy)",
+          code: "42501",
+        },
+      };
     }
     KNOWN_OBJECTS.add(path);
     return { data: { path }, error: null };
@@ -597,8 +658,8 @@ const authBridge = {
       // The on_auth_user_created trigger creates the profile row — real
       // migration machinery, exercised exactly as in production.
       const inserted = await adminSql(
-        `insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at)
-         values (gen_random_uuid(), ${lit(args.email)}, ${lit(JSON.stringify(meta))}::jsonb, now())
+        `insert into auth.users (id, email, raw_user_meta_data)
+         values (gen_random_uuid(), ${lit(args.email)}, ${lit(JSON.stringify(meta))}::jsonb)
          returning id, email`,
       );
       edgeIdentity.set(inserted[0].id as string);
@@ -611,8 +672,8 @@ const authBridge = {
   async signInAnonymously() {
     try {
       const rows = await adminSql(
-        `insert into auth.users (id, email, raw_user_meta_data, is_anonymous)
-         values (gen_random_uuid(), null, '{"guest":true}'::jsonb, true)
+        `insert into auth.users (id, email, raw_user_meta_data)
+         values (gen_random_uuid(), null, '{"guest":true}'::jsonb)
          returning id, email`,
       );
       edgeIdentity.set(rows[0].id as string);
