@@ -13,7 +13,7 @@ import { createClient, type Session, type SupabaseClient } from "@supabase/supab
 export const SUPABASE_URL = "https://ewukneoblhogtreeekqc.supabase.co";
 export const SUPABASE_ANON_KEY = "sb_publishable_g_SOzhE21n76m1-FAx-c5Q_CzUi7VMi";
 
-export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+export let supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
@@ -65,6 +65,20 @@ supabase.auth.onAuthStateChange((event, session: Session | null) => {
 
 export function authUserId(): string | null {
   return currentUserId;
+}
+
+/** TEST HOOK ONLY — src/lib/backend.ts must never call this. Lets the test
+ *  harness establish an identity without a real GoTrue session. */
+export function __testSetAuthUserId(id: string | null) {
+  setUserId(id);
+}
+
+/** TEST HOOK ONLY — swaps the network client for a wire-protocol bridge so
+ *  tests can run the real backend.ts against a local Postgres. `supabase`
+ *  is a live ESM binding, so every importer sees the swap. Production code
+ *  must never call either hook. */
+export function __testSetSupabaseClient(client: SupabaseClient) {
+  supabase = client;
 }
 
 export function isAuthReady(): boolean {

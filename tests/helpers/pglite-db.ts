@@ -275,7 +275,7 @@ export const IDS = {
 
 const adminClaims = JSON.stringify({ sub: IDS.admin, role: "authenticated" });
 
-const SEED_SQL = `
+export const SEED_SQL = `
 begin;
 
 -- 1. Accounts. The on_auth_user_created trigger creates every profile row.
