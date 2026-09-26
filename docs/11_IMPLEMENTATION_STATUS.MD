@@ -5,9 +5,9 @@
 **Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (71 passing
 across 6 files — 57 prior + 11 new per-source limiter behavior tests + 3 new
 migration-apply assertions) · 4 live-anon probes unaffected and green · live
-hotfix **PENDING a fresh Management API token** (this session's stored token
-returned 401; repo work complete and green, live convergence is a short owner
-step — see below)
+hotfix **applied and verified the same day** (fresh owner token; live
+submission had been left DOWN by a partial paste — repaired; acceptance proof
+executed on the live project inside a rolled-back transaction, zero artifacts)
 
 ## This session [2026-09-26 — Gap #1: per-source rate limiting]
 
@@ -73,32 +73,58 @@ mirror, and bucket rows are introspected from postgres sessions.
 
 **Test results:** 71/71 pass, 242 expect() calls across 6 files.
 
-**Live deployment (NOT applied this session):** the live project runs the
-divergent enum-typed lineage (`p_category report_category`, bucket
-`'cr-<epoch/60>'`, `rate_limits.updated_at`, `community_reports.rate_bucket`).
-Repo 0005 as-is would fail or fork behavior further there. A
-signature-matched live hotfix (same per-source body on the live signature and
-bucket scheme, setting `updated_at`) is drafted and ready, but this session's
-Management API token returned 401, so it has NOT been applied — until then
-the live endpoint still runs the global bucket. Owner step: paste a fresh
-token; the hotfix is applied, verified live (two sources, 31 rapid
-submissions from one, the other unaffected), and test artifacts reverted.
+**Live deployment (applied and verified 2026-09-26, fresh owner token):** the
+live project has converged onto the per-source limiter. What was found live
+was worse than a missing hotfix: the owner had pasted the repo 0005 function
+into the live project but never migrated the live `rate_limits` table, leaving
+**live public report submission DOWN** (42703 `column "window_start" does not
+exist`) — caught and repaired in the same session. Three live defects were
+closed:
+
+1. `rate_limits` gained a `window_start timestamptz` column (backfill: the one
+   legacy `'cr-<epoch/60>'` row's epoch-derived window was recovered honestly;
+   default `now()` added; the legacy `updated_at` column retained for the old
+   overload — see 3).
+2. The function's `search_path` is now `public, extensions`: hosted Supabase
+   installs pgcrypto's `digest()` in `extensions`, so the original body died
+   with 42883 `digest(text, unknown) does not exist` on live (the PGlite
+   harness masked this — its digest() lives in `public`). Repo 0005 updated
+   identically; the harness could not catch a hosted-only schema layout, which
+   is an honest limit of the test environment.
+3. Live retains an old **enum-typed overload** of `submit_community_report`
+   (still using the legacy `updated_at` scheme) alongside the text-typed one.
+   PostgREST resolves string-literal callers to the text-typed overload — the
+   per-source one — so every client path uses the fixed function. The legacy
+   overload + `updated_at` column are retained residue; dropping them is a
+   separate cleanup decision (documented in 0005's lineage note), not silently
+   taken.
+
+**Live verification (all inside one rolled-back transaction — zero
+artifacts):** attempts 1–30 from source A accepted; #31 refused with
+`RATE_LIMITED`; source B accepted in the same window while A was exhausted; A
+still refused afterwards; bucket keys equaled the salted digests computed
+independently in node (`f254d843eabe…` for A, `72b7ef1b46dd…` for B).
+`community_reports.rate_bucket` remains a nullable, unused-by-this-body
+residue column, retained like the overload above.
 
 ### Directive §5 classification (this session's scope)
 
 - Per-source rate limiting, repository lineage — **IMPLEMENTED, verified by
   test** (isolation, boundary, window reset, degraded mode, privacy).
-- Per-source rate limiting, live deployment — **PENDING OWNER TOKEN**;
-  honestly classified as not done until applied and verified live.
+- Per-source rate limiting, live deployment — **IMPLEMENTED, verified live**
+  (isolation proof executed on the live project inside a rolled-back
+  transaction; zero artifacts left).
 - Evidence URL revocation (gap 2), `backend.ts` HTTP-edge suite (gap 3),
   account recovery/MFA (gap 4) — **PLANNED** (untouched; one gap per
   session per directive §22–26).
 
 ### Remaining known gaps (honest, this session's delta)
 
-1. Live convergence pending (above): until the hotfix is applied, the live
-   endpoint keeps the global bucket and a single source can still exhaust it
-   there.
+1. Live convergence is complete, with retained residue: the live project
+   still carries the legacy enum-typed overload of `submit_community_report`,
+   the `rate_limits.updated_at` column and the unused
+   `community_reports.rate_bucket` column. All are inert for client traffic;
+   dropping them is a separate maintenance decision (docs/14 candidate).
 2. The `x-forwarded-for` first hop is only as trustworthy as the edge that
    sets it: hosted Supabase overwrites/normalizes the chain, but a client
    that bypasses the platform proxy on a self-hosted or misrouted deployment

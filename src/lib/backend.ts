@@ -1961,19 +1961,30 @@ export const api = {
         return (data ?? []).map(mapEvidence);
       }, ["evidence"]),
 
-    /** Signed-read proxy: returns a fresh signed URL for an evidence row. */
+    /**
+     * Signed-read proxy: mints a short-lived signed URL for an evidence row.
+     *
+     * Gap #2 (evidence URL revocation): the URL is minted ONLY after the
+     * `evidence_url` RPC re-derives the caller's CURRENT site access (the
+     * same mg_can_access_site predicate as the storage read policy) and logs
+     * the mint to the definer-only evidence_url_audit table. The TTL drops
+     * from 3600s to 120s - a leaked link is a two-minute exposure, not an
+     * hour, and revoking a user's access kills their NEXT mint immediately
+     * (revocation-at-mint; in-flight URLs <=120s are the documented residual).
+     * The RPC clamps TTL server-side (30-300s) regardless of what we send.
+     */
     getUrl: async (evidenceId: string): Promise<string | null> => {
       await requireAuthed();
-      const { data, error } = await supabase
-        .from("evidence")
-        .select("storage_path")
-        .eq("id", evidenceId)
-        .maybeSingle();
+      const TTL_SECONDS = 120;
+      const { data: path, error } = await supabase.rpc("evidence_url", {
+        p_evidence_id: evidenceId,
+        p_ttl_seconds: TTL_SECONDS,
+      });
       if (error) throw backendError(error);
-      if (!data) throw new Error("NOT_FOUND");
+      if (!path) throw new Error("NOT_FOUND");
       const { data: signed, error: sErr } = await supabase.storage
         .from("evidence")
-        .createSignedUrl(data.storage_path as string, 3600);
+        .createSignedUrl(path as string, TTL_SECONDS);
       if (sErr || !signed) return null;
       return signed.signedUrl;
     },

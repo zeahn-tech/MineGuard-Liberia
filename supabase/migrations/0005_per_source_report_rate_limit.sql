@@ -30,10 +30,23 @@
 -- that present no forwardable client IP degrade to one shared global bucket
 -- — fail-closed: capacity stays bounded even when the source is unknown.
 --
--- LINEAGE: repository lineage only. The live deployment runs a divergent
--- (enum-typed, 'cr-<epoch/60>' bucket) definition of this RPC and must be
--- hotfixed with a signature-matched variant — see docs/11 for the live
--- hotfix record; do not run this file against the live project as-is.
+-- EXTENSION SCHEMA: hosted Supabase installs pgcrypto's digest() into the
+-- `extensions` schema, while a plain Postgres (the PGlite test harness)
+-- puts it in `public`. `set search_path = public, extensions` resolves
+-- digest() on both: on hosted Supabase via extensions, on plain Postgres
+-- via public (nonexistent schemas in a search path are silently ignored,
+-- so the harness is unaffected). An unqualified digest() under
+-- `search_path = public` alone breaks this function on every hosted
+-- Supabase deployment — found live on 2026-09-26 (42883 digest(text,
+-- unknown) does not exist) and fixed in the same hotfix.
+--
+-- LINEAGE: 2026-09-26 the live deployment converged onto this body
+-- (text-typed signature, per-source buckets) via the Management API, after a
+-- partial paste by the owner left live public reporting DOWN (rate_limits
+-- lacked window_start; digest() was unreachable under search_path = public).
+-- The live table keeps its legacy updated_at column and an old enum-typed
+-- overload of this RPC (unused by PostgREST string callers); both are
+-- retained residue — see docs/11 before dropping anything.
 -- ============================================================================
 
 begin;
@@ -76,7 +89,7 @@ create or replace function public.submit_community_report(
 )
 returns jsonb
 language plpgsql
-security definer set search_path = public
+security definer set search_path = public, extensions
 as $$
 declare
   v_id    uuid;

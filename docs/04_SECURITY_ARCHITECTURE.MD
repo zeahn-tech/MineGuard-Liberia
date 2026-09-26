@@ -81,8 +81,11 @@ risk documented honestly below.
    fresh spoofed hop per request; an edge-function limiter would be strictly
    stronger and remains future work. Verified by tests/rate-limit.test.ts
    (source isolation, cap boundary, window reset, degraded mode, digest-only
-   persistence). NOTE: applied to the repository lineage; the live project's
-   divergent function needs a signature-matched hotfix — see docs/11.
+   persistence). NOTE: converged on the live deployment 2026-09-26 (same
+   day), where a partial earlier paste had left public reporting down — the
+   live table now carries `window_start`, the function resolves `digest()`
+   via the `extensions` schema, and the legacy enum-typed overload +
+   `updated_at`/`rate_bucket` columns are retained inert residue (docs/11).
 2. Account recovery and MFA beyond password sign-in (Supabase supports MFA
    enrollment — configuration pending).
 3. Encryption at rest is inherited from the Supabase platform; field-level

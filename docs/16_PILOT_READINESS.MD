@@ -10,7 +10,7 @@ require evidence across the dimensions below.
 |-----------|-------|----------------|
 | Functionality | 🟡 Substantial | All core modules implemented end-to-end; evidence UI, operator portal surface, template editor outstanding |
 | Security — authorization | 🟢 Core solid | Centralized authz core; every function guarded; scope + tenant isolation server-side |
-| Security — hardening | 🟡 Gaps | Per-source report rate limiting done (repo lineage, tested); live-lineage hotfix + evidence fetch ACL deep-check + MFA/recovery outstanding |
+| Security — hardening | 🟡 Gaps | Per-source report rate limiting done (repo + live, tested); evidence fetch ACL deep-check + MFA/recovery outstanding |
 | Data integrity | 🟢 Core solid | Provenance, lifecycle states, audit log, verification enums; unique-code guard pending |
 | Offline behavior | 🟢 Inspections | Local-first, retry, dedupe; media offline queue pending |
 | Synchronization | 🟢 Inspections | Idempotent clientRef sync; conflict strategy documented |
@@ -26,7 +26,7 @@ require evidence across the dimensions below.
 
 1. Priorities 1–3 of the test strategy implemented and green in CI.
 2. Evidence attachment UI shipped; media offline queue shipped.
-3. Rate limiting on public endpoints (per-source limiter implemented and tested, migration 0005; live-lineage hotfix pending); evidence ACL re-check at fetch.
+3. Rate limiting on public endpoints (per-source limiter implemented, tested, and converged live — migration 0005); evidence ACL re-check at fetch.
 4. Restore-from-backup rehearsal completed and documented.
 5. Accessibility pass (keyboard, contrast, screen-reader landmarks) on the five
    core flows.

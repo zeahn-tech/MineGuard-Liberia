@@ -55,14 +55,15 @@ describe("migrations apply to a clean database", () => {
         `select count(*) from information_schema.tables
           where table_schema = 'public' and table_type = 'BASE TABLE'`,
       );
-      expect(Number(scalar(tables))).toBe(14);
+      // 14 domain tables + evidence_url_audit (0006).
+      expect(Number(scalar(tables))).toBe(15);
 
       const rls = await one(
         run,
         `select count(*) from pg_tables
           where schemaname = 'public' and rowsecurity = true`,
       );
-      expect(Number(scalar(rls))).toBe(14);
+      expect(Number(scalar(rls))).toBe(15);
 
       const guards = await one(
         run,
@@ -156,6 +157,38 @@ describe("migrations apply to a clean database", () => {
     );
     expect(rows.rows[0]?.provolatile).toBe("s");
     expect(rows.rows[0]?.prosecdef).toBe(false);
+  });
+
+  test("0006 is idempotent and keeps the mint-gate signature", async () => {
+    const db = await getDb();
+    const sql = readFileSync(
+      join(ROOT, "supabase", "migrations", "0006_evidence_url_revocation.sql"),
+      "utf8",
+    );
+    await db.exec(sql);
+    await db.exec(sql);
+    const fns = await db.query<{ n: string }>(
+      `select count(*)::text as n from pg_proc p
+         join pg_namespace n2 on n2.oid = p.pronamespace
+        where n2.nspname = 'public'
+          and p.proname = 'evidence_url'
+          and pg_get_function_identity_arguments(p.oid) =
+              'p_evidence_id uuid, p_ttl_seconds integer'`,
+    );
+    // create or replace ⇒ re-running must never duplicate the signature.
+    expect(Number(fns.rows[0]?.n)).toBe(1);
+    // The audit table exists with RLS enabled and no policies (definer-only).
+    const audit = await db.query<{ rls: boolean; policies: string }>(
+      `select c.relrowsecurity as rls,
+              (select count(*)::text from pg_policies pol
+                where pol.schemaname = 'public'
+                  and pol.tablename = 'evidence_url_audit') as policies
+         from pg_class c
+         join pg_namespace n on n.oid = c.relnamespace
+        where n.nspname = 'public' and c.relname = 'evidence_url_audit'`,
+    );
+    expect(audit.rows[0]?.rls).toBe(true);
+    expect(audit.rows[0]?.policies).toBe("0");
   });
 
   test("0002 wraps itself in a single transaction", () => {
