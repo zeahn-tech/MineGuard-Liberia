@@ -1,5 +1,99 @@
 # 11 — Implementation Status
 
+**Session:** Gap Closure Directive v1.0, Gap #2 (Priority A) — evidence signed-URL revocation path
+**Date:** 2026-09-26
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (82 passing
+across 7 files — 71 prior + 10 new evidence-URL mint-gate tests + 1 new
+migration-apply 0006 assertion) · 4 live-anon probes green · live convergence
+applied and verified with the same-session token (acceptance proof executed on
+the live project inside one rolled-back transaction; zero artifacts)
+
+## This session, part 2 [2026-09-26 — Gap #2: evidence URL revocation]
+
+**Directive item:** Priority A gap 2 — signed evidence URLs were valid 1 hour
+with no revocation; add a mechanism to invalidate a signed URL early.
+
+**Acceptance criteria (stated before coding):** the mint gate returns NULL
+(not the path) when the caller's CURRENT site access fails or the row is
+missing; refuses role-less accounts; clamps TTL server-side (30–300s); logs
+every accepted mint to a definer-only audit table storing no URL material;
+the client mints through the gate with a 120s TTL; repo migration applies
+cleanly and idempotently; live convergence verified with zero artifacts.
+
+**Design (revocation-at-mint + short TTL — the directive's first suggested
+mechanism, no new infrastructure):** permission-bound revocation instead of
+pure clock-bound revocation. `evidence_url(p_evidence_id, p_ttl_seconds)`
+(SECURITY DEFINER, VOLATILE — it writes audit rows) re-derives the caller's
+current access via the same `mg_can_access_site` predicate the storage read
+policy uses, then returns the storage path for the client to sign. Losing
+site access refuses the next mint immediately; the TTL drop 3600s → 120s
+caps any in-flight exposure at two minutes. A revocation-at-fetch proxy would
+close the ≤120s residual but requires edge infrastructure and is explicitly
+NOT added (documented as PROPOSED in docs/04).
+
+**Implementation:**
+
+- `supabase/migrations/0006_evidence_url_revocation.sql` [NEW] — the RPC
+  (TTL clamp, guest refusal, NULL-not-found, gate, audit append), the
+  definer-only `evidence_url_audit` table (RLS on, deliberately zero
+  policies), explicit signature-auditable grants (execute to authenticated,
+  revoked from anon/public).
+- `src/lib/backend.ts` — `evidence.getUrl` now calls `evidence_url` and signs
+  the returned path with `createSignedUrl(path, 120)`; NOT_FOUND preserved;
+  TTL_SECONDS=120 is the only client-side TTL in the codebase.
+- `tests/evidence-url.test.ts` [NEW] — 10 tests: authorized mint returns the
+  path; cross-tenant NULL with no audit row; **permission change ⇒ next mint
+  refused (the revocation proof)**; missing-id NULL without existence leak;
+  guest FORBIDDEN; anon denied; TTL clamp (3600-ask logs 300, 1s-ask logs
+  30, nothing outside bounds); one audit row per accepted mint carrying the
+  real actor; audit table invisible to authenticated (definer-only); RPC is
+  volatile + definer.
+- `tests/migration-apply.test.ts` [EXTENDED] — 0006 idempotency, exact
+  signature, audit table RLS-on with zero policies; table counts 14 → 15.
+- Docs: 03 (new table row), 04 (File access rewritten; gap 6 closed with
+  honest residual), 07 (Serving/ACL rewritten), 13 (suite inventory), 16
+  (board + definition-of-done).
+
+**Live convergence (same session, owner token):** live's divergent lineage
+required two adaptations, both recorded in 0006's lineage note: (1) the live
+`mg_can_access_site` is the two-argument `(county, operator_name)` form, so
+the live function body differs in exactly that predicate line (matching the
+live storage read policy, which uses the identical two-arg call); (2) the
+live `evidence` table carries denormalized `county`/`operator_name` columns
+the repo lineage derives via `site_id`. Table + grants applied from 0006
+as-is; the function applied as the live-predicate variant.
+
+**Live verification (one rolled-back transaction, zero artifacts — confirmed
+afterwards: audit 0 rows, profiles 2, evidence 2, probe users 0, auth trigger
+intact):** an ephemeral probe user (auto-removed by rollback; profile-trigger
+suppressed and restored within the same transaction) exercised the real
+live data: admin minted for real evidence ✓ (path returned, audit row with
+TTL 120); missing id → NULL ✓; probe operator tenant-matched → mint ✓; the
+same probe renamed (access revoked) → NULL with no new audit row ✓; role-less
+→ FORBIDDEN ✓; 3600s ask → audit logged 300 ✓.
+
+**Honest limits of this item:**
+
+1. In-flight ≤120s URLs outlive a permission change by at most two minutes —
+   accepted residual; the fetch-time proxy that would eliminate it is
+   PROPOSED (docs/04), REQUIRES OWNER CONFIRMATION, not silently dropped.
+2. The mint gate's protection is authorization-consistency, not URL secrecy:
+   anyone who can see a record can mint; anyone whose access is revoked
+   cannot. It does not watermark, fingerprint, or prevent re-sharing of a
+   URL while valid.
+3. `evidence_url_audit` grows unbounded by design (append-only); a retention
+   sweep belongs to docs/14's maintenance schedule, not this change.
+4. The live project keeps lineage residue (two-arg access predicate,
+   enum-typed RPC overload, legacy columns) — inert for client traffic,
+   cleanup is a separate decision.
+
+**Directive §5 classification:** Evidence URL revocation — **IMPLEMENTED
+(repo + live), verified by test and live probe**. In-flight ≤120s residual
+and fetch-time proxy — **PROPOSED**. Gap #3 (`backend.ts` HTTP-edge test
+coverage), gap #4 (account recovery/MFA) — **PLANNED** (untouched).
+
+## Prior session, part 1 [2026-09-26 — Gap #1: per-source rate limiting]
+
 **Session:** Gap Closure Directive v1.0, Gap #1 (Priority A) — per-source rate limiting on the public community-report endpoint
 **Date:** 2026-09-26
 **Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (71 passing

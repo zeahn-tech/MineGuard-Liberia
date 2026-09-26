@@ -68,13 +68,18 @@ pages — inspection (`/portal/inspections/:id`), incident
 
 [PLANNED] Camera capture UX, batch upload with per-file progress.
 
-## Serving and ACL [IMPLEMENTED — interim]
+## Serving and ACL [IMPLEMENTED — mint gate, 2026-09-26]
 
-`evidence.getUrl` requires authentication; Firestore rules scope the
-metadata `get` via `siteVisibleAt()`, and `storage.rules` re-derives the same
-role/tenant check via a `firestore.get()` join before allowing the object
-read. This is the documented interim measure pending a Cloud-Function
-signed-URL proxy (doc 04, "File access").
+`evidence.getUrl` requires authentication and now mints through the
+`evidence_url` SECURITY DEFINER RPC (migration 0006): the server re-derives
+the caller's CURRENT role/tenant (`mg_can_access_site`) at every mint, clamps
+the TTL server-side (client requests 120s; hard bounds 30–300s), logs the
+mint to the definer-only `evidence_url_audit` table, and only then returns
+the storage path for signing. The storage-layer read policy (metadata join +
+`mg_can_access_site`) remains the second, independent layer. A leaked link
+expires in ≤120s; a permission change refuses the next mint immediately.
+Full rationale and residuals: doc 04, "File access"; test coverage:
+`tests/evidence-url.test.ts`.
 
 ## Retention [PROPOSED — REQUIRES GOVERNMENT CONFIRMATION]
 

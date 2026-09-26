@@ -36,6 +36,13 @@
 --
 -- LINEAGE: applies to the repository lineage; the live project receives the
 -- same function via Management API hotfix (docs/11 records both).
+-- KNOWN LINEAGE DIVERGENCE (recorded 2026-09-26): the gate's final predicate
+-- is lineage-specific. Repository lineage: mg_can_access_site(v_row.site_id).
+-- Live lineage: mg_can_access_site(v_row.county, v_row.operator_name) — the
+-- live project still runs the two-argument form (its storage read policy
+-- uses it identically), so the live hotfix body differs in exactly this one
+-- line. Everything else (TTL clamp, guest refusal, audit append, grants,
+-- definer-only audit table) is identical in both lineages.
 -- ============================================================================
 
 begin;

@@ -53,8 +53,21 @@ folder to equal `auth.uid()` and the account to hold a role; the read policy
 re-derives the caller's role/tenant from `public.profiles` and joins the
 evidence metadata row by `storage_path` through `mg_can_access_site()` before
 granting access — role-blind reads (prior audit defect 0.3) are structurally
-impossible. Signed URLs remain short-lived (1h); a leaked URL is a residual
-risk documented honestly below.
+impossible.
+
+**Signed-URL mint gate [IMPLEMENTED 2026-09-26 — migration 0006].** URLs are
+no longer minted from a bare metadata read: `evidence.getUrl` calls the
+`evidence_url(p_evidence_id, p_ttl_seconds)` SECURITY DEFINER RPC, which
+re-derives the caller's CURRENT access (same `mg_can_access_site` predicate
+as the storage read policy) at every mint, refuses role-less accounts, clamps
+TTL server-side to 30–300s, and appends a row to the definer-only
+`evidence_url_audit` log (actor, evidence, TTL; no URL material stored).
+TTL drops from 3600s to 120s. Revocation is permission-bound: losing site
+access refuses the next mint immediately; a leaked link is at most a 2-minute
+exposure (was one hour). Residual, documented honestly: an in-flight ≤120s
+URL stays valid until expiry after a permission change — closing even that
+requires a fetch-time proxy (edge infrastructure deliberately not added).
+Verified by `tests/evidence-url.test.ts` and live (docs/11).
 
 ## Known gaps [PLANNED / REQUIRES GOVERNMENT CONFIRMATION]
 
@@ -101,8 +114,12 @@ risk documented honestly below.
    read policy evaluates `mg_can_access_site(site_id)`. A residual caveat:
    rows written directly via SQL before this schema existed would need a
    backfill; rows written through the API are always stamped.
-6. A leaked 1h signed URL remains valid until expiry (short-TTL tradeoff
-   documented; revocation requires rotating the bucket or shortening TTL).
+6. ~~A leaked 1h signed URL remains valid until expiry~~ **Closed 2026-09-26
+   (migration 0006):** URLs are minted through the `evidence_url` gate with a
+   120s TTL and a current-permission re-check per mint (see "File access"
+   above). Residual: an in-flight ≤120s URL outlives a permission change by
+   at most two minutes; a fetch-time proxy would close even that and remains
+   PROPOSED, REQUIRES OWNER/GOVERNMENT CONFIRMATION (new infrastructure).
 
 ## Frontend security notes
 

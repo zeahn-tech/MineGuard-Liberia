@@ -1,9 +1,14 @@
 # 13 — Test Strategy
 
-**Status:** the first suites exist (2026-09-23): `tests/offline-queue.test.ts`
-(13) and `tests/offline-evidence.test.ts` (5), run by `bun test` and wired into
-CI. This document keeps the strategy and priority order for the remaining
-layers. [PARTIALLY IMPLEMENTED]
+**Status:** 7 suites / 82 tests green as of 2026-09-26: the SQL layer runs
+against real Postgres (PGlite) applying every migration in
+`supabase/migrations/` — `tests/migration-apply.test.ts` (clean-apply,
+idempotency, signature parity), `tests/rls.test.ts` (role matrix),
+`tests/rate-limit.test.ts` (per-source limiter, migration 0005),
+`tests/evidence-url.test.ts` (signed-URL mint gate, migration 0006) — plus
+`tests/offline-queue.test.ts`, `tests/offline-evidence.test.ts`, and
+`tests/live-anon.test.ts` (probes the live project with the public anon key
+only). Run by `bun test`, wired into CI. [PARTIALLY IMPLEMENTED]
 
 ## Principles
 
