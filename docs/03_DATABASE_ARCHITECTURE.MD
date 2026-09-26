@@ -26,7 +26,7 @@ The authoritative schema, RLS policies, guard triggers and RPCs live in
 | report_tracking | Public tracking mirror | tracking_code (pk), status, created_at | world-readable coarse status by code |
 | meta | Sentinels + aggregates (jsonb) | public_stats | refreshed by `refresh_public_stats()` |
 | audit_log | Append-only trail | actor_id, actor_label, action, entity_type, entity_id, summary | insert policy only — no update/delete policy |
-| rate_limits | Public-report limiter | bucket (pk), count, window_start | touched only by the definer RPC |
+| rate_limits | Public-report limiter | bucket (pk), count, window_start | touched only by the definer RPC; since 0005 the bucket key is `report:<salted sha-256 of client IP>` per source (first x-forwarded-for hop), or `report:global` when no forwardable IP exists — no raw address is ever stored |
 
 State unions are Postgres enums (user_role, site_status, inspection_state,
 finding_severity, finding_state, ca_status, incident_type, incident_state,

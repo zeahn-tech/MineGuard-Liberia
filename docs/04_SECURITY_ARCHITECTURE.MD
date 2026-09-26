@@ -67,12 +67,22 @@ risk documented honestly below.
    future RPC that relies on the privilege layer alone would be anon-callable
    on lineages provisioned before 2026-09-25. New deployments from the
    repository migrations get both layers.
-1. Rate limiting on the public report endpoint. A 30-reports-per-minute global
-   rolling bucket is enforced server-side inside the `submit_community_report`
-   security-definer RPC (`rate_limits` table, keyed on server time). Honest
-   limits: the bucket is global per minute, so a distributed flood can still
-   exhaust it for everyone, and it is not per-source. A per-IP/per-source
-   limiter (edge function + proxy headers) remains planned.
+1. Rate limiting on the public report endpoint. Since migration 0005 the
+   `submit_community_report` security-definer RPC enforces a 30-reports-per-
+   minute rolling bucket **per client source**: the source is derived
+   server-side from the PostgREST-injected `request.headers` GUC (first
+   `x-forwarded-for` hop, `x-real-ip` fallback — never a client-supplied
+   argument), and the bucket key stores only a salted SHA-256 digest of the
+   address, so the limiter table cannot become a surveillance log. Sourceless
+   calls degrade to one shared global bucket (fail-closed). Honest limits:
+   header-derived identity is only as trustworthy as the platform edge that
+   sets the chain — hosted Supabase normalizes it, but on a self-hosted or
+   misrouted deployment a client that bypasses the proxy could present a
+   fresh spoofed hop per request; an edge-function limiter would be strictly
+   stronger and remains future work. Verified by tests/rate-limit.test.ts
+   (source isolation, cap boundary, window reset, degraded mode, digest-only
+   persistence). NOTE: applied to the repository lineage; the live project's
+   divergent function needs a signature-matched hotfix — see docs/11.
 2. Account recovery and MFA beyond password sign-in (Supabase supports MFA
    enrollment — configuration pending).
 3. Encryption at rest is inherited from the Supabase platform; field-level

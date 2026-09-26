@@ -1,5 +1,121 @@
 # 11 — Implementation Status
 
+**Session:** Gap Closure Directive v1.0, Gap #1 (Priority A) — per-source rate limiting on the public community-report endpoint
+**Date:** 2026-09-26
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (71 passing
+across 6 files — 57 prior + 11 new per-source limiter behavior tests + 3 new
+migration-apply assertions) · 4 live-anon probes unaffected and green · live
+hotfix **PENDING a fresh Management API token** (this session's stored token
+returned 401; repo work complete and green, live convergence is a short owner
+step — see below)
+
+## This session [2026-09-26 — Gap #1: per-source rate limiting]
+
+**Directive item:** Priority A gap 1 — replace the global 30/min bucket on
+`submit_community_report` with a per-source limiter (IP or device-scoped).
+
+**Defect closed:** 0001's `submit_community_report` counted every submission
+on Earth into ONE global bucket (`'public_report'` in the repo lineage,
+`'cr-<epoch/60>'` on the live lineage): any single source able to POST 31
+times a minute — a buggy retry loop, a shared NAT, or an attacker — silenced
+community reporting for the entire country until the window rolled over.
+Denial of service against a public safety channel, one SQL literal away.
+
+**Acceptance criteria (stated before coding, per directive §3.2):**
+
+1. Source A exhausting its quota does not silence source B (the directive's
+   core acceptance), and vice versa.
+2. The source key is derived server-side from the PostgREST-injected
+   `request.headers` GUC — never from a client-supplied argument.
+3. The (N+1)-th submission within the window is refused with a message
+   containing `RATE_LIMITED`; the cap stays 30/min per source (partitioned
+   capacity, not a 30× loosening).
+4. After the fixed 60-second window lapses, the same source may submit again.
+5. With no forwardable client IP, the limiter degrades to the existing global
+   bucket — fail-closed; there is no unlimited path.
+6. No raw address is persisted: the bucket key is a salted SHA-256 digest,
+   and `rate_limits` stays definer-only.
+7. The public RPC signature is unchanged (0002's EXECUTE grants and
+   `src/lib/backend.ts` stay valid untouched).
+
+**Implementation (smallest coherent change):**
+
+- `supabase/migrations/0005_per_source_report_rate_limit.sql` [NEW] —
+  recreates ONLY `submit_community_report` with an identical signature and a
+  per-source limiter: `mg_client_ip()` (STABLE, SECURITY INVOKER; first
+  `x-forwarded-for` hop, `x-real-ip` fallback, empty ⇒ global) feeds the
+  bucket key `report:<sha256("mgliberia-v1:" || ip)>`, or `report:global`
+  when no forwardable IP exists; same `rate_limits` upsert + rolling-window
+  shape as 0001; self-contained explicit EXECUTE grant so the migration does
+  not depend on 0002 having run.
+- `tests/rate-limit.test.ts` [NEW] — 11 tests: source derivation (XFF first
+  hop, x-real-ip fallback, empty ⇒ global); the core isolation proof (A
+  exhausts its quota → A is refused → B still submits in the SAME window → A
+  is still refused); the exact cap boundary (30 pass, 31st refused with
+  `RATE_LIMITED`); window reset via harness clock surgery; degraded global
+  mode; digest-only bucket keys with the digest recomputed independently in
+  node (not by trusting the SQL's own crypto); anon's zero-row visibility of
+  `rate_limits`.
+- `tests/migration-apply.test.ts` [EXTENDED] — 0005 discovered in order,
+  idempotent (create-or-replace ⇒ no duplicate functions), identity
+  signature asserted equal to the one 0002 grants and the client calls,
+  helper asserted STABLE and not SECURITY DEFINER.
+- No client change: `src/lib/backend.ts` already maps the `RATE_LIMITED`
+  token to friendly text, and the RPC signature is unchanged.
+
+**Test-harness lessons encoded in the suite (first-draft defects removed):**
+`withRole` transactions ALWAYS roll back, so the multi-step isolation proofs
+run inside a single transaction — which is also a stronger proof (same
+instant, same wall-clock window); and anon has no SELECT policy on
+`community_reports`/`rate_limits`, so those reads return ZERO ROWS silently —
+success is therefore confirmed through the world-readable `report_tracking`
+mirror, and bucket rows are introspected from postgres sessions.
+
+**Test results:** 71/71 pass, 242 expect() calls across 6 files.
+
+**Live deployment (NOT applied this session):** the live project runs the
+divergent enum-typed lineage (`p_category report_category`, bucket
+`'cr-<epoch/60>'`, `rate_limits.updated_at`, `community_reports.rate_bucket`).
+Repo 0005 as-is would fail or fork behavior further there. A
+signature-matched live hotfix (same per-source body on the live signature and
+bucket scheme, setting `updated_at`) is drafted and ready, but this session's
+Management API token returned 401, so it has NOT been applied — until then
+the live endpoint still runs the global bucket. Owner step: paste a fresh
+token; the hotfix is applied, verified live (two sources, 31 rapid
+submissions from one, the other unaffected), and test artifacts reverted.
+
+### Directive §5 classification (this session's scope)
+
+- Per-source rate limiting, repository lineage — **IMPLEMENTED, verified by
+  test** (isolation, boundary, window reset, degraded mode, privacy).
+- Per-source rate limiting, live deployment — **PENDING OWNER TOKEN**;
+  honestly classified as not done until applied and verified live.
+- Evidence URL revocation (gap 2), `backend.ts` HTTP-edge suite (gap 3),
+  account recovery/MFA (gap 4) — **PLANNED** (untouched; one gap per
+  session per directive §22–26).
+
+### Remaining known gaps (honest, this session's delta)
+
+1. Live convergence pending (above): until the hotfix is applied, the live
+   endpoint keeps the global bucket and a single source can still exhaust it
+   there.
+2. The `x-forwarded-for` first hop is only as trustworthy as the edge that
+   sets it: hosted Supabase overwrites/normalizes the chain, but a client
+   that bypasses the platform proxy on a self-hosted or misrouted deployment
+   could present a fresh spoofed hop per request. Header-derived identity is
+   the best signal available inside Postgres; an edge-function limiter would
+   be strictly stronger and remains future work (doc 04 updated).
+3. Per-source buckets accumulate one `rate_limits` row per distinct source
+   (salted-hash-keyed). Growth is bounded by real traffic and the table
+   stays definer-only, but a periodic sweep of stale rows belongs in doc 14's
+   maintenance schedule rather than in this change (smallest coherent
+   change).
+4. All previously listed gaps not closed by this item remain open (evidence
+   URL revocation, `backend.ts` test coverage, account recovery/MFA, camera
+   UX, operator portal, scheduled stats refresh).
+
+## Prior session [2026-09-25 — live hotfix: profile completion failing]
+
 **Session:** Live hotfix — `complete_staff_profile` WHERE-less UPDATE (profile
 completion `[object Object]` error)
 **Date:** 2026-09-25
@@ -8,8 +124,6 @@ across 5 files, including 4 probes against the live Supabase project using only
 the public anon key) · live function verified by Management API query after the
 fix, and end-to-end as a signed-in test account (HTTP 204 on the exact RPC
 payload the app sends); test artifacts fully reverted (see below)
-
-## This session [2026-09-25 — live hotfix: profile completion failing]
 
 **Reported defect:** completing the staff profile in the portal showed
 `[object Object]` and the profile never saved.

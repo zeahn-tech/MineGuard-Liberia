@@ -45,6 +45,7 @@ describe("migrations apply to a clean database", () => {
     // The session's own migrations must all be present in the repo listing.
     expect(MIGRATIONS).toContain("0002_grants_and_storage.sql");
     expect(MIGRATIONS).toContain("0003_profiles_read_hardening.sql");
+    expect(MIGRATIONS).toContain("0005_per_source_report_rate_limit.sql");
   });
 
   test("0001 core objects exist (tables, RLS, triggers, RPCs)", async () => {
@@ -103,6 +104,58 @@ describe("migrations apply to a clean database", () => {
         where schemaname = 'public' and tablename = 'profiles'`,
     );
     expect(Number(profiles.rows[0]?.n)).toBe(3);
+  });
+
+  test("0005 is idempotent — it can be re-run without error", async () => {
+    const db = await getDb();
+    const sql = readFileSync(
+      join(ROOT, "supabase", "migrations", "0005_per_source_report_rate_limit.sql"),
+      "utf8",
+    );
+    await db.exec(sql);
+    await db.exec(sql);
+    const fns = await db.query<{ n: string }>(
+      `select count(*)::text as n from pg_proc p
+         join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public'
+          and p.proname in ('submit_community_report', 'mg_client_ip')`,
+    );
+    // create or replace (not create) ⇒ re-running must never duplicate.
+    expect(Number(fns.rows[0]?.n)).toBe(2);
+  });
+
+  test("0005 keeps the RPC signature that 0002 grants and the client calls", async () => {
+    // Gap Closure Directive acceptance: same public contract. The identity
+    // signature in pg_proc must still equal the one 0002's EXECUTE grant
+    // names and src/lib/backend.ts invokes — otherwise a fresh install would
+    // break the public reporting endpoint while looking green.
+    const db = await getDb();
+    const sig = await db.query<{ identity: string }>(
+      `select pg_get_function_identity_arguments(p.oid) as identity
+         from pg_proc p
+         join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname = 'submit_community_report'`,
+    );
+    expect(sig.rows[0]?.identity).toBe(
+      "p_tracking_code text, p_category text, p_description text, p_county text, p_district text, p_community text, p_latitude double precision, p_longitude double precision, p_contact_phone text",
+    );
+  });
+
+  test("0005's limiter helper is stable and NOT security definer", async () => {
+    // mg_client_ip reads a session GUC; it must not need (or carry) definer
+    // privileges, and it must be marked stable so the planner can treat it
+    // as constant within a statement.
+    const db = await getDb();
+    const rows = await db.query<{
+      provolatile: string;
+      prosecdef: boolean;
+    }>(
+      `select provolatile, prosecdef from pg_proc p
+         join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname = 'mg_client_ip'`,
+    );
+    expect(rows.rows[0]?.provolatile).toBe("s");
+    expect(rows.rows[0]?.prosecdef).toBe(false);
   });
 
   test("0002 wraps itself in a single transaction", () => {
