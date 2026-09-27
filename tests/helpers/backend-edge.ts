@@ -266,15 +266,12 @@ async function wireQuery(sql: string): Promise<Row[]> {
       } catch {
         /* nothing to roll back */
       }
-      // Diagnostic: re-derive the identity inside a fresh transaction to
-      // show exactly what the RLS policies saw when the payload failed.
-      try {
-        const diag = `begin; ${identity} select auth.uid() as uid, public.mg_is_admin() as admin, current_user as u, current_setting('request.jwt.claims', true) as claims; rollback;`;
-        const dr = await db.exec(diag);
-        console.error(`[bridge] FAILED: ${String((e as { message?: string })?.message ?? e)}\n  SQL: ${sql.slice(0, 200)}\n  identity-in-txn: ${JSON.stringify(dr[3]?.rows?.[0] ?? null)}`);
-      } catch {
-        console.error(`[bridge] FAILED: ${String((e as { message?: string })?.message ?? e)}\n  SQL: ${sql.slice(0, 200)}`);
-      }
+      // Diagnostics for the denials a test EXPECTS (error tokens) and for
+      // unexpected failures; the expected-denial chatter stays quiet in
+      // verbose output by logging one line through console.log.
+      console.log(
+        `[bridge] request failed: ${String((e as { message?: string })?.message ?? e).slice(0, 160)}`,
+      );
       throw e;
     }
   });

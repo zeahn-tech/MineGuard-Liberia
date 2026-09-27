@@ -1,14 +1,36 @@
 # 13 — Test Strategy
 
-**Status:** 7 suites / 82 tests green as of 2026-09-26: the SQL layer runs
+**Status:** 8 suites / 128 tests green as of 2026-09-27: the SQL layer runs
 against real Postgres (PGlite) applying every migration in
 `supabase/migrations/` — `tests/migration-apply.test.ts` (clean-apply,
 idempotency, signature parity), `tests/rls.test.ts` (role matrix),
 `tests/rate-limit.test.ts` (per-source limiter, migration 0005),
 `tests/evidence-url.test.ts` (signed-URL mint gate, migration 0006) — plus
-`tests/offline-queue.test.ts`, `tests/offline-evidence.test.ts`, and
-`tests/live-anon.test.ts` (probes the live project with the public anon key
+`tests/backend-edge.test.ts` (the data layer driven through a wire-protocol
+bridge, Gap #3), `tests/offline-queue.test.ts`, `tests/offline-evidence.test.ts`,
+and `tests/live-anon.test.ts` (probes the live project with the public anon key
 only). Run by `bun test`, wired into CI. [PARTIALLY IMPLEMENTED]
+
+## The HTTP-edge bridge (Gap #3, 2026-09-27)
+
+`tests/backend-edge.test.ts` closes the last untested layer: the real
+`src/lib/backend.ts` — error shaping (`backendError`), authorization
+re-derivation (`requireAuthed/Staff/Admin/Reviewer`), row mapping,
+`clientRef` offline dedupe and audit writes — executed UNMODIFIED against
+`tests/helpers/backend-edge.ts`, a PostgREST wire emulation over a dedicated
+PGlite (stub auth/storage → all migrations → compact seed). Per-request
+identity works exactly like PostgREST (`set local role` +
+`request.jwt.claims` inside ONE bundled exec — separate execs lose identity
+for RLS WITH CHECK, probe-proven); GoTrue is faked over `auth.users`; RPCs
+go through a named-notation whitelist; storage rides `storage.objects`.
+Every exported surface has ≥1 authorized and ≥1 denied path; `live()`
+queries swallow fetcher errors by design, so their denials are asserted via
+a `console.error` spy. The suite found two production defects (sites
+INSERT…RETURNING 42501; inspection review guard order) fixed in migration
+0007, plus the `backendError` token-ordering fix in `src/lib/supabase.ts`.
+Bridge-fidelity caveat: it emulates the supabase-js subset the data layer
+uses — realtime is immediate re-query and signed URLs are bridge-local, so
+it is not a substitute for the live-anon probes.
 
 ## Principles
 

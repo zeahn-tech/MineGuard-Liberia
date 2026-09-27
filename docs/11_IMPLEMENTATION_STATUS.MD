@@ -1,5 +1,113 @@
 # 11 — Implementation Status
 
+**Session:** Gap Closure Directive v1.0, Gap #3 (Priority A) — data-layer/HTTP-edge test coverage
+**Date:** 2026-09-27
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (128 passing
+across 8 files — 82 prior + 46 new backend-edge tests) · two production
+defects found by the new suite and fixed with probe-proven migrations/code
+(migration 0007; `backendError` ordering) · live convergence for 0007 NOT yet
+run (see honest limits)
+
+## This session [2026-09-27 — Gap #3: data-layer/HTTP-edge test coverage]
+
+**Directive item:** Priority A gap 3 — the data layer (`src/lib/backend.ts`,
+the HTTP edge) had zero test coverage: error shaping (`backendError`),
+authorization re-derivation (`requireAuthed/Staff/Admin/Reviewer`), row
+mapping, the offline-dedupe contract and audit writes were exercised only
+indirectly through SQL suites. Acceptance: every exported surface gets at
+least one authorized-path and one denied-path test, driven through the real
+module UNMODIFIED.
+
+**What was built:**
+
+- `tests/helpers/backend-edge.ts` [NEW] — a wire-protocol bridge: translates
+  supabase-js vocabulary (`.from().select().eq().insert().update()…`, `.rpc()`,
+  GoTrue auth calls, storage upload) into RLS-enforced SQL on a dedicated
+  PGlite that applies the stub auth/storage schema, every
+  `supabase/migrations/*.sql` in order, and a compact EDGE_SEED mirroring the
+  shared fixture's identity/tenant shape (two operators, county inspector,
+  national supervisor, admin, role-less guest; no findingB — a deliberate
+  compaction caught two test bugs before they became false confidence).
+  Per-request identity exactly like PostgREST: each request is one bundled
+  `begin; set local role authenticated; set local request.jwt.claims = '<jwt>';
+  <payload>; commit;` script (separate execs lose identity for RLS WITH
+  CHECK — probe-proven); a request mutex serializes; RPCs go through a
+  whitelist with named-notation calls; GoTrue is faked over `auth.users`;
+  storage rides `storage.objects`.
+- `tests/backend-edge.test.ts` [NEW] — 46 tests in 8 blocks: `backendError`
+  contract (the literal `[object Object]` bug pinned), auth gate (anon /
+  role-less guest / orphan uid / signUp trigger / credential-error mapping),
+  sites (create + audit + generated code, status, tenant/county scoping,
+  openActions, risk factors), inspections lifecycle (draft → submit →
+  supervisor review, ownership guard, NOT_EDITABLE / NOT_REVIEWABLE,
+  findings acknowledge-vs-resolve, corrective actions open → respond →
+  close), records (incidents, clientRef dedupe = one row, observations,
+  community report submit/track/triage), stats/users (admin-only surfaces,
+  setUserRole + audit, provisionByEmail, completeProfile bootstrap-free,
+  recentAuditLog), evidence (upload path contract + audit, tenant gate,
+  scoped list RPC, signed URL, admin-only footprint), seed refusal,
+  ensureProfileDoc idempotency. Mutations commit; post-conditions are then
+  verified in SQL as admin.
+
+**Production defects found by the suite (all fixed):**
+
+1. `backendError()` token ordering (`src/lib/supabase.ts`) — `USER_NOT_FOUND`
+   contains the substring `NOT_FOUND`, so the generic mapping swallowed the
+   specific token. Fixed: specific tokens first, plus `code`-field capture
+   (42501 → FORBIDDEN; guard tokens NOT_EDITABLE / NOT_REVIEWABLE /
+   FORBIDDEN mapped out of P0001 messages).
+2. Sites INSERT … RETURNING 42501 (migration 0007) — the "sites read" policy
+   called `mg_can_access_site(id)`, which re-queries `public.sites`; Postgres
+   evaluates the SELECT policy on RETURNING rows, but the new row is not yet
+   visible to the INSERT's own command snapshot → every
+   `.insert().select("id")` failed 42501 even for admins, i.e. **admin site
+   creation from the app was impossible on the repo lineage** (seed-style
+   inserts without RETURNING worked, which is why the clean-apply suite never
+   caught it). Fix: `mg_can_access_site_row(county, operator_name)` — the
+   same role matrix over the row's OWN columns, no inner SELECT — now backs
+   the policy; the uuid form delegates to it for callers that reference rows
+   which already exist (storage policies, evidence RPC, scope stamps).
+   Probe-verified: admin INSERT … RETURNING succeeds; per-role visibility
+   unchanged (operator own tenant, county staff own county, guest nothing).
+3. `mg_guard_inspection_update()` order (migration 0007) — the ownership
+   check preceded the reviewer branch, contradicting the "inspections update"
+   RLS policy: a supervisor approving an inspector's submission always hit
+   FORBIDDEN, so the review workflow could never complete for inspections the
+   reviewer did not own. Fix: reviewer allowance (under_review →
+   approved/rejected) precedes ownership; admin bypass, owner submission and
+   NOT_EDITABLE / reviewer-required denials preserved.
+
+**Test-only learnings (documented in-suite, no production change):**
+`live()` queries swallow fetcher errors by design (log + resolve undefined so
+a bad subscription never hangs the UI) — denied-path assertions capture
+`console.error`; `evidence.upload`'s client-side site check does NOT mask
+existence (cross-tenant → FORBIDDEN) while `respondCorrectiveAction` does
+(invisible row → NOT_FOUND); the generated site-code prefix is
+`MGL-<COUNTY>-####` from the county string (e.g. MGL-BOMI-). Two PGlite
+authoring notes are in the bridge header: the one-bundled-exec identity rule
+above, and setof-RPC shaping via `proretset`.
+
+**Honest limits of this session:**
+
+1. The bridge is a high-fidelity PostgREST emulation, not PostgREST: the
+   query-shape vocabulary is a curated subset, realtime is faked as
+   immediate re-query, signed URLs are bridge-local. Wire quirks outside the
+   subset would not be caught here.
+2. Migration 0007 is repo-lineage only. The live project already converged on
+   the two-argument `(county, operator_name)` access predicate (docs/11 Gap
+   #2 session), so its sites-read policy is likely already immune to defect 2
+   — unverified. Defect 3 (guard order) on live: status unknown. The 0007
+   live-convergence pass has NOT been run; it needs an owner token and is a
+   separate, explicit step.
+3. 46 tests give every exported surface ≥1 authorized + ≥1 denied path, but
+   not every branch; offline-queue replay paths remain covered by the offline
+   suites, not this one.
+
+**Directive §5 classification:** Gap #3 — **IMPLEMENTED (repo + tests
+green)**. Gap #4 (account recovery/MFA) — **PLANNED** (untouched).
+
+## Prior session, part 2 [2026-09-26 — Gap #2: evidence URL revocation]
+
 **Session:** Gap Closure Directive v1.0, Gap #2 (Priority A) — evidence signed-URL revocation path
 **Date:** 2026-09-26
 **Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (82 passing
@@ -7,8 +115,6 @@ across 7 files — 71 prior + 10 new evidence-URL mint-gate tests + 1 new
 migration-apply 0006 assertion) · 4 live-anon probes green · live convergence
 applied and verified with the same-session token (acceptance proof executed on
 the live project inside one rolled-back transaction; zero artifacts)
-
-## This session, part 2 [2026-09-26 — Gap #2: evidence URL revocation]
 
 **Directive item:** Priority A gap 2 — signed evidence URLs were valid 1 hour
 with no revocation; add a mechanism to invalidate a signed URL early.
