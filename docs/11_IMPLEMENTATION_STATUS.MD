@@ -1,13 +1,105 @@
 # 11 — Implementation Status
 
+**Session:** §11 — inspection template editor (admin UI)
+**Date:** 2026-09-27
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (178 passing
+across 12 files — 168 prior + 10 new template-editor tests) · one production
+defect found by the suite and fixed (migration 0008: missing templates DELETE
+policy — admin deletion silently deleted nothing) · live convergence for 0008
+NOT yet run (see honest limits)
+
+## This session [2026-09-27 — §11: inspection template editor]
+
+**Directive item:** §11 — templates must be authorable in the product, not
+only in the data layer: "inspection design is configurable without a code
+change."
+
+**Acceptance criteria (stated before coding):** an admin can create and edit
+a template (sections → questions, the four answer types, required flags,
+select options), publish/unpublish it, and delete an unused one — from the
+UI; a template saved in the editor is immediately offered to the field draft
+flow (including offline devices, since templates are read through the same
+query); a malformed template can never be persisted (the field flow keys
+answers `si:qi` and renders controls from answerType, so shape IS a
+contract); non-admin identities cannot save/publish/delete; every change is
+audit logged.
+
+**Implementation:**
+
+- `src/lib/template-schema.ts` [NEW] — `validateTemplateSections()`, the
+  single shape authority shared by the editor (live feedback) and the data
+  layer (authoritative re-check). Refusal tokens name the offending row
+  (`TEMPLATE_Q_1_2_LABEL_REQUIRED`). Selects must carry options; required
+  flags must be real booleans; labels/titles bounded. Unknown extra JSON
+  fields stay permitted (jsonb storage; future question types need no
+  migration).
+- `src/lib/backend.ts` [EXTENDED] — `listTemplatesAll()` (editor list,
+  including unpublished), `saveTemplate()` (create or update; admin-only;
+  re-validates server-side; audit `template.create`/`template.update`),
+  `setTemplateActive()` (publish/unpublish; audit), `deleteTemplate()`
+  (admin-only; refuses `TEMPLATE_IN_USE` when inspections reference the
+  template so history keeps its shape; audit `template.delete`).
+- `src/pages/Templates.tsx` [NEW] — `/portal/templates` list (status chip,
+  section/question counts, publish toggle, delete) and the editor:
+  sections with reorder/remove, questions with answer-type selector,
+  conditional options field for selects, required checkboxes, live
+  validation banner, dirty-state gating of the save button.
+- `src/main.tsx` / `src/pages/PortalLayout.tsx` [EXTENDED] — routes
+  (`templates`, `templates/new`, `templates/:templateId`) + nav entry.
+- `tests/helpers/backend-edge.ts` [EXTENDED] — the bridge's query builder
+  gains the `.delete()` verb (the `__delete__` exec path already existed;
+  only the supabase-js-shaped method was missing).
+- `tests/template-editor.test.ts` [NEW] — 10 tests: the shape contract
+  (accepted field-flow shape; every refusal token; indices in tokens); the
+  admin workflow over the bridge (create → publish → appears in the field
+  flow's `listTemplates`; edit → inspectors receive the edited shape;
+  malformed refused server-side with nothing persisted; unpublish hides
+  from the field flow while the row survives; delete refused `IN_USE` for
+  the seeded referenced template, allowed for an unused one; inspector,
+  supervisor and operator all FORBIDDEN on save/publish/delete while still
+  able to READ templates).
+
+**Production defect found (migration 0008):** `mg_guard_template_write()`
+carries an admin-only DELETE branch and `deleteTemplate()` exists — but 0001
+defined **no** "templates delete" RLS policy. Under RLS, rows invisible to a
+DELETE are silently skipped: Postgres deleted zero rows WITHOUT error (the
+BEFORE DELETE guard never fired — triggers run only on rows that pass the
+policy filter). Admin template deletion was a silent no-op on every lineage
+with this schema. 0008 adds `create policy "templates delete" … using
+(mg_is_admin())`. Verified by test: unreferenced template deleted (row gone,
+audit row present); referenced template refused `TEMPLATE_IN_USE` by the
+data layer.
+
+**Honest limits of this session:**
+
+1. Migration 0008 is repo-lineage only; the live convergence pass has NOT
+   been run (owner token, separate explicit step). Until converged, live
+   admin deletion of templates silently no-ops exactly as described.
+2. Editing a template that existing inspections reference changes the
+   TEMPLATE, not the historical answers (answers were captured at submission
+   time and remain keyed to the section/question indices of their era).
+   The editor does not warn when editing a referenced template — if a
+   changed question order would make historical answers ambiguous to
+   render, that is a known interpretive limit of index-keyed answers,
+   documented here rather than hidden.
+3. No template versioning/draft-revision history: an edit overwrites. The
+   audit trail records who changed what and when, but not a full diff.
+4. The editor covers the four shipped answer types only; adding a type
+   requires code (renderer + validator), though not a migration.
+
+**Directive §5 classification:** Template editor — **IMPLEMENTED (repo +
+tests)**; 0008 live convergence outstanding. Remaining functionality row in
+docs/16: evidence field UI polish (camera capture, batch upload) —
+**PLANNED**.
+
+## Prior session [2026-09-27 — Priority B §20 rework: structural operator section]
+
 **Session:** Gap Closure Directive v1.0, Priority B item 5 (rework) — structural operator section with route-level isolation
 **Date:** 2026-09-27
 **Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (168 passing
 across 11 files — 147 prior + 21 new operator-isolation tests) · acceptance
 criterion verified by test: an operator account cannot reach any staff-only
 route or query · no schema migration required
-
-## This session [2026-09-27 — Priority B §20 rework: structural operator section]
 
 **Directive item (owner feedback):** the prior §20 build reduced operators to
 a filtered staff view inside the staff portal — conditionally-hidden nav plus

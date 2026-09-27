@@ -30,7 +30,11 @@ suspended / closed). Create and status change are admin-only and audit logged.
 
 ### Inspections [IMPLEMENTED]
 Configurable templates (sections → questions; boolean/text/number/select answer
-types). Lifecycle: draft → under_review → approved / rejected. Drafts are created
+types) — designed in an admin template editor at `/portal/templates`
+(§11: inspection design is data, not code; shape validated live in the editor
+and re-validated server-side; publish/unpublish; delete refused while
+inspections reference the template — migration 0008 completed the missing
+DELETE policy). Lifecycle: draft → under_review → approved / rejected. Drafts are created
 on-device and sync idempotently (offline queue). GPS capture with accuracy.
 Reviewer approve/reject with note. Findings with severity, and the compliance
 chain: inspection → finding → corrective action → deadline → response →
