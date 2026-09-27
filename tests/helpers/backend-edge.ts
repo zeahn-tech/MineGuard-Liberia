@@ -230,25 +230,50 @@ export const edgeIdentity = {
 
 type Row = Record<string, unknown>;
 
-/** One wire request = one transaction with the caller's identity. */
+/**
+ * One wire request = one transaction with the caller's identity.
+ *
+ * CRITICAL (proven by probe, 2026-09-26): the role/claims SET LOCAL statements
+ * and the payload SQL MUST travel in ONE bundled db.exec() script. Executing
+ * them as separate exec()/query() calls on the same connection leaves RLS
+ * policies evaluating with a stale/absent identity — `mg_is_admin()` returns
+ * true to a preceding SELECT, yet the INSERT's WITH CHECK fails with 42501
+ * (PGlite session-state quirk; the shared fixture seed avoids it only because
+ * db.exec() runs its whole script as one batch). Bundling also matches the
+ * wire contract: PostgREST applies JWT claims and runs the statement inside a
+ * single request transaction.
+ */
 async function wireQuery(sql: string): Promise<Row[]> {
   return enqueue(async () => {
     const db = await getEdgeDb();
-    await db.exec("begin");
+    const uidAtCall = current.uid;
+    const identity = uidAtCall
+      ? `set local role authenticated; set local request.jwt.claims = '${JSON.stringify({ sub: uidAtCall, role: "authenticated" })}';`
+      : `set local role anon; set local request.jwt.claims = '';`;
+    // One batch: BEGIN → SET role → SET claims → payload → COMMIT (5
+    // statements). db.exec() returns one result per statement; the payload
+    // result is at index 3. Its RETURNING/SELECT rows are the PostgREST-
+    // shaped response body.
+    const script = `begin; ${identity} ${sql}; commit;`;
     try {
-      await db.exec(
-        current.uid
-          ? `set local role authenticated; set local request.jwt.claims = '${JSON.stringify({ sub: current.uid, role: "authenticated" })}';`
-          : `set local role anon; set local request.jwt.claims = '';`,
-      );
-      const res = await db.query(sql);
-      await db.exec("commit");
-      return res.rows as Row[];
+      const results = await db.exec(script);
+      const payload = results[3];
+      return ((payload && payload.rows) ?? []) as Row[];
     } catch (e) {
+      // The batch aborted mid-script; clear any implicit txn state.
       try {
         await db.exec("rollback");
       } catch {
-        /* already aborted */
+        /* nothing to roll back */
+      }
+      // Diagnostic: re-derive the identity inside a fresh transaction to
+      // show exactly what the RLS policies saw when the payload failed.
+      try {
+        const diag = `begin; ${identity} select auth.uid() as uid, public.mg_is_admin() as admin, current_user as u, current_setting('request.jwt.claims', true) as claims; rollback;`;
+        const dr = await db.exec(diag);
+        console.error(`[bridge] FAILED: ${String((e as { message?: string })?.message ?? e)}\n  SQL: ${sql.slice(0, 200)}\n  identity-in-txn: ${JSON.stringify(dr[3]?.rows?.[0] ?? null)}`);
+      } catch {
+        console.error(`[bridge] FAILED: ${String((e as { message?: string })?.message ?? e)}\n  SQL: ${sql.slice(0, 200)}`);
       }
       throw e;
     }
@@ -579,9 +604,12 @@ async function rpcReturnType(fn: string): Promise<string> {
   const hit = rpcReturnCache.get(fn);
   if (hit) return hit;
   const db = await getEdgeDb();
+  // proretset distinguishes setof functions; regtype alone renders the
+  // ELEMENT type ("evidence"), never "setof evidence".
   const res = await db.query(
-    `select prorettype::regtype::text as rt from pg_proc p
-       join pg_namespace n on n.oid = p.pronamespace
+    `select case when proretset then 'setof ' || prorettype::regtype::text
+                 else prorettype::regtype::text end as rt
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname = 'public' and p.proname = '${fn.replace(/'/g, "''")}'`,
   );
   const rt = String((res.rows[0] as Row | undefined)?.rt ?? "");

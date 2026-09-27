@@ -130,27 +130,48 @@ export function backendError(err: unknown): Error {
           ? err
           : "";
 
-  if (message) {
-    if (
-      message.includes("FORBIDDEN_ROLE_CHANGE") ||
-      message.includes("row-level security") ||
-      message.includes("42501")
-    ) {
-      return new Error("FORBIDDEN");
-    }
-    if (message.includes("RATE_LIMITED")) return new Error("RATE_LIMITED");
-    if (message.includes("NOT_FOUND")) return new Error("NOT_FOUND");
-    if (message.includes("UNAUTHENTICATED")) return new Error("UNAUTHENTICATED");
+  // PostgREST puts the SQLSTATE in the `code` field, separate from the
+  // message — capture both before matching (a bare 42501 object whose message
+  // is e.g. "permission denied for table sites" must map to FORBIDDEN too).
+  const code =
+    typeof err === "object" && err !== null && "code" in err
+      ? String((err as { code: unknown }).code ?? "")
+      : "";
+
+  if (message || code) {
+    // ORDER MATTERS: specific tokens BEFORE generic substrings they contain.
+    // "USER_NOT_FOUND" contains "NOT_FOUND" — the generic branch used to
+    // swallow it and the UI showed NOT_FOUND instead of the human text.
+    if (message.includes("USER_NOT_FOUND"))
+      return new Error(
+        "No account with that email — the person must sign up first.",
+      );
     if (message.includes("UNREGISTERED_USER"))
       return new Error(
         "Your account has no profile row yet — reload the page and try again.",
       );
     if (message.includes("GUEST_ACCOUNT")) return new Error(message);
-    if (message.includes("USER_NOT_FOUND"))
-      return new Error(
-        "No account with that email — the person must sign up first.",
-      );
-    if (message.includes("PGRST116") || message.includes("No rows")) {
+    if (message.includes("RATE_LIMITED")) return new Error("RATE_LIMITED");
+    if (message.includes("UNAUTHENTICATED")) return new Error("UNAUTHENTICATED");
+    // Guard-trigger raises (code P0001) carry these exact stable tokens in
+    // their message text (see mg_guard_* in 0001_initial_schema.sql) — map
+    // them instead of JSON-round-tripping the whole object at the caller.
+    if (message.includes("NOT_REVIEWABLE")) return new Error("NOT_REVIEWABLE");
+    if (message.includes("NOT_EDITABLE")) return new Error("NOT_EDITABLE");
+    if (
+      message.includes("FORBIDDEN_ROLE_CHANGE") ||
+      message.includes("FORBIDDEN") ||
+      message.includes("row-level security") ||
+      message.includes("42501") ||
+      code === "42501"
+    ) {
+      return new Error("FORBIDDEN");
+    }
+    if (
+      message.includes("NOT_FOUND") ||
+      message.includes("PGRST116") ||
+      message.includes("No rows")
+    ) {
       return new Error("NOT_FOUND");
     }
   }
