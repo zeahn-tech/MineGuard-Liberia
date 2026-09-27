@@ -442,6 +442,13 @@ class WireQuery {
     return this;
   }
 
+  delete() {
+    // PostgREST .delete() carries no body; the exec path dispatches on this
+    // sentinel and emits `delete from … where … returning 1 as deleted`.
+    this.values = { __delete__: true } as unknown as Record<string, unknown>;
+    return this;
+  }
+
   single() {
     this.wantSingle = true;
     return this;

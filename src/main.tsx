@@ -26,6 +26,12 @@ const CommunitySubmit = lazy(() => import("./pages/CommunitySubmit.tsx"));
 const CommunityTrack = lazy(() => import("./pages/CommunityTrack.tsx"));
 const Audit = lazy(() => import("./pages/Audit.tsx"));
 const Security = lazy(() => import("./pages/Security.tsx"));
+const TemplateList = lazy(() =>
+  import("./pages/Templates.tsx").then((m) => ({ default: m.TemplateList })),
+);
+const TemplateEditor = lazy(() =>
+  import("./pages/Templates.tsx").then((m) => ({ default: m.TemplateEditor })),
+);
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 const OperatorLayout = lazy(() => import("./pages/operate/OperatorLayout.tsx"));
 const OperatorOverview = lazy(() => import("./pages/operate/OperatorOverview.tsx"));
@@ -174,6 +180,9 @@ createRoot(document.getElementById("root")!).render(
               <Route path="environment/:observationId" element={<ObservationDetail />} />
               <Route path="community" element={<Community />} />
               <Route path="audit" element={<Audit />} />
+              <Route path="templates" element={<TemplateList />} />
+              <Route path="templates/new" element={<TemplateEditor />} />
+              <Route path="templates/:templateId" element={<TemplateEditor />} />
               <Route path="security" element={<Security />} />
             </Route>
 

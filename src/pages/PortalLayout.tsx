@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  ClipboardList,
   CloudOff,
   Command,
   FileCheck2,
@@ -64,6 +65,7 @@ const NAV = [
   { to: "/portal/environment", label: "Environment", icon: Leaf },
   { to: "/portal/community", label: "Community Reports", icon: MessageSquareWarning },
   { to: "/portal/audit", label: "Audit Log", icon: ScrollText },
+  { to: "/portal/templates", label: "Templates", icon: ClipboardList },
   { to: "/portal/security", label: "Account Security", icon: ShieldEllipsis },
 ];
 

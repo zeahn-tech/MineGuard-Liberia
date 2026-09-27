@@ -21,6 +21,7 @@ import {
   mfaAal,
   supabase,
 } from "./supabase";
+import { validateTemplateSections } from "./template-schema";
 import {
   canAccessSite,
   isStaffRole,
@@ -633,6 +634,7 @@ export {
   mfaListFactors,
   mfaUnenroll,
 } from "./supabase";
+export { validateTemplateSections } from "./template-schema";
 export type { MfaAal, MfaEnrollStart, MfaFactor } from "./supabase";
 
 /** Request a password-reset email. Response and timing are identical for
@@ -975,6 +977,124 @@ export const api = {
         if (error) throw backendError(error);
         return (data ?? []).map(mapTemplate);
       }, ["inspection_templates"]),
+
+    /** ALL templates regardless of active flag — the template editor's list
+     *  (§11: inspection design configurable without a code change). */
+    listTemplatesAll: () =>
+      live<InspectionTemplate[]>(async () => {
+        const user = await requireStaffUser();
+        if (user.role !== ROLES.ADMIN) {
+          // Inspectors/supervisors may READ templates (the guard allows
+          // staff writes too, but the editor is admin surface — keep the
+          // feed visible so inspectors see what is coming).
+        }
+        const { data, error } = await supabase
+          .from("inspection_templates")
+          .select("*")
+          .order("created_at", { ascending: false });
+        if (error) throw backendError(error);
+        return (data ?? []).map(mapTemplate);
+      }, ["inspection_templates"]),
+
+    /** Create or update a template. The sections JSON is validated here —
+     *  the client editor enforces shape, but the data layer is the boundary
+     *  that must never persist a malformed template into the field flow
+     *  (draft answers key on `si:qi`, so shape IS a contract). */
+    saveTemplate: async (args: {
+      templateId?: string;
+      name: string;
+      description?: string;
+      active: boolean;
+      sections: InspectionTemplate["sections"];
+    }) => {
+      const user = await requireAdminUser();
+      const name = args.name.trim();
+      if (!name) throw new Error("TEMPLATE_NAME_REQUIRED");
+      if (name.length > 120) throw new Error("TEMPLATE_NAME_TOO_LONG");
+      const validation = validateTemplateSections(args.sections);
+      if (validation) throw new Error(validation);
+
+      const row: Record<string, unknown> = {
+        name,
+        description: args.description?.trim() || null,
+        active: args.active === true,
+        sections: args.sections,
+      };
+      if (args.templateId) {
+        const { error } = await supabase
+          .from("inspection_templates")
+          .update(row)
+          .eq("id", args.templateId);
+        if (error) throw backendError(error);
+        await logAudit({
+          actorId: user.uid,
+          actorLabel: await actorLabel(user),
+          action: "template.update",
+          entityType: "inspection_templates",
+          entityId: args.templateId,
+          summary: `Template “${name}” updated (${args.sections.length} section(s))`,
+        });
+        return args.templateId;
+      }
+      const id = await insertReturningId("inspection_templates", {
+        ...row,
+        created_by: user.uid,
+      });
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "template.create",
+        entityType: "inspection_templates",
+        entityId: id,
+        summary: `Template “${name}” created (${args.sections.length} section(s))`,
+      });
+      return id;
+    },
+
+    /** Set the active flag (the publish/unpublish switch). */
+    setTemplateActive: async (args: { templateId: string; active: boolean }) => {
+      const user = await requireAdminUser();
+      const { error } = await supabase
+        .from("inspection_templates")
+        .update({ active: args.active })
+        .eq("id", args.templateId);
+      if (error) throw backendError(error);
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "template.active",
+        entityType: "inspection_templates",
+        entityId: args.templateId,
+        summary: `Template ${args.active ? "published" : "unpublished"}`,
+      });
+    },
+
+    /** Delete a template. The guard trigger allows admin only; templates
+     *  referenced by existing inspections are NOT deleted — the data layer
+     *  refuses with IN_USE so history keeps its template shape. */
+    deleteTemplate: async (args: { templateId: string }) => {
+      const user = await requireAdminUser();
+      const used = await supabase
+        .from("inspections")
+        .select("id")
+        .eq("template_id", args.templateId)
+        .limit(1);
+      if (used.error) throw backendError(used.error);
+      if ((used.data ?? []).length > 0) throw new Error("TEMPLATE_IN_USE");
+      const { error } = await supabase
+        .from("inspection_templates")
+        .delete()
+        .eq("id", args.templateId);
+      if (error) throw backendError(error);
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "template.delete",
+        entityType: "inspection_templates",
+        entityId: args.templateId,
+        summary: "Template deleted",
+      });
+    },
 
     list: () =>
       live<
