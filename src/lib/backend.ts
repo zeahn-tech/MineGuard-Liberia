@@ -18,6 +18,7 @@ import {
   authUserId,
   backendError,
   bumpProfileVersion,
+  mfaAal,
   supabase,
 } from "./supabase";
 import {
@@ -618,6 +619,48 @@ function authErrorMessage(err: { message?: string } | null | undefined): string 
   return err?.message ?? "AUTH_FAILED";
 }
 
+// ---------------------------------------------------------------------------
+// ACCOUNT RECOVERY + MFA — Gap Closure Directive Gap #4 (docs/04 gap 2).
+// Password reset (request + set) and TOTP factor lifecycle over the GoTrue
+// helpers in src/lib/supabase.ts. Recovery CODES and WebAuthn/phone factors
+// are NOT implemented (documented residual).
+// ---------------------------------------------------------------------------
+
+export {
+  mfaAal,
+  mfaEnrollStart,
+  mfaEnrollVerify,
+  mfaListFactors,
+  mfaUnenroll,
+} from "./supabase";
+export type { MfaAal, MfaEnrollStart, MfaFactor } from "./supabase";
+
+/** Request a password-reset email. Response and timing are identical for
+ *  known and unknown addresses (no account enumeration) — Supabase does the
+ *  same server-side. The redirect lands on the app ROOT (not a hash route):
+ *  supabase-js exchanges the recovery token in the URL fragment/query before
+ *  the router sees it, restoring a session for setting the new password.
+ *  With a recovery session active, change the password on /portal/security
+ *  or via the /auth reset panel. */
+export async function resetPasswordEmail(email: string) {
+  // Bun/SSR-safe: tests run the data layer without a DOM.
+  const base =
+    typeof window !== "undefined"
+      ? `${window.location.origin}${window.location.pathname}`
+      : "http://localhost:5173/";
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: base,
+  });
+  if (error) throw new Error(authErrorMessage(error));
+}
+
+/** Set a new password from a recovery session (the email link restores a
+ *  privileged session GoTrue treats as aal1 for password update). */
+export async function updatePassword(newPassword: string) {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw new Error(authErrorMessage(error));
+}
+
 /** Create the profile row for a fresh account (idempotent; the
  *  on_auth_user_created trigger normally does this first). */
 export async function ensureProfileDoc() {
@@ -633,6 +676,22 @@ export async function signInEmail(email: string, password: string) {
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw new Error(authErrorMessage(error));
   await ensureProfileDoc();
+}
+
+/** Sign in and return whether the account requires a second step. GoTrue's
+ *  assurance contract: when a VERIFIED factor exists, a fresh password
+ *  session is aal1 while the account requires aal2 — MFA_CHALLENGE_REQUIRED
+ *  tells the UI to run the authenticator-code step. profileVersion is
+ *  intentionally NOT bumped here (ensureProfileDoc runs post-challenge). */
+export async function signInEmailMfaAware(email: string, password: string) {
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw new Error(authErrorMessage(error));
+  const aal = await mfaAal();
+  if (aal.next === "aal2" && aal.current !== "aal2") {
+    return { mfaRequired: true };
+  }
+  await ensureProfileDoc();
+  return { mfaRequired: false };
 }
 
 export async function signUpEmail(email: string, password: string, name?: string) {

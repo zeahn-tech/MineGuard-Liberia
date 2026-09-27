@@ -23,6 +23,7 @@ const Community = lazy(() => import("./pages/Community.tsx"));
 const CommunitySubmit = lazy(() => import("./pages/CommunitySubmit.tsx"));
 const CommunityTrack = lazy(() => import("./pages/CommunityTrack.tsx"));
 const Audit = lazy(() => import("./pages/Audit.tsx"));
+const Security = lazy(() => import("./pages/Security.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 const InspectionsLocal = lazy(() =>
   import("./pages/Inspections.tsx").then((m) => ({
@@ -143,6 +144,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="environment/:observationId" element={<ObservationDetail />} />
               <Route path="community" element={<Community />} />
               <Route path="audit" element={<Audit />} />
+              <Route path="security" element={<Security />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

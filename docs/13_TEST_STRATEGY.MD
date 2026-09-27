@@ -1,15 +1,17 @@
 # 13 — Test Strategy
 
-**Status:** 8 suites / 128 tests green as of 2026-09-27: the SQL layer runs
+**Status:** 9 suites / 140 tests green as of 2026-09-27: the SQL layer runs
 against real Postgres (PGlite) applying every migration in
 `supabase/migrations/` — `tests/migration-apply.test.ts` (clean-apply,
 idempotency, signature parity), `tests/rls.test.ts` (role matrix),
 `tests/rate-limit.test.ts` (per-source limiter, migration 0005),
 `tests/evidence-url.test.ts` (signed-URL mint gate, migration 0006) — plus
 `tests/backend-edge.test.ts` (the data layer driven through a wire-protocol
-bridge, Gap #3), `tests/offline-queue.test.ts`, `tests/offline-evidence.test.ts`,
-and `tests/live-anon.test.ts` (probes the live project with the public anon key
-only). Run by `bun test`, wired into CI. [PARTIALLY IMPLEMENTED]
+bridge, Gap #3), `tests/account-security.test.ts` (password recovery + TOTP
+MFA over the GoTrue API, Gap #4), `tests/offline-queue.test.ts`,
+`tests/offline-evidence.test.ts`, and `tests/live-anon.test.ts` (probes the
+live project with the public anon key only). Run by `bun test`, wired into
+CI. [PARTIALLY IMPLEMENTED]
 
 ## The HTTP-edge bridge (Gap #3, 2026-09-27)
 

@@ -10,7 +10,7 @@ require evidence across the dimensions below.
 |-----------|-------|----------------|
 | Functionality | 🟡 Substantial | All core modules implemented end-to-end; evidence UI, operator portal surface, template editor outstanding |
 | Security — authorization | 🟢 Core solid | Centralized authz core; every function guarded; scope + tenant isolation server-side |
-| Security — hardening | 🟡 Gaps | Per-source report rate limiting + evidence signed-URL mint gate (0005/0006) done (repo + live, tested); MFA/recovery outstanding |
+| Security — hardening | 🟡 Gaps | Per-source report rate limiting + evidence signed-URL mint gate (0005/0006) done (repo + live, tested); TOTP MFA + password recovery done in repo (Gap #4, tested) — live project MFA/SMTP configuration + convergence pending |
 | Data integrity | 🟢 Core solid | Provenance, lifecycle states, audit log, verification enums; unique-code guard pending |
 | Offline behavior | 🟢 Inspections | Local-first, retry, dedupe; media offline queue pending |
 | Synchronization | 🟢 Inspections | Idempotent clientRef sync; conflict strategy documented |

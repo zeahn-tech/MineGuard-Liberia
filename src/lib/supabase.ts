@@ -17,7 +17,9 @@ export let supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_K
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: false,
+    // Recovery links (Gap #4) restore their session from the URL — the token
+    // exchange must run before the hash router claims the location.
+    detectSessionInUrl: true,
     storageKey: "mg.supabase.auth.v1",
   },
   realtime: {
@@ -107,6 +109,118 @@ export function getProfileVersion(): number {
 export async function getSessionToken(): Promise<string | null> {
   const { data } = await supabase.auth.getSession();
   return data.session?.access_token ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// MFA + ACCOUNT RECOVERY — Gap Closure Directive Gap #4.
+//
+// Thin, typed wrappers over the GoTrue MFA API (supabase.auth.mfa.*) so the
+// data layer and the UI never touch raw wire shapes. Error mapping follows
+// the same stable-token convention as authErrorMessage(): the UI matches on
+// message text, never on error instances.
+//
+// HONEST SCOPE (docs/04 gap 2): enrollment, sign-in challenge, unenroll,
+// authenticator-assurance level, password reset request + set. Recovery
+// CODES and WebAuthn/phone factors are NOT implemented — TOTP only, one
+// factor at a time in the UI, documented as the residual.
+// ---------------------------------------------------------------------------
+
+export type MfaFactor = {
+  id: string;
+  factorType: string;
+  status: string;
+  friendlyName?: string | null;
+  createdAt?: string | null;
+};
+
+export type MfaAal = {
+  /** Assurance the CURRENT session has proven. */
+  current: "aal1" | "aal2" | null;
+  /** Assurance the account REQUIRES next (aal2 when a verified factor exists). */
+  next: "aal1" | "aal2" | null;
+};
+
+export type MfaEnrollStart = {
+  factorId: string;
+  /** Base32 secret for manual entry into the authenticator app. */
+  secret: string | null;
+  /** QR image (SVG/data URL) when GoTrue provides one. */
+  qr: string | null;
+  /** otpauth:// URI when GoTrue provides one. */
+  uri: string | null;
+};
+
+/** Map GoTrue MFA failures to the stable tokens the UI matches on. */
+function mfaErrorMessage(err: { message?: string } | null | undefined): string {
+  const m = (err?.message ?? "").toLowerCase();
+  if (m.includes("too many") || m.includes("rate limit") || m.includes("over_request_rate_limit"))
+    return "TOO_MANY_ATTEMPTS";
+  if (m.includes("not found")) return "MFA_NOT_FOUND";
+  if (m.includes("invalid") || m.includes("totp") || m.includes("code"))
+    return "MFA_INVALID_CODE";
+  if (m.includes("already verified")) return "MFA_ALREADY_VERIFIED";
+  if (m.includes("unverified") || m.includes("enroll")) return "MFA_NOT_ENROLLED";
+  return err?.message ?? "AUTH_FAILED";
+}
+
+/** Current vs required assurance level for the signed-in account. */
+export async function mfaAal(): Promise<MfaAal> {
+  const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (error) throw new Error(mfaErrorMessage(error));
+  // AuthenticatorAssuranceLevels includes a (string & {}) widen branch that
+  // defeats literal narrowing — cast through the stable wire literals.
+  const current = (data.currentLevel ?? null) as MfaAal["current"];
+  const next = (data.nextLevel ?? null) as MfaAal["next"];
+  return { current, next };
+}
+
+/** Verified + unverified factors of the signed-in account. */
+export async function mfaListFactors(): Promise<MfaFactor[]> {
+  const { data, error } = await supabase.auth.mfa.listFactors();
+  if (error) throw new Error(mfaErrorMessage(error));
+  return (data.totp ?? []).map((f) => ({
+    id: f.id,
+    factorType: f.factor_type ?? "totp",
+    status: f.status,
+    friendlyName: f.friendly_name ?? null,
+    createdAt: f.created_at ?? null,
+  }));
+}
+
+/** Start TOTP enrollment: creates an UNVERIFIED factor and returns the
+ *  authenticator secret (manual entry) plus QR material when provided. */
+export async function mfaEnrollStart(friendlyName?: string): Promise<MfaEnrollStart> {
+  const { data, error } = await supabase.auth.mfa.enroll({
+    factorType: "totp",
+    friendlyName: friendlyName ?? "Authenticator app",
+  });
+  if (error) throw new Error(mfaErrorMessage(error));
+  if (data.type !== "totp") throw new Error("MFA_UNSUPPORTED_FACTOR");
+  return {
+    factorId: data.id,
+    secret: data.totp?.secret ?? null,
+    qr: data.totp?.qr_code ?? null,
+    uri: data.totp?.uri ?? null,
+  };
+}
+
+/** Complete enrollment: challenge the fresh factor, verify the code, and
+ *  (on success) leave the session at aal2. */
+export async function mfaEnrollVerify(factorId: string, code: string): Promise<void> {
+  const challenge = await supabase.auth.mfa.challenge({ factorId });
+  if (challenge.error) throw new Error(mfaErrorMessage(challenge.error));
+  const { error } = await supabase.auth.mfa.verify({
+    factorId,
+    challengeId: challenge.data.id,
+    code: code.replace(/\s+/g, ""),
+  });
+  if (error) throw new Error(mfaErrorMessage(error));
+}
+
+/** Remove a factor entirely (requires an aal2 session in GoTrue). */
+export async function mfaUnenroll(factorId: string): Promise<void> {
+  const { error } = await supabase.auth.mfa.unenroll({ factorId });
+  if (error) throw new Error(mfaErrorMessage(error));
 }
 
 // ---------------------------------------------------------------------------

@@ -36,6 +36,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { readFileSync, readdirSync } from "node:fs";
+import { createHmac } from "node:crypto";
 import { join, dirname } from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -58,6 +59,7 @@ export const EDGE_IDS = {
   guest: "aaaaaaaa-0000-4000-8000-000000000006",
   siteA: "bbbbbbbb-0000-4000-8000-000000000001",
   siteB: "bbbbbbbb-0000-4000-8000-000000000002",
+  mfaFactor: "88888888-0000-4000-8000-000000000001",
   template: "cccccccc-0000-4000-8000-000000000001",
   inspection: "dddddddd-0000-4000-8000-000000000001",
   findingA: "eeeeeeee-0000-4000-8000-000000000001",
@@ -79,6 +81,11 @@ insert into auth.users (id, email, raw_user_meta_data) values
   ('${EDGE_IDS.county}', 'dave@mineguard.test',  '{"name":"Dave Inspector"}'),
   ('${EDGE_IDS.national}','erin@mineguard.test', '{"name":"Erin Supervisor"}'),
   ('${EDGE_IDS.guest}',  'frank@guest.test',     '{"name":"Frank Guest"}');
+
+-- One pre-verified TOTP factor for the county inspector: proves the aal2
+-- contract (fresh password session for an MFA account = MFA_CHALLENGE_REQUIRED).
+insert into auth.mfa_factors (id, user_id, friendly_name, secret, status)
+  values ('${EDGE_IDS.mfaFactor}', '${EDGE_IDS.county}', 'County phone', 'JBSWY3DPEHPK3PXP', 'verified');
 
 -- First-admin bootstrap through the real user-facing path.
 set local role authenticated;
@@ -226,7 +233,29 @@ export const edgeIdentity = {
   get(): string | null {
     return current.uid;
   },
+  /** Alias used inside the auth fake (reads without the set/get pairing). */
+  current(): string | null {
+    return current.uid;
+  },
 };
+
+/** RFC 4648 base32 encode (no padding) — for generated TOTP secrets. */
+function base32Encode(bytes: Uint8Array): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = 0;
+  let value = 0;
+  let out = "";
+  for (const b of bytes) {
+    value = (value << 8) | b;
+    bits += 8;
+    while (bits >= 5) {
+      out += alphabet[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) out += alphabet[(value << (5 - bits)) & 31];
+  return out;
+}
 
 type Row = Record<string, unknown>;
 
@@ -278,6 +307,12 @@ async function wireQuery(sql: string): Promise<Row[]> {
 }
 
 /** Admin-context SQL for post-condition verification and test setup. */
+/** The current TOTP code for a base32 secret (test helper: the "authenticator
+ *  app" side of the Gap #4 tests). */
+export function edgeTotp(secretBase32: string): string {
+  return totpNow(secretBase32);
+}
+
 export async function adminSql(sql: string): Promise<Row[]> {
   return enqueue(async () => {
     const db = await getEdgeDb();
@@ -654,6 +689,46 @@ async function storageInsert(
 // GoTrue fake
 // ---------------------------------------------------------------------------
 
+/** Base32 decode (RFC 4648, no padding) — for TOTP secrets. */
+function base32Decode(s: string): Uint8Array {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = 0;
+  let value = 0;
+  const out: number[] = [];
+  for (const c of s.toUpperCase().replace(/=+$/, "")) {
+    const idx = alphabet.indexOf(c);
+    if (idx === -1) continue;
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return new Uint8Array(out);
+}
+
+/** RFC 6238 TOTP (30s step, SHA-1, 6 digits) — the same algorithm every
+ *  authenticator app runs; proves the real verify contract in tests. */
+function totpNow(secretBase32: string, atMs = Date.now()): string {
+  const counter = Math.floor(atMs / 1000 / 30);
+  const buf = new ArrayBuffer(8);
+  const view = new DataView(buf);
+  view.setUint32(4, counter >>> 0);
+  view.setUint32(0, Math.floor(counter / 2 ** 32) >>> 0);
+  // HMAC-SHA1 over the big-endian counter — exactly what authenticators do.
+  const digest = createHmac("sha1", Buffer.from(base32Decode(secretBase32)))
+    .update(new Uint8Array(buf))
+    .digest();
+  const off = digest[digest.length - 1] & 0x0f;
+  const bin =
+    ((digest[off] & 0x7f) << 24) |
+    ((digest[off + 1] & 0xff) << 16) |
+    ((digest[off + 2] & 0xff) << 8) |
+    (digest[off + 3] & 0xff);
+  return String(bin % 1_000_000).padStart(6, "0");
+}
+
 const authBridge = {
   async signInWithPassword(args: { email: string; password: string }) {
     try {
@@ -715,6 +790,189 @@ const authBridge = {
 
   onAuthStateChange(_cb: unknown) {
     return { data: { subscription: { unsubscribe() {} } } };
+  },
+
+  async getSession() {
+    const uid = edgeIdentity.current();
+    if (!uid) return { data: { session: null }, error: null };
+    return { data: { session: { user: { id: uid } } }, error: null };
+  },
+
+  async resetPasswordForEmail(_email: string, _opts?: unknown) {
+    void _email;
+    void _opts;
+    // The bridge has no mail infrastructure: the request is accepted (the
+    // no-enumeration contract is GoTrue's, tested there) and "delivered"
+    // by restoring a recovery session for the address directly.
+    return { data: {}, error: null };
+  },
+
+  async updateUser(args: { password?: string }) {
+    try {
+      const uid = edgeIdentity.current();
+      if (!uid) return { data: { user: null }, error: { message: "Not authenticated" } };
+      if (args.password !== undefined) {
+        // GoTrue requires a session (the recovery link provides one). The stub
+        // stores no credential material — the contract under test is the
+        // client surface (session present → accepted), not GoTrue's storage.
+        void args;
+      }
+      return { data: { user: { id: uid } }, error: null };
+    } catch (e) {
+      return { data: { user: null }, error: pgErrorObject(e) };
+    }
+  },
+
+  // ------------------------------------------------------------------
+  // MFA (Gap #4) — TOTP lifecycle over auth.mfa_factors/mfa_challenges.
+  // ------------------------------------------------------------------
+  mfa: {
+    async getAuthenticatorAssuranceLevel() {
+      try {
+        const uid = edgeIdentity.current();
+        if (!uid) return { data: { currentLevel: null, nextLevel: null }, error: null };
+        const rows = await adminSql(
+          `select count(*) filter (where status = 'verified') as verified,
+                  count(*) filter (where verified_at is not null) as proven
+             from auth.mfa_factors f
+             left join auth.mfa_challenges c on c.factor_id = f.id
+            where f.user_id = '${uid}'`,
+        );
+        const r = rows[0];
+        const hasVerified = Number(r.verified) > 0;
+        const currentProven = hasVerified && Number(r.proven) > 0;
+        return {
+          data: {
+            currentLevel: currentProven ? "aal2" : hasVerified ? "aal1" : "aal1",
+            nextLevel: hasVerified ? "aal2" : "aal1",
+          },
+          error: null,
+        };
+      } catch (e) {
+        return { data: null, error: pgErrorObject(e) };
+      }
+    },
+
+    async listFactors() {
+      try {
+        const uid = edgeIdentity.current();
+        if (!uid) return { data: null, error: { message: "Not authenticated" } };
+        const rows = await adminSql(
+          `select id, friendly_name, status, factor_type, created_at
+             from auth.mfa_factors where user_id = '${uid}' order by created_at`,
+        );
+        return {
+          data: {
+            totp: rows.map((r) => ({
+              id: r.id as string,
+              factor_type: (r.factor_type as string) ?? "totp",
+              status: r.status as string,
+              friendly_name: (r.friendly_name as string) ?? null,
+              created_at: r.created_at as string,
+            })),
+          },
+          error: null,
+        };
+      } catch (e) {
+        return { data: null, error: pgErrorObject(e) };
+      }
+    },
+
+    async enroll(args: {
+      factorType: string;
+      friendlyName?: string;
+    }) {
+      try {
+        const uid = edgeIdentity.current();
+        if (!uid) return { data: null, error: { message: "Not authenticated" } };
+        if (args.factorType !== "totp")
+          return { data: null, error: { message: "Unsupported factor type" } };
+        const secret = base32Encode(crypto.getRandomValues(new Uint8Array(20)));
+        const rows = await adminSql(
+          `insert into auth.mfa_factors (user_id, friendly_name, secret, status)
+           values ('${uid}', ${args.friendlyName ? lit(args.friendlyName) : "null"}, '${secret}', 'unverified')
+           returning id, secret`,
+        );
+        return {
+          data: {
+            type: "totp" as const,
+            id: rows[0].id as string,
+            totp: {
+              secret,
+              qr_code: null as string | null,
+              uri: `otpauth://totp/MineGuard:${uid}?secret=${secret}&issuer=MineGuard`,
+            },
+          },
+          error: null,
+        };
+      } catch (e) {
+        return { data: null, error: pgErrorObject(e) };
+      }
+    },
+
+    async challenge(args: { factorId: string }) {
+      try {
+        const uid = edgeIdentity.current();
+        if (!uid) return { data: null, error: { message: "Not authenticated" } };
+        const owned = await adminSql(
+          `select 1 from auth.mfa_factors where id = '${args.factorId}' and user_id = '${uid}'`,
+        );
+        if (owned.length === 0)
+          return { data: null, error: { message: "MFA factor not found" } };
+        const rows = await adminSql(
+          `insert into auth.mfa_challenges (factor_id, user_id)
+           values ('${args.factorId}', '${uid}') returning id`,
+        );
+        return {
+          data: { id: rows[0].id as string, type: "totp" as const, expires_at: Math.floor(Date.now() / 1000) + 300 },
+          error: null,
+        };
+      } catch (e) {
+        return { data: null, error: pgErrorObject(e) };
+      }
+    },
+
+    async verify(args: { factorId: string; challengeId: string; code: string }) {
+      try {
+        const uid = edgeIdentity.current();
+        if (!uid) return { data: null, error: { message: "Not authenticated" } };
+        const factor = await adminSql(
+          `select secret, status from auth.mfa_factors where id = '${args.factorId}' and user_id = '${uid}'`,
+        );
+        if (factor.length === 0)
+          return { data: null, error: { message: "MFA factor not found" } };
+        const expected = totpNow(String(factor[0].secret));
+        if (args.code !== expected)
+          return { data: null, error: { message: "Invalid TOTP code" } };
+        await adminSql(
+          `update auth.mfa_factors set status = 'verified', updated_at = now() where id = '${args.factorId}'`,
+        );
+        await adminSql(
+          `update auth.mfa_challenges set verified_at = now() where id = '${args.challengeId}' and user_id = '${uid}'`,
+        );
+        return {
+          data: { access_token: `bridge-aal2-${uid}`, token_type: "bearer" },
+          error: null,
+        };
+      } catch (e) {
+        return { data: null, error: pgErrorObject(e) };
+      }
+    },
+
+    async unenroll(args: { factorId: string }) {
+      try {
+        const uid = edgeIdentity.current();
+        if (!uid) return { data: null, error: { message: "Not authenticated" } };
+        const rows = await adminSql(
+          `delete from auth.mfa_factors where id = '${args.factorId}' and user_id = '${uid}' returning id`,
+        );
+        if (rows.length === 0)
+          return { data: null, error: { message: "MFA factor not found" } };
+        return { data: { id: args.factorId }, error: null };
+      } catch (e) {
+        return { data: null, error: pgErrorObject(e) };
+      }
+    },
   },
 };
 

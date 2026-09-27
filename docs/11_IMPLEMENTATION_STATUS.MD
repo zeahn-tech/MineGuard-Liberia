@@ -1,5 +1,105 @@
 # 11 — Implementation Status
 
+**Session:** Gap Closure Directive v1.0, Gap #4 (Priority A) — account recovery + MFA
+**Date:** 2026-09-27
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (140 passing
+across 9 files — 128 prior + 12 new account-security tests) · no schema
+migration required (MFA state lives in GoTrue, not `public.*`) · live
+project MFA/SMTP configuration and convergence NOT done (see honest limits)
+
+## This session [2026-09-27 — Gap #4: account recovery + MFA]
+
+**Directive item:** Priority A gap 4 — account recovery and MFA beyond
+password sign-in (docs/04 gap 2, "configuration pending").
+
+**Acceptance criteria (stated before coding):** a user can request a
+password-reset email and set a new password from the emailed link; a user can
+enroll a TOTP authenticator, verify it with a REAL code, and unenroll; once a
+verified factor exists, a fresh password sign-in requires the authenticator
+code before the portal opens; anonymous callers can neither enumerate factors
+nor enroll; no cross-account factor access; the UI never fabricates delivery
+(or removal) of the lost-authenticator path — it states the administrative
+process; every claim is pinned by tests through the unmodified data layer.
+
+**Implementation:**
+
+- `src/lib/supabase.ts` [EXTENDED] — typed GoTrue MFA wrappers
+  (`mfaAal`, `mfaListFactors`, `mfaEnrollStart`, `mfaEnrollVerify`,
+  `mfaUnenroll`) with stable-token error mapping (MFA_INVALID_CODE /
+  MFA_NOT_FOUND / TOO_MANY_ATTEMPTS…); `detectSessionInUrl` turned ON so the
+  recovery email link can restore its session before the hash router claims
+  the URL.
+- `src/lib/backend.ts` [EXTENDED] — `resetPasswordEmail` (request; redirect
+  lands on the app root, never a user-controlled target), `updatePassword`
+  (set, requires the recovery/privileged session), `signInEmailMfaAware`
+  (returns `mfaRequired` when the account requires aal2 and the fresh session
+  hasn't proven it — the GoTrue assurance contract), MFA re-exports.
+- `src/pages/Auth.tsx` [EXTENDED] — three flows added to the existing card:
+  the MFA challenge step (code entry after password, back-to-sign-in), the
+  forgot-password request panel (with the no-enumeration notice), and the
+  recovery-link "set new password" panel (`/auth?mode=reset`).
+- `src/pages/Security.tsx` [NEW] — `/portal/security` under RequireAuth:
+  TOTP enrollment (secret for manual authenticator entry, QR when GoTrue
+  supplies one, verify-then-activate), factor list + remove, password
+  change, and the lost-authenticator administrative-recovery statement.
+- `src/main.tsx` / `src/pages/PortalLayout.tsx` [EXTENDED] — route + nav.
+- `tests/helpers/pglite-db.ts` [EXTENDED] — stub `auth.mfa_factors` /
+  `auth.mfa_challenges` tables (plaintext secrets; stub proves the CLIENT
+  contract, not GoTrue's storage).
+- `tests/helpers/backend-edge.ts` [EXTENDED] — GoTrue fake gains
+  `mfa.getAuthenticatorAssuranceLevel / listFactors / enroll / challenge /
+  verify / unenroll` over those tables, `resetPasswordForEmail`,
+  `updateUser`, `getSession`; TOTP verification is REAL RFC 6238
+  (HMAC-SHA1, 30s step, dynamic truncation) and tests compute the
+  "authenticator app" side with the same math via the exported `edgeTotp`.
+  Seed adds one verified factor for the county inspector.
+- `tests/account-security.test.ts` [NEW] — 12 tests: AAL reporting;
+  wrong-code enrollment rejected (factor stays unverified, next stays aal1);
+  real-code enrollment verifies (next becomes aal2); unenroll; cross-account
+  factor access refused; anonymous enumerate/enroll refused; MFA sign-in
+  reports MFA_CHALLENGE_REQUIRED (and non-MFA sign-in does not);
+  challenge + wrong code fails, right code proves aal2; reset request does
+  not leak account existence; updatePassword requires a session and succeeds
+  with one; duplicate-email signup still EMAIL_IN_USE.
+
+**No migration was needed:** factors, challenges and assurance live in
+GoTrue's own schema, which the client reaches only through the official API.
+The `public.*` schema, RLS and guard triggers are untouched.
+
+**Honest limits of this session:**
+
+1. The live Supabase project must have MFA enabled (Auth → Multi-factor) and
+   SMTP configured for recovery emails before either feature works on live.
+   Both are project configuration requiring owner access — NOT confirmed;
+   the code is ready but unproven on live, and no live convergence was run
+   this session.
+2. TOTP only. Recovery codes, WebAuthn and phone/SMS factors are NOT
+   implemented; the Security page says so. A lost authenticator is recovered
+   administratively through the program office (an admin would need a
+   GoTrue admin API path or dashboard access to drop the factor — itself not
+   built; documented as the operational procedure).
+3. MFA enrollment/verification events are GoTrue-side and do NOT reach
+   `audit_log`. If the audit trail must show them, an auth hook (e.g.
+   `mfa.factor_activated`) writing to a table the RPC layer can read is
+   PROPOSED — requires owner confirmation (new infrastructure).
+4. `signInEmail` (the legacy entry point) still exists for compatibility and
+   does NOT run the MFA check; the Auth page now uses `signInEmailMfaAware`.
+   Any future call site must use the MFA-aware variant or MFA is bypassable
+   at that door.
+5. The bridge's `updateUser` accepts a password change without checking the
+   credential (the stub stores none) — the REAL GoTrue enforces the current
+   password/privileged-session rules; that part of the contract is GoTrue's
+   and is not re-proven here.
+
+**Directive §5 classification:** Account recovery + MFA — **IMPLEMENTED
+(repo, tested); live project configuration pending owner action**. Gap #3's
+0007 live convergence remains outstanding (see prior session). No further
+Priority A gaps remain in docs/16's board; remaining readiness items are the
+non-security rows (restore rehearsal, media field UI, performance,
+accessibility, deployment pipeline).
+
+## Prior session [2026-09-27 — Gap #3: data-layer/HTTP-edge test coverage]
+
 **Session:** Gap Closure Directive v1.0, Gap #3 (Priority A) — data-layer/HTTP-edge test coverage
 **Date:** 2026-09-27
 **Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (128 passing
@@ -7,8 +107,6 @@ across 8 files — 82 prior + 46 new backend-edge tests) · two production
 defects found by the new suite and fixed with probe-proven migrations/code
 (migration 0007; `backendError` ordering) · live convergence for 0007 NOT yet
 run (see honest limits)
-
-## This session [2026-09-27 — Gap #3: data-layer/HTTP-edge test coverage]
 
 **Directive item:** Priority A gap 3 — the data layer (`src/lib/backend.ts`,
 the HTTP edge) had zero test coverage: error shaping (`backendError`),

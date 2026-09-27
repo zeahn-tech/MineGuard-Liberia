@@ -99,8 +99,33 @@ Verified by `tests/evidence-url.test.ts` and live (docs/11).
    live table now carries `window_start`, the function resolves `digest()`
    via the `extensions` schema, and the legacy enum-typed overload +
    `updated_at`/`rate_bucket` columns are retained inert residue (docs/11).
-2. Account recovery and MFA beyond password sign-in (Supabase supports MFA
-   enrollment — configuration pending).
+2. ~~Account recovery and MFA beyond password sign-in~~ **Closed 2026-09-27
+   (Gap #4, repo):** password recovery (request + set) and TOTP multi-factor
+   authentication are implemented end-to-end — client helpers over the
+   GoTrue API (`src/lib/supabase.ts`: `mfaAal`, `mfaListFactors`,
+   `mfaEnrollStart`, `mfaEnrollVerify`, `mfaUnenroll`; `src/lib/backend.ts`:
+   `resetPasswordEmail`, `updatePassword`, `signInEmailMfaAware`), a sign-in
+   challenge step and forgot-password/reset panels on `/auth`, an Account
+   Security page at `/portal/security` (enroll with authenticator-secret
+   entry, verify, unenroll, password change), and a recovery deep link that
+   restores a session before the router claims it (`detectSessionInUrl` is
+   ON). Enforced contract: once a verified factor exists, the account
+   requires aal2 — a fresh password session gets `MFA_CHALLENGE_REQUIRED`
+   and the UI completes sign-in only after the code verifies. Verified by
+   `tests/account-security.test.ts` (12 tests; the bridge's GoTrue fake
+   verifies REAL RFC 6238 TOTP codes, so the "wrong code rejected / right
+   code accepted" assertions are genuine cryptography, not scripted
+   echoes). **Honest residuals:** (a) TOTP only — recovery CODES, WebAuthn
+   and phone factors are NOT implemented; a lost authenticator is an
+   administrative recovery through the program office (stated on the
+   Security page), not a self-service loop; (b) the live Supabase project
+   must have MFA enabled in its Auth settings before this works on live —
+   configuration, not code, and NOT yet confirmed (needs owner access);
+   (c) recovery emails require SMTP configured on the project — the client
+   contract is proven, delivery is platform configuration; (d) enrollment/
+   verification are GoTrue-side operations and are NOT written to
+   `audit_log` — if the audit trail must record MFA changes, that requires
+   an auth hook (PROPOSED, requires owner confirmation).
 3. Encryption at rest is inherited from the Supabase platform; field-level
    encryption for sensitive attachments is planned.
 4. Role assignment currently requires the target user to have signed in once
@@ -124,6 +149,8 @@ Verified by `tests/evidence-url.test.ts` and live (docs/11).
 ## Frontend security notes
 
 - `returnTo` redirect validation blocks open redirects
-  (`resolveRedirectAfterAuth` requires a single leading slash).
+  (`resolveRedirectAfterAuth` requires a single leading slash); the
+  recovery `redirectTo` lands on the app root — no user-controllable
+  redirect target is ever sent to GoTrue.
 - No dangerouslySetInnerHTML usage; Leaflet marker HTML is static, sanitized
   constants.

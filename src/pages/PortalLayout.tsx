@@ -37,6 +37,7 @@ import {
   RefreshCw,
   ScrollText,
   ShieldCheck,
+  ShieldEllipsis,
   UserCog,
 } from "lucide-react";
 import {
@@ -63,6 +64,7 @@ const NAV = [
   { to: "/portal/environment", label: "Environment", icon: Leaf },
   { to: "/portal/community", label: "Community Reports", icon: MessageSquareWarning },
   { to: "/portal/audit", label: "Audit Log", icon: ScrollText },
+  { to: "/portal/security", label: "Account Security", icon: ShieldEllipsis },
 ];
 
 export default function PortalLayout() {

@@ -72,6 +72,27 @@ language sql stable as $$
                   '{}'::jsonb)
 $$;
 
+-- GoTrue MFA stub (Gap #4): the two tables the client-side MFA lifecycle
+-- needs. Secrets are stored in PLAINTEXT here — the real GoTrue encrypts
+-- them; this stub exists to prove the CLIENT contract, not GoTrue's.
+create table auth.mfa_factors (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references auth.users(id) on delete cascade,
+  friendly_name text,
+  factor_type   text not null default 'totp',
+  secret        text not null,
+  status        text not null default 'unverified' check (status in ('unverified','verified')),
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+create table auth.mfa_challenges (
+  id            uuid primary key default gen_random_uuid(),
+  factor_id     uuid not null references auth.mfa_factors(id) on delete cascade,
+  user_id       uuid not null references auth.users(id) on delete cascade,
+  verified_at   timestamptz,
+  created_at    timestamptz not null default now()
+);
+
 grant usage on schema auth to anon, authenticated;
 grant execute on all functions in schema auth to anon, authenticated;
 
