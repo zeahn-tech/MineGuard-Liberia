@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
+import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { useQuery, useMutation } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { useAuth } from "@/hooks/use-auth";
@@ -67,15 +67,6 @@ const NAV = [
   { to: "/portal/security", label: "Account Security", icon: ShieldEllipsis },
 ];
 
-// The operator's own nav (§20): their compliance surface + security. Staff
-// pages (map, environment, audit, community triage) are not operator surface
-// and the backend denies them anyway.
-const OPERATOR_NAV = [
-  { to: "/portal/operate", label: "Compliance", icon: LayoutDashboard },
-  { to: "/portal/incidents", label: "My Incidents", icon: HeartPulse },
-  { to: "/portal/security", label: "Account Security", icon: ShieldEllipsis },
-];
-
 export default function PortalLayout() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
@@ -94,7 +85,6 @@ export default function PortalLayout() {
 
   const isStaff =
     user?.role === "admin" || user?.role === "supervisor" || user?.role === "inspector";
-  const isOperator = user?.role === "operator";
   const isAdmin = user?.role === "admin";
 
   // First-run provisioning: first admin can assign roles; seed available to staff.
@@ -125,15 +115,9 @@ export default function PortalLayout() {
     if (user.profileComplete !== true) setShowProfile(true);
   }, [user]);
 
-  // Operator portal (§20): an operator opening the portal ROOT is redirected
-  // to their dedicated compliance surface instead of the staff command center.
-  // Only the exact root — deep links (e.g. /portal/incidents/:id) stay valid.
-  const location = useLocation();
-  useEffect(() => {
-    if (user?.role === "operator" && location.pathname === "/portal") {
-      navigate("/portal/operate", { replace: true });
-    }
-  }, [user?.role, location.pathname, navigate]);
+  // NOTE (§20 structural split): operators no longer pass through here at
+  // all — RequireStaff bounces them to /operate before this layout renders.
+  // The old conditional-nav and root-redirect logic is gone.
 
   // Offline queue state + auto-sync on reconnect
   useEffect(() => {
@@ -203,9 +187,7 @@ export default function PortalLayout() {
     }
   };
 
-  // Operator portal (§20): operators get their own surface, not the staff
-  // command center with a reduced nav. Staff keep the full NAV.
-  const navItems = isOperator ? OPERATOR_NAV : isStaff ? NAV : NAV.filter((n) => n.label === "Field Inspections" || n.label === "Community Reports" || n.label === "Incidents");
+  const navItems = NAV;
 
   return (
     <div className="min-h-screen bg-background">

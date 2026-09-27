@@ -1202,6 +1202,42 @@ export const api = {
         return (data ?? []).map(mapFinding);
       }, ["findings"]),
 
+    /** Findings feed for the operator portal (§20): every finding on sites
+     *  the caller can access, joined with site identity. Operators are
+     *  strictly tenant-scoped (RLS + mirror); staff get their own scope. */
+    listMyFindings: () =>
+      live<
+        (Finding & { siteCode: string; siteName: string; county: string })[]
+      >(async () => {
+        const user = await requireAuthed(true);
+        if (!user.role) return [];
+        const [findingRaw, siteRaw] = await Promise.all([
+          allRows<AnyRow>("findings"),
+          allRows<AnyRow>("sites"),
+        ]);
+        const sites = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
+        const out = [];
+        for (const r of findingRaw) {
+          const f = mapFinding(r);
+          const site = sites.get(f.siteId);
+          if (!site || !canAccessSite(user, site)) continue;
+          out.push({
+            ...f,
+            siteCode: site.code,
+            siteName: site.name,
+            county: site.county,
+          });
+        }
+        // Openest findings first, then newest.
+        const openRank = (s: Finding["status"]) =>
+          s === "open" ? 0 : s === "acknowledged" ? 1 : s === "resolved" ? 2 : 3;
+        out.sort(
+          (a, b) =>
+            openRank(a.status) - openRank(b.status) || b.createdAt - a.createdAt,
+        );
+        return out;
+      }, ["findings", "sites"]),
+
     addFinding: async (args: {
       inspectionId: string;
       title: string;

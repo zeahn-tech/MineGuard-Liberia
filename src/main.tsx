@@ -4,6 +4,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 import React, { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter, Route, Routes } from "react-router";
+import { RequireStaff } from "@/components/RequireAuth";
 import "./index.css";
 
 const Landing = lazy(() => import("./pages/Landing.tsx"));
@@ -26,6 +27,14 @@ const CommunityTrack = lazy(() => import("./pages/CommunityTrack.tsx"));
 const Audit = lazy(() => import("./pages/Audit.tsx"));
 const Security = lazy(() => import("./pages/Security.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
+const OperatorLayout = lazy(() => import("./pages/operate/OperatorLayout.tsx"));
+const OperatorOverview = lazy(() => import("./pages/operate/OperatorOverview.tsx"));
+const OperatorSites = lazy(() => import("./pages/operate/OperatorSites.tsx").then((m) => ({ default: m.OperatorSites })));
+const OperatorSiteDetail = lazy(() => import("./pages/operate/OperatorSites.tsx").then((m) => ({ default: m.OperatorSiteDetail })));
+const OperatorFindings = lazy(() => import("./pages/operate/OperatorFindings.tsx"));
+const OperatorCorrectiveActions = lazy(() => import("./pages/operate/OperatorCorrectiveActions.tsx"));
+const OperatorIncidents = lazy(() => import("./pages/operate/OperatorIncidents.tsx"));
+const OperatorSecurity = lazy(() => import("./pages/operate/OperatorSecurity.tsx"));
 const InspectionsLocal = lazy(() =>
   import("./pages/Inspections.tsx").then((m) => ({
     default: m.LocalInspectionForm,
@@ -121,13 +130,32 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/report" element={<CommunitySubmit />} />
             <Route path="/report/track" element={<CommunityTrack />} />
 
-            {/* Authenticated portal */}
+            {/* OPERATOR SECTION — a routed section of its own (Priority B
+                §20), gated by RequireOperator. Staff identities are
+                redirected to the staff portal; nothing staff-only renders
+                inside this subtree. */}
+            <Route
+              path="/operate"
+              element={<OperatorLayout />}
+            >
+              <Route index element={<OperatorOverview />} />
+              <Route path="sites" element={<OperatorSites />} />
+              <Route path="sites/:siteId" element={<OperatorSiteDetail />} />
+              <Route path="findings" element={<OperatorFindings />} />
+              <Route path="corrective-actions" element={<OperatorCorrectiveActions />} />
+              <Route path="incidents" element={<OperatorIncidents />} />
+              <Route path="security" element={<OperatorSecurity />} />
+            </Route>
+
+            {/* Authenticated STAFF portal — gated by RequireStaff so an
+                operator account cannot render (or be navigated into) any
+                staff-only surface. */}
             <Route
               path="/portal"
               element={
-                <RequireAuth>
+                <RequireStaff>
                   <PortalLayout />
-                </RequireAuth>
+                </RequireStaff>
               }
             >
               <Route index element={<CommandCenter />} />

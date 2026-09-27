@@ -64,12 +64,19 @@ Browser (field laptop / office)
 - ~~Operators currently reach the portal with a reduced nav, but the backend
   operator-facing listing endpoints are the same staff endpoints with
   role-based filtering; a dedicated operator portal surface is [PLANNED].~~
-  **Closed 2026-09-27 (Priority B §20):** operators now land on a dedicated
-  compliance surface at `/portal/operate` (own sites, corrective-action
-  obligations with the respond flow, tenant-scoped nav) instead of the staff
-  command center. The underlying listing endpoints remain the same shared,
-  server-scoped queries plus `listMyCorrectiveActions` — one authorization
-  core, two presentations.
+  **Closed 2026-09-27 (Priority B §20, structural):** the operator experience
+  is its OWN routed section — `/operate/*` with a dedicated layout shell
+  (`OperatorLayout`), its own nav, offline incident submission with document
+  upload, and the corrective-action respond flow. Section gates are
+  structural, not cosmetic: `RequireStaff` wraps every `/portal/*` staff
+  route (an operator is redirected to `/operate` before any staff page code
+  runs) and `RequireOperator` wraps `/operate/*` (staff are redirected to
+  `/portal`). Underlying queries remain the same server-scoped core plus
+  operator feeds (`listMyFindings`, `listMyCorrectiveActions`) — one
+  authorization core, two presentations, verified by
+  `tests/operator-isolation.test.ts` at both the route layer (router config
+  asserted) and the query layer (every staff surface fails closed for the
+  operator identity; every operator feed is strictly own-tenant).
 - Evidence file serving uses Convex storage URLs gated by an authenticated
   action; per-record ACLs on file fetch are [PLANNED].
 - The site-code generator scans all sites (fine at national registry scale for a

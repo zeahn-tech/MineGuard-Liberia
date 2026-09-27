@@ -59,15 +59,24 @@ markers; community reports as dashed unverified markers. Verified vs reported ar
 visually distinct. Administrative boundaries not depicted [PLANNED — requires
 authoritative boundary data].
 
-### Operator portal [IMPLEMENTED 2026-09-27]
-Dedicated compliance surface for the Operator role (spec §20): the operator's
-own licensed sites, their corrective-action obligations (open / overdue /
-awaiting verification counters, per-action deadline and finding severity), and
-the respond flow — a described action taken, submitted once, verified and
-closed by the reviewing authority. Strict tenant isolation is enforced
-server-side (RLS + `mg_can_access_site` + the respond guard); the page renders
-only what the server already scoped. Cross-tenant obligations are invisible,
-not hidden in the UI. Every response is attributed in the audit trail.
+### Operator portal [IMPLEMENTED 2026-09-27 — structural]
+A dedicated routed section for the Operator role (spec §20) at `/operate/*` —
+not a conditionally-hidden staff view: its own layout shell and nav
+(Overview · My Sites · Findings · Corrective Actions · Incidents · Account
+Security), entered by route gate (`RequireOperator`) with the staff portal
+separately gated (`RequireStaff`). Surfaces: the operator's own licensed
+sites; findings recorded on them (read-only — response flows through
+corrective actions); compliance obligations with the respond flow (a
+described action taken, submitted once, verified and closed by the reviewing
+authority); incident submission with offline queueing (persist-first,
+clientRef dedupe on reconnect) and supporting-document upload (photos/PDFs →
+evidence vault with metadata + audit). Strict tenant isolation is enforced
+server-side (RLS + `mg_can_access_site` + respond/upload guards); the section
+renders only what the server already scoped, and an operator account cannot
+reach any staff-only route or query — verified by
+`tests/operator-isolation.test.ts` (route structure asserted; every staff
+surface fails closed for the operator identity; every operator feed is
+strictly own-tenant).
 
 ### Command center [IMPLEMENTED]
 All statistics computed live from stored data: sites, inspections, findings,

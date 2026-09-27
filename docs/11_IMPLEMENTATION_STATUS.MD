@@ -1,13 +1,100 @@
 # 11 — Implementation Status
 
+**Session:** Gap Closure Directive v1.0, Priority B item 5 (rework) — structural operator section with route-level isolation
+**Date:** 2026-09-27
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (168 passing
+across 11 files — 147 prior + 21 new operator-isolation tests) · acceptance
+criterion verified by test: an operator account cannot reach any staff-only
+route or query · no schema migration required
+
+## This session [2026-09-27 — Priority B §20 rework: structural operator section]
+
+**Directive item (owner feedback):** the prior §20 build reduced operators to
+a filtered staff view inside the staff portal — conditionally-hidden nav plus
+a root redirect. The directive requires a DEDICATED operator experience with
+strict tenant isolation, as its own routed section. Acceptance: an operator
+account cannot reach any staff-only route or query, verified by test.
+
+**What changed structurally:**
+
+- `src/components/RequireAuth.tsx` [REWORKED] — three gates:
+  `RequireAuth` (signed-in with any role; role-less accounts get an explicit
+  no-role notice instead of an empty portal), `RequireStaff` (admin /
+  supervisor / inspector; an operator hitting any staff route is redirected
+  to `/operate`, not to sign-in — redirect-to-auth would loop), and
+  `RequireOperator` (operator only; any other identity is redirected to the
+  staff portal root).
+- `src/main.tsx` [REWORKED] — `/operate/*` is its own routed subtree with
+  `OperatorLayout` as the element (the gate lives in the layout, so every
+  nested route inherits it); `/portal/*` is wrapped in `RequireStaff`. No
+  staff component is routable inside `/operate` and vice versa.
+- `src/pages/PortalLayout.tsx` [SIMPLIFIED] — all operator branching removed
+  (OPERATOR_NAV, root redirect, role filters): the staff portal is staff-only
+  by gate, not by nav filtering.
+- `src/pages/operate/` [NEW SECTION] — `OperatorLayout` (own shell, own nav,
+  offline sync strip), `OperatorOverview` (counters + do-next obligations +
+  own sites), `OperatorSites`/`OperatorSiteDetail`, `OperatorFindings`,
+  `OperatorCorrectiveActions` (the respond flow), `OperatorIncidents`
+  (submission with offline queueing + document upload), `OperatorSecurity`
+  (the Gap #4 MFA/password surface inside the operator shell).
+- `src/pages/Auth.tsx` [EXTENDED] — sign-in without an explicit returnTo
+  lands each identity in its OWN section (operator → `/operate`, staff →
+  `/portal`).
+- `src/lib/backend.ts` [EXTENDED] — `listMyFindings()` (findings feed joined
+  with site identity; RLS + mirror scoped) alongside the prior
+  `listMyCorrectiveActions()`.
+
+**Isolation proof — `tests/operator-isolation.test.ts` [NEW, 21 tests]:**
+
+- Route layer (structural assertions against the shipped source): the
+  `/portal` element is wrapped in `RequireStaff`; `/operate` is its own
+  subtree with `OperatorLayout`; no staff page component is routable inside
+  the operator subtree; `RequireOperator` wraps the operator shell;
+  PortalLayout no longer contains operator branching; sign-in routes by
+  role.
+- Query layer (operator identity through the real data layer): command
+  center equals own-tenant figures (site count == own sites.list length;
+  community-report queue 0); audit log empty with the RLS denial logged;
+  user directory undefined-with-FORBIDDEN-log; provisioning, role
+  assignment, site create/status, triage, observation status, incident
+  status, review, finding resolution, seed, storage footprint all FORBIDDEN;
+  risk scores exactly the own-tenant set.
+- Operator surfaces: sites/findings/obligations/incidents strictly
+  own-tenant (cross-tenant rows seeded then proven absent); site detail of
+  another tenant null-masked; end-to-end incident submission + document
+  upload authorized on the OWN site (kind `document` in the evidence row)
+  and FORBIDDEN against the other tenant's site.
+
+**Honest limits of this session:**
+
+1. Route-gate tests assert the shipped router/guard source (structure), not
+   a live browser navigation — the Playwright smoke layer (docs/13 Priority
+   5) is the place for click-through navigation proofs.
+2. Operators have no surface for environmental observations or community
+   triage (not operator duties in the spec); the incident list is read-only
+   status-wise (staff set investigation status).
+3. The respond flow remains single-shot (open → submitted; no amend path —
+   reopening is a reviewer capability the guard does not currently allow).
+4. Findings are read-only for operators by design; acknowledging is an
+   operator capability server-side (guard allows `acknowledged`) but no
+   operator UI exposes it — findings say "respond via the corrective
+   action", which is the spec's channel. If acknowledgement in the operator
+   UI is wanted, it is a small addition.
+
+**Directive §5 classification:** Operator section — **IMPLEMENTED
+(structural, repo + tests)**; the §20 item now meets the directive's
+"dedicated experience, strict isolation, verified by test" bar. Remaining
+functionality rows in docs/16: evidence field UI polish (camera capture,
+batch upload) and the template editor — **PLANNED**.
+
+## Prior session [2026-09-27 — Priority B §20: Mining Operator Portal]
+
 **Session:** Gap Closure Directive v1.0, Priority B item 5 — Mining Operator Portal (§20)
 **Date:** 2026-09-27
 **Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (147 passing
 across 10 files — 140 prior + 7 new operator-portal tests) · no schema
 migration required (all server machinery existed; this session surfaced and
 wired it)
-
-## This session [2026-09-27 — Priority B §20: Mining Operator Portal]
 
 **Directive item:** Priority B item 5 — the dedicated operator portal surface
 (docs/02 listed it [PLANNED]: "operators currently reach the portal with a

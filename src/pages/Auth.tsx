@@ -33,10 +33,13 @@ interface AuthProps {
 function resolveRedirectAfterAuth(
   returnTo: string | null,
   fallback = "/portal",
+  role?: string | null,
 ) {
   if (returnTo?.startsWith("/") && !returnTo.startsWith("//")) {
     return returnTo;
   }
+  // No explicit returnTo: land each identity in its OWN section (§20).
+  if (role === "operator") return "/operate";
   return fallback;
 }
 
@@ -44,6 +47,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const {
     isLoading: authLoading,
     isAuthenticated,
+    user,
     signInEmail,
     signUpEmail,
     signInGuest,
@@ -54,6 +58,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const redirect = resolveRedirectAfterAuth(
     searchParams.get("returnTo"),
     redirectAfterAuth,
+    user?.role ?? null,
   );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
