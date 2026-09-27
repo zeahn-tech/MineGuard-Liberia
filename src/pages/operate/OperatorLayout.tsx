@@ -14,6 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import { Button } from "@/components/ui/button";
+import NotificationBell from "@/components/NotificationBell";
 import { RequireOperator } from "@/components/RequireAuth";
 import { useAuth } from "@/hooks/use-auth";
 import { readQueue, syncQueue, type QueueItem } from "@/lib/offline-queue";
@@ -176,16 +177,19 @@ export default function OperatorLayout() {
               <Link to="/operate" className="display text-sm">
                 MineGuard <span className="kicker text-[10px]">Operator</span>
               </Link>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="ml-auto text-muted-foreground"
-                onClick={() => void handleSyncNow()}
-                disabled={syncing}
-              >
-                <RefreshCw className={`size-3.5 ${syncing ? "animate-spin" : ""}`} />
-                {pendingCount > 0 ? `${pendingCount} queued` : "Sync"}
-              </Button>
+              <div className="ml-auto flex items-center gap-1">
+                <NotificationBell />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground"
+                  onClick={() => void handleSyncNow()}
+                  disabled={syncing}
+                >
+                  <RefreshCw className={`size-3.5 ${syncing ? "animate-spin" : ""}`} />
+                  {pendingCount > 0 ? `${pendingCount} queued` : "Sync"}
+                </Button>
+              </div>
             </header>
 
             {mobileNavOpen && (
@@ -210,6 +214,7 @@ export default function OperatorLayout() {
 
             {/* Desktop sync strip */}
             <div className="hidden items-center justify-end gap-3 border-b border-border px-6 py-2 md:flex">
+              <NotificationBell />
               {pendingCount > 0 && (
                 <span className="text-xs text-muted-foreground">
                   {pendingCount} submission(s) queued offline

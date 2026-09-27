@@ -111,7 +111,32 @@ dedupe, sync status indicator, auto-sync on reconnect. Covers inspections,
 incidents and environmental observations, plus offline evidence byte queuing
 (IndexedDB) for attachments.
 
-### Notifications, AI assistance, government reporting exports [PROPOSED]
+### Notifications [PARTIALLY IMPLEMENTED — minimal in-app v1, 2026-09-27]
+In-app notifications derived at request time from records the caller can
+already see — no notifications table, no delivery infrastructure, no cost.
+Two v1 event classes: corrective-action deadlines in the caller's scope
+(due-soon ≤3 days → warning; overdue → urgent; far-future silent) and
+community-report status changes for staff (triaged reports from the last 7
+days; untouched reports are not news). Operators additionally see reviewer
+decisions (verified/closed/escalated) on corrective actions they opened.
+Everything is role- and tenant-scoped by the same server rules as the
+underlying records; notifications cannot leak what the caller cannot read.
+Rendered in a bell dropdown in both portal shells.
+
+Delivery channels — CLASSIFICATION:
+- In-app (this feature): IMPLEMENTED. No new infrastructure.
+- Email (SMTP), push (FCM/web-push), SMS: NOT IMPLEMENTED — **REQUIRES
+  GOVERNMENT/OWNER CONFIRMATION**. Each implies a provider account and cost,
+  personal-data handling beyond the current in-app scope (recipient
+  addresses/device tokens), a retention question for delivery logs, and an
+  abuse surface from a government-adjacent sender. The reporter-facing
+  channel is additionally constrained: community reports are anonymous by
+  design, so there is no reporter address to notify — the public tracking
+  page remains their status channel.
+- A future persisted-notification table (read receipts, per-user dismissal)
+  is PROPOSED, same confirmation gate.
+
+AI assistance, government reporting exports [PROPOSED]
 Not implemented in v1.0. See docs 08 and 14.
 
 ## Explicit non-goals (v1.0)

@@ -1,13 +1,104 @@
 # 11 — Implementation Status
 
+**Session:** §1 — minimal in-app notifications (derived, not stored)
+**Date:** 2026-09-27
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (200 passing
+across 14 files — 188 prior + 12 new notification tests) · delivery-channel
+classification recorded (in-app IMPLEMENTED; email/push/SMS REQUIRES
+GOVERNMENT/OWNER CONFIRMATION) · no schema migration, no new infrastructure
+
+## This session [2026-09-27 — §1: minimal in-app notifications]
+
+**Directive item:** §8/§1 — notifications not implemented at all; scope a
+minimal version first (e.g. corrective-action deadlines, community report
+status changes) before considering push/email/SMS. Classify delivery-channel
+decisions as REQUIRES GOVERNMENT/OWNER CONFIRMATION where they imply new
+infrastructure or cost.
+
+**Scope decision (stated before coding):** v1 notifications are DERIVED at
+request time from records the caller can already see — no notifications
+table, no delivery infrastructure, no provider accounts, no cost, no new
+retention question. Rationale: every event worth notifying about is already
+visible in the caller's scoped record set; computing the list per request
+inherits RLS/tenant scoping for free and cannot leak what the caller cannot
+read. The two directive-named event classes plus one operator-specific
+class:
+
+1. Corrective-action DEADLINES — open/in_progress CAs in the caller's
+   scope: due-soon (≤3 days) → warning; overdue → urgent; far-future →
+   silent; decided CAs → no deadline noise.
+2. Community-report STATUS CHANGES — staff queue only (RLS): triaged
+   (under_review/verified/dismissed/referred) reports from the last 7 days;
+   untouched "submitted" reports are not news. A reporter-facing variant is
+   impossible without knowing who the anonymous reporter was — the public
+   tracking page remains the reporter's channel by design.
+3. Reviewer DECISIONS for operators — verified/closed/escalated on CAs the
+   operator opened (matched by opened_by_id); escalated is urgent; links
+   point into the operator section.
+
+**Implementation:**
+
+- `src/lib/backend.ts` [EXTENDED] — `records.listNotifications()`: the
+  derived service (kinds ca_deadline / ca_decision / report_status, each
+  with severity, body, in-app deep link into the caller's own section, and
+  a timestamp). Sorting: urgent first, then newest. Unassigned/anonymous
+  callers get empty/no-data (live() contract), never an error.
+- `src/components/NotificationBell.tsx` [NEW] — bell + dropdown list used
+  by BOTH portal shells (staff PortalLayout sidebar; operator section's
+  top bar and desktop strip). Urgent count colors the badge. The panel
+  footer states the in-app-only scope to the user, verbatim.
+- `tests/notifications.test.ts` [NEW] — 12 tests: deadline thresholds
+  (overdue→urgent, ≤3d→warning, 30d→silent, closed→silent); decisions
+  addressed to the CA opener only (verified info, escalated urgent,
+  /operate links); report status (triaged surfaces, submitted silent,
+  operators get none); scoping/no-leak (cross-tenant CA invisible to the
+  other operator; role-less empty; anonymous undefined-or-empty; links
+  stay inside the caller's section); and a v1 SCOPE GUARD — a source-level
+  assertion that no delivery channel (sendEmail/sendSms/push/fcm/sendgrid/
+  twilio) is wired into the product and that no notifications table exists,
+  so the confirmed-only boundary cannot erode silently.
+
+**Delivery-channel classification (docs/01, binding):**
+
+| Channel | Status | Why gated |
+|---|---|---|
+| In-app (derived) | **IMPLEMENTED** | No new infrastructure; RLS-inherited scoping |
+| Email (SMTP) | REQUIRES GOVERNMENT/OWNER CONFIRMATION | Provider account + cost; recipient PII beyond current scope; delivery-log retention; government-adjacent sender abuse surface |
+| Push (FCM/web-push) | REQUIRES GOVERNMENT/OWNER CONFIRMATION | Device-token registry = new personal-data class; provider cost |
+| SMS | REQUIRES GOVERNMENT/OWNER CONFIRMATION | Per-message cost; phone-number PII; strongest sender-impersonation concerns |
+| Reporter-facing notify | NOT POSSIBLE by design | Reports are anonymous; tracking page is the channel |
+| Persisted notifications table | PROPOSED | Read receipts/dismissal need storage + retention decisions |
+
+**Honest limits of this session:**
+
+1. Derived notifications have no read-state: the badge reflects the current
+   event set, not "unread since you last looked". A dismissed/read marker
+   requires the persisted-table PROPOSED path above.
+2. The due-soon window is fixed at 3 days in code, not per-user
+   configurable.
+3. Events exist only while their source rows do; deleting a CA removes its
+   notification — correct for deadlines, but decision history is served by
+   the audit log, not notifications.
+4. Test-suite note: the notification tests initially failed because a seed
+   helper leaked the admin identity into the assertion context (and one
+   test depended on another suite's triage mutation) — both were test bugs,
+   fixed by restoring identity after admin-context seeding and by seeding
+   independent fixtures.
+
+**Directive §5 classification:** In-app notifications — **IMPLEMENTED
+(minimal v1, repo + tests)**. Email/push/SMS — **REQUIRES GOVERNMENT/OWNER
+CONFIRMATION** (new infrastructure + cost); reporter-facing channel —
+impossible by design (anonymous reporting). Remaining docs/16 functionality
+items: accessibility, performance, deployment pipeline, restore rehearsal.
+
+## Prior session [2026-09-27 — §10: camera capture + batch evidence upload]
+
 **Session:** §10 — camera capture + batch evidence upload with per-file progress
 **Date:** 2026-09-27
 **Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (188 passing
 across 13 files — 178 prior + 10 new evidence-capture tests) · the
 never-silently-drop offline guarantee re-proven across both new features ·
 no schema migration required
-
-## This session [2026-09-27 — §10: camera capture + batch evidence upload]
 
 **Directive item:** §10 — EvidenceSection supported file attach and offline
 queueing but had no camera-capture flow and no per-file progress on

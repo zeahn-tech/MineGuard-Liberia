@@ -1,6 +1,6 @@
 # 13 — Test Strategy
 
-**Status:** 13 suites / 188 tests green as of 2026-09-27: the SQL layer runs
+**Status:** 14 suites / 200 tests green as of 2026-09-27: the SQL layer runs
 against real Postgres (PGlite) applying every migration in
 `supabase/migrations/` — `tests/migration-apply.test.ts` (clean-apply,
 idempotency, signature parity), `tests/rls.test.ts` (role matrix),
@@ -17,7 +17,10 @@ Priority B §20), `tests/offline-queue.test.ts`,
 shape contract + admin template CRUD workflow, which found the missing
 templates DELETE policy — migration 0008), `tests/evidence-capture.test.ts`
 (§10 camera capture + batch byte progress + the never-silently-drop queue
-guarantee), and `tests/live-anon.test.ts`
+guarantee), `tests/notifications.test.ts` (§1 derived in-app notifications:
+deadline thresholds, decision/report events, role scoping, no-leak, and a
+source-level guard that no delivery channel ships without confirmation), and
+`tests/live-anon.test.ts`
 (probes the live project with the public anon key only). Run by `bun test`,
 wired into CI. [PARTIALLY IMPLEMENTED]
 

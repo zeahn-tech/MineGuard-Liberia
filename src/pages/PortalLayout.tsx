@@ -4,6 +4,7 @@ import { useQuery, useMutation } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
+import NotificationBell from "@/components/NotificationBell";
 import {
   Dialog,
   DialogContent,
@@ -244,6 +245,9 @@ export default function PortalLayout() {
             >
               <LogOut className="size-3.5" /> Sign out
             </Button>
+            <div className="mt-2 border-t border-border pt-2">
+              <NotificationBell />
+            </div>
           </div>
         </aside>
 

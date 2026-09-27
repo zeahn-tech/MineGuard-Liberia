@@ -1915,6 +1915,133 @@ export const api = {
       });
       if (error) throw backendError(error);
     },
+
+    // ------------------------------------------------------- notifications
+    // §1 MINIMAL IN-APP NOTIFICATIONS — derived, not stored.
+    //
+    // SCOPE DECISION: v1 notifications are COMPUTED at request time from
+    // records the caller can already see. No notifications table, no
+    // delivery infrastructure, no cost, no retention question. The v1 event
+    // classes (the two the directive names):
+    //   * corrective-action DEADLINES — open CAs in the caller's scope,
+    //     flagged due-soon (≤3 days) or overdue, with per-record links;
+    //   * community-report STATUS CHANGES — staff see triaged (under_review /
+    //     verified / dismissed / referred) reports from the last 7 days;
+    //     a reporter-visible variant is NOT possible without knowing who the
+    //     anonymous reporter was (tracking-code lookup stays the public's
+    //     channel by design).
+    // Push / email / SMS are EXPLICITLY NOT implemented — they imply new
+    // infrastructure and cost (provider accounts, PII handling, retention)
+    // and are classified REQUIRES GOVERNMENT/OWNER CONFIRMATION in docs/01.
+
+    listNotifications: () =>
+      live<
+        {
+          id: string;
+          kind: "ca_deadline" | "ca_decision" | "report_status";
+          severity: "info" | "warning" | "urgent";
+          title: string;
+          body: string;
+          linkTo: string;
+          at: number;
+        }[]
+      >(async () => {
+        const user = await requireAuthed(true);
+        if (!user.role) return [];
+        const now = Date.now();
+        const DAY = 86_400_000;
+        const out: {
+          id: string;
+          kind: "ca_deadline" | "ca_decision" | "report_status";
+          severity: "info" | "warning" | "urgent";
+          title: string;
+          body: string;
+          linkTo: string;
+          at: number;
+        }[] = [];
+
+        // 1. Corrective-action deadlines in the caller's scope. For operators
+        //    this is their tenant's obligations; for staff their own scope —
+        //    the same scoped feeds the portal pages use.
+        const [caRaw, findingRaw, siteRaw] = await Promise.all([
+          allRows<AnyRow>("corrective_actions"),
+          allRows<AnyRow>("findings"),
+          allRows<AnyRow>("sites"),
+        ]);
+        const findings = new Map(findingRaw.map((r) => [r.id as string, mapFinding(r)]));
+        const sites = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
+        for (const r of caRaw) {
+          const ca = mapCA(r);
+          if (ca.status !== "open" && ca.status !== "in_progress") continue;
+          const site = sites.get(ca.siteId);
+          if (!site || !canAccessSite(user, site)) continue;
+          const finding = findings.get(ca.findingId);
+          const dueMs = ca.dueAt - now;
+          const isOverdue = dueMs < 0;
+          if (!isOverdue && dueMs > 3 * DAY) continue; // due-soon window: ≤3d
+          const siteLabel = `${site.code} ${site.name}`;
+          out.push({
+            id: `ca-${ca._id}`,
+            kind: "ca_deadline",
+            severity: isOverdue ? "urgent" : "warning",
+            title: isOverdue
+              ? `Overdue corrective action at ${siteLabel}`
+              : `Corrective action due soon at ${siteLabel}`,
+            body: `${finding?.title ?? "Compliance finding"} — ${ca.description}`,
+            linkTo: user.role === ROLES.OPERATOR ? "/operate/corrective-actions" : `/portal/sites/${site._id}`,
+            at: ca.dueAt,
+          });
+        }
+
+        // 2. Reviewer decisions on corrective actions the caller opened —
+        //    the operator learns their response was verified/closed/escalated.
+        if (user.role === ROLES.OPERATOR && user.operatorName) {
+          for (const r of caRaw) {
+            const ca = mapCA(r);
+            if (ca.openedById !== user.uid) continue;
+            if (ca.status !== "verified" && ca.status !== "closed" && ca.status !== "escalated") continue;
+            const site = sites.get(ca.siteId);
+            if (!site) continue;
+            out.push({
+              id: `cad-${ca._id}`,
+              kind: "ca_decision",
+              severity: ca.status === "escalated" ? "urgent" : "info",
+              title:
+                ca.status === "escalated"
+                  ? `Corrective action ESCALATED at ${site.code} ${site.name}`
+                  : `Corrective action ${ca.status} at ${site.code} ${site.name}`,
+              body: ca.description,
+              linkTo: "/operate/corrective-actions",
+              at: ca.closedAt ?? ca.dueAt,
+            });
+          }
+        }
+
+        // 3. Community-report status changes — staff queue only (RLS-scoped).
+        if (isStaffRole(user.role)) {
+          const repRaw = await allRows<AnyRow>("community_reports");
+          for (const r of repRaw) {
+            const rep = mapReport(r);
+            if (rep.status === "submitted") continue; // untouched — not news
+            const reviewedAt = rep.reviewedAt ?? rep.createdAt;
+            if (now - reviewedAt > 7 * DAY) continue; // recent window only
+            out.push({
+              id: `rep-${rep._id}`,
+              kind: "report_status",
+              severity: rep.status === "verified" ? "info" : "warning",
+              title: `Community report ${rep.trackingCode} → ${rep.status.replace("_", " ")}`,
+              body: rep.description,
+              linkTo: "/portal/community",
+              at: reviewedAt,
+            });
+          }
+        }
+
+        // Urgent first, then newest.
+        const sevRank = { urgent: 0, warning: 1, info: 2 } as const;
+        out.sort((a, b) => sevRank[a.severity] - sevRank[b.severity] || b.at - a.at);
+        return out;
+      }, ["corrective_actions", "findings", "sites", "community_reports"]),
   },
 
   // ----------------------------------------------------------------- stats
