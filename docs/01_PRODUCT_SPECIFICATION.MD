@@ -97,8 +97,13 @@ Storage-backed uploads with kind detection, size limit, metadata, and provenance
 The field attachment UI (`EvidenceSection`) is wired into inspection, incident
 and observation detail pages. Offline attach queues file bytes on-device
 (IndexedDB) and uploads on reconnect; a failed replay stays queued with retry
-info — nothing is silently dropped. Camera capture UX and batch upload remain
-[PLANNED].
+info — nothing is silently dropped. Camera capture (§10): a real getUserMedia
+viewfinder with shutter/retake/switch and a capture="environment" file-input
+fallback where the API or permission is unavailable — captured frames join the
+batch exactly like picked files. Batch upload (§10): per-file BYTE progress
+bars driven by real XHR progress events (no polling, no fabricated indicators);
+offline files show "saved on device" instead of a bar, because bytes resting
+on the phone have no progress to report.
 
 ### Offline operations [IMPLEMENTED]
 Local draft persistence, submission queue with retry, server-side clientRef

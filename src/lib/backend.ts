@@ -20,6 +20,7 @@ import {
   bumpProfileVersion,
   mfaAal,
   supabase,
+  uploadWithProgress,
 } from "./supabase";
 import { validateTemplateSections } from "./template-schema";
 import {
@@ -2155,6 +2156,11 @@ export const api = {
       siteId: string;
       caption?: string;
       capturedAt?: number;
+      /** Optional byte-progress callback (§10). When provided AND the
+       *  environment has XMLHttpRequest (browser), bytes go up through the
+       *  progress-emitting wire path; otherwise the supabase-js path is
+       *  used (tests, exotic environments — same object, same policies). */
+      onProgress?: (p: { loaded: number; total: number }) => void;
     }) => {
       const user = await requireAuthed();
       if (!args.siteId) throw new Error("EVIDENCE_REQUIRES_SITE");
@@ -2174,10 +2180,24 @@ export const api = {
       const storagePath = `${user.uid}/${rowId}__${args.fileName}`;
       // 2. Upload bytes (uid first-folder contract + 25MB bucket cap
       //    re-checked server-side by the bucket setting and storage policy).
-      const { error: upErr } = await supabase.storage
-        .from("evidence")
-        .upload(storagePath, args.file, { contentType: args.mimeType });
-      if (upErr) throw backendError(upErr);
+      if (args.onProgress && typeof XMLHttpRequest !== "undefined") {
+        try {
+          await uploadWithProgress(
+            "evidence",
+            storagePath,
+            args.file,
+            args.mimeType,
+            args.onProgress,
+          );
+        } catch (e) {
+          throw backendError(e);
+        }
+      } else {
+        const { error: upErr } = await supabase.storage
+          .from("evidence")
+          .upload(storagePath, args.file, { contentType: args.mimeType });
+        if (upErr) throw backendError(upErr);
+      }
       // 3. Create the metadata row — reads only work once this exists, so a
       //    failed write leaves no readable reference to the bytes.
       const { error: dbErr } = await supabase.from("evidence").insert({

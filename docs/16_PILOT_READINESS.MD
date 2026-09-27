@@ -8,18 +8,18 @@ require evidence across the dimensions below.
 
 | Dimension | State | Evidence / gap |
 |-----------|-------|----------------|
-| Functionality | 🟡 Substantial | All core modules implemented end-to-end; dedicated operator section (Priority B §20) + admin template editor (§11) shipped, tested; evidence UI polish outstanding |
+| Functionality | 🟡 Substantial | All core modules implemented end-to-end; dedicated operator section (Priority B §20), admin template editor (§11), camera capture + batch byte-progress evidence (§10) shipped, tested |
 | Security — authorization | 🟢 Core solid | Centralized authz core; every function guarded; scope + tenant isolation server-side |
 | Security — hardening | 🟡 Gaps | Per-source report rate limiting + evidence signed-URL mint gate (0005/0006) done (repo + live, tested); TOTP MFA + password recovery done in repo (Gap #4, tested) — live project MFA/SMTP configuration + convergence pending |
 | Data integrity | 🟢 Core solid | Provenance, lifecycle states, audit log, verification enums; unique-code guard pending |
 | Offline behavior | 🟢 Inspections | Local-first, retry, dedupe; media offline queue pending |
 | Synchronization | 🟢 Inspections | Idempotent clientRef sync; conflict strategy documented |
-| Media | 🟡 Backend ready | Storage pipeline + metadata + audit live; field UI pending |
+| Media | 🟢 Shipped | Storage pipeline + metadata + audit live; field UI with camera capture, batch multi-file byte progress, offline byte queue (§10, tested) |
 | Performance | ⚪ Unmeasured | No load testing; queries are collect()-based (fine for pilot scale) |
 | Accessibility | 🟡 Partial | Tokens chosen for contrast; audit of flows not yet done |
 | Deployment | 🟢 Dev only | Dev deployment verified; prod pipeline + backups pending |
 | Recovery | ⚪ Unplanned | Restore test not yet performed |
-| Testing | 🟢 12 suites / 178 tests | SQL layer (PGlite, all migrations), wire-bridge data-layer suites (backend edge, account security, operator portal + isolation, template editor), offline queues, live anon probes — all green; UI smoke layer [PLANNED] |
+| Testing | 🟢 13 suites / 188 tests | SQL layer (PGlite, all migrations), wire-bridge data-layer suites (backend edge, account security, operator portal + isolation, template editor, evidence capture/progress), offline queues, live anon probes — all green; UI smoke layer [PLANNED] |
 | Documentation | 🟢 Current | Docs 00–16 synchronized with this build |
 
 ## Definition of done for pilot

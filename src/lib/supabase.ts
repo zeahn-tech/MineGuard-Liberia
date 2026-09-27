@@ -224,6 +224,79 @@ export async function mfaUnenroll(factorId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// BYTE-PROGRESS STORAGE UPLOAD — §10 camera capture + batch evidence upload.
+//
+// supabase-js's storage.upload() exposes no upload progress. The wire
+// equivalent is POST {url}/storage/v1/object/{bucket}/{path} with the
+// caller's JWT — implemented here over XMLHttpRequest, the only browser
+// primitive that surfaces per-byte upload progress events. auth-js sets the
+// SAME path/key format, so objects written through either path are identical
+// and the storage RLS policies (first folder = uid) apply unchanged.
+// ---------------------------------------------------------------------------
+
+export type UploadProgress = {
+  /** Bytes sent so far (approximate — includes HTTP overhead). */
+  loaded: number;
+  /** Total bytes to send. */
+  total: number;
+};
+
+/** Upload one blob with progress. Resolves when the object is stored;
+ *  rejects on HTTP error or network failure (the caller decides whether a
+ *  failure is queueable). No polling, no fake progress: every update is a
+ *  real XMLHttpRequest progress event. */
+export function uploadWithProgress(
+  bucket: string,
+  storagePath: string,
+  file: Blob,
+  mimeType: string,
+  onProgress?: (p: UploadProgress) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    void (async () => {
+      try {
+        const token = await getSessionToken();
+        if (!token) {
+          reject(new Error("UNAUTHENTICATED"));
+          return;
+        }
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `${SUPABASE_URL}/storage/v1/object/${bucket}/${encodeURI(storagePath)}`, true);
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+        xhr.setRequestHeader("apikey", SUPABASE_ANON_KEY);
+        xhr.setRequestHeader("x-upsert", "false");
+        xhr.setRequestHeader("cache-control", "3600");
+        xhr.setRequestHeader("content-type", mimeType);
+        if (onProgress) {
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) onProgress({ loaded: e.loaded, total: e.total });
+          };
+        }
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            let message = `Storage upload failed (${xhr.status})`;
+            try {
+              const body = JSON.parse(xhr.responseText) as { message?: string; error?: string };
+              message = body.message ?? body.error ?? message;
+            } catch {
+              /* keep the status-code message */
+            }
+            reject(new Error(message));
+          }
+        };
+        xhr.onerror = () => reject(new Error("Failed to fetch: network error during upload"));
+        xhr.ontimeout = () => reject(new Error("Failed to fetch: upload timed out"));
+        xhr.send(file);
+      } catch (e) {
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
+    })();
+  });
+}
+
+// ---------------------------------------------------------------------------
 // ERROR SHAPING — maps Postgres/Supabase errors to the stable message tokens
 // the UI already understands (FORBIDDEN, NOT_FOUND, RATE_LIMITED, …).
 // ---------------------------------------------------------------------------

@@ -1,5 +1,92 @@
 # 11 — Implementation Status
 
+**Session:** §10 — camera capture + batch evidence upload with per-file progress
+**Date:** 2026-09-27
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (188 passing
+across 13 files — 178 prior + 10 new evidence-capture tests) · the
+never-silently-drop offline guarantee re-proven across both new features ·
+no schema migration required
+
+## This session [2026-09-27 — §10: camera capture + batch evidence upload]
+
+**Directive item:** §10 — EvidenceSection supported file attach and offline
+queueing but had no camera-capture flow and no per-file progress on
+multi-file upload. Implement both; preserve the never-silently-drop
+offline-queue guarantee.
+
+**Honest starting point:** the prior EvidenceSection header COMMENT claimed
+"batch upload with per-file progress rows" and a camera input — the camera
+input existed as a bare `<input capture="environment">` row (usable, but not
+a flow), and the "progress" rows showed only coarse status transitions with
+no byte-level progress whatsoever. This session made the claims true.
+
+**Implementation:**
+
+- `src/lib/supabase.ts` [EXTENDED] — `uploadWithProgress()`: the Storage
+  REST wire path (`POST {url}/storage/v1/object/{bucket}/{path}` with the
+  session JWT) over XMLHttpRequest — the only browser primitive with real
+  upload progress events. Same bucket/key format as supabase-js, so objects
+  are identical and the storage RLS policies apply unchanged. Every
+  progress update is a real XHR event; nothing is polled or fabricated.
+- `src/lib/backend.ts` [EXTENDED] — `evidence.upload` accepts an optional
+  `onProgress` callback: with it AND a browser environment, bytes go up the
+  XHR path; otherwise (tests, exotic environments) the supabase-js path is
+  used unchanged. Same object, same policies, same audit row either way.
+- `src/components/CameraCapture.tsx` [NEW] — primary path: getUserMedia
+  environment-facing viewfinder with shutter, retake, front/rear switch,
+  mirrored preview; the captured canvas frame becomes a JPEG Blob
+  indistinguishable downstream from a picked file. Fallback path: when the
+  API or permission is unavailable (desktop, denied prompt, insecure
+  context), a `capture="environment"` file input answered by the native
+  camera app. The stream is ALWAYS stopped on close/unmount.
+- `src/components/EvidenceSection.tsx` [REWORKED] — a "Take a photo" button
+  opens CameraCapture inside the attach dialog; captured frames join the
+  batch (`pendingFilesRef`) exactly like picked files. Batch upload now
+  passes `onProgress` per file and renders a real per-file byte progress
+  bar (percent + KB sent) for in-flight files; queued files show "saved on
+  device" instead — bytes resting on the phone have no progress to report,
+  and a fabricated bar would violate the honesty rules.
+- `tests/evidence-capture.test.ts` [NEW] — 10 tests: batch upload with
+  progress callbacks lands all files (kinds correct); per-file failure
+  isolation (one oversized file FILE_TOO_LARGE does not abort the others);
+  the offline guarantee across both features (camera frame and picked file
+  queue identically, replay syncs each exactly once; network-class failure
+  queues; policy denial FORBIDDEN is NOT queued — it must surface, not
+  retry forever; sync failure keeps the item with attempts + lastError
+  retry info); the camera contract (getUserMedia + environment facing +
+  toBlob; capture=environment fallback; stream always stopped; camera
+  output routed into the same batch/queue; XHR progress path gated on the
+  browser environment).
+
+**The guarantee, restated precisely:** a file entering the attach dialog is
+uploaded (metadata row + storage object + audit) OR queued with its bytes
+(IndexedDB; replayed with dedupe-by-removal on reconnect) OR surfaced as an
+explicit per-file failure the user sees. There is no fourth path — no code
+route drops bytes silently, and the tests exercise all three outcomes.
+
+**Honest limits of this session:**
+
+1. getUserMedia cannot run in a test process — the camera tests assert the
+   component's contract from source (API detection, fallback input, stream
+   teardown, capture math) rather than driving a live stream. A Playwright
+   run with fake media streams (docs/13 Priority 5) would close that gap.
+2. XHR upload progress measures bytes SENT, not bytes confirmed stored —
+   the request completing (HTTP 200) is the success signal; the bar reaching
+   100% means "handed to the network", briefly ahead of confirmation. The
+   row flips to Uploaded only on confirmation.
+3. Insecure contexts (plain HTTP, non-localhost) never get getUserMedia —
+   the fallback file input is the designed path there, not a defect.
+4. No EXIF stripping or orientation normalization: captured frames are
+   canvas-encoded JPEGs (orientation already normalized by the canvas
+   draw); picked HEIC files from iOS remain dependent on browser
+   transcoding support.
+
+**Directive §5 classification:** Camera capture + batch byte progress —
+**IMPLEMENTED (repo + tests)**. docs/16's functionality board now lists only
+the accessibility, performance, deployment and restore rows as open.
+
+## Prior session [2026-09-27 — §11: inspection template editor]
+
 **Session:** §11 — inspection template editor (admin UI)
 **Date:** 2026-09-27
 **Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (178 passing
@@ -7,8 +94,6 @@ across 12 files — 168 prior + 10 new template-editor tests) · one production
 defect found by the suite and fixed (migration 0008: missing templates DELETE
 policy — admin deletion silently deleted nothing) · live convergence for 0008
 NOT yet run (see honest limits)
-
-## This session [2026-09-27 — §11: inspection template editor]
 
 **Directive item:** §11 — templates must be authorable in the product, not
 only in the data layer: "inspection design is configurable without a code

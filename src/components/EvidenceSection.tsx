@@ -1,18 +1,26 @@
 // ---------------------------------------------------------------------------
-// EVIDENCE SECTION (doc 07 — evidence/media architecture)
+// EVIDENCE SECTION (doc 07 — evidence/media architecture; §10 camera + batch)
 //
 // Reusable attach-photos/files UI for a parent record (inspection, incident,
 // observation). Notes:
-//  - Batch upload: multiple files per dialog, with per-file progress rows
-//    (uploading / uploaded / saved on device / failed). A camera input
-//    (capture="environment") gives one-tap photo capture on mobile.
-//  - Bytes must reach Storage before the metadata doc exists, so an upload while
-//    offline is queued locally (IndexedDB via offline-evidence.ts) and replayed
-//    when connectivity returns. A device-local URI is never a permanent media
-//    reference — the queue holds bytes only until the real upload succeeds.
-//  - Authorization is server-enforced (firestore.rules / storage.rules): the
-//    data layer lists only evidence in the caller's scope and the upload
-//    mutation re-derives site visibility before writing.
+//  - CAMERA CAPTURE (§10): a real getUserMedia viewfinder (CameraCapture)
+//    with shutter/retake/switch and a capture="environment" file-input
+//    fallback where the API or permission is unavailable. Captured frames
+//    join the batch exactly like picked files — same upload, same queue,
+//    same guarantees.
+//  - BATCH UPLOAD WITH PER-FILE BYTE PROGRESS (§10): every file uploads
+//    through the XHR wire path (uploadWithProgress) whose progress events
+//    drive a real per-file progress bar — no polling, no fake progress.
+//    Files that must be queued (offline) show "saved on device" instead:
+//    there is no progress to report for bytes resting on the phone, and
+//    pretending otherwise would be a fabricated indicator.
+//  - NEVER SILENTLY DROP: bytes must reach Storage before the metadata row
+//    exists, so an upload that cannot complete while offline is queued
+//    locally (IndexedDB via offline-evidence.ts) and replayed when
+//    connectivity returns; a network-class failure mid-batch is queued the
+//    same way. A device-local URI is never a permanent media reference.
+//  - Authorization is server-enforced: the data layer lists only evidence in
+//    the caller's scope and the upload path re-derives site visibility.
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -22,6 +30,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import CameraCapture, { type CameraCaptureResult } from "@/components/CameraCapture";
 import {
   Dialog,
   DialogContent,
@@ -31,7 +40,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { CloudOff, FileText, ImageIcon, Paperclip, Upload } from "lucide-react";
+import { Camera, CloudOff, FileText, ImageIcon, Paperclip, Upload } from "lucide-react";
 import type { Evidence } from "@/lib/types";
 import {
   enqueuePendingEvidence,
@@ -42,13 +51,16 @@ import {
 
 const MAX_BYTES = 25 * 1024 * 1024; // mirrored in rules + data layer
 
-/** Per-file progress row inside the attach dialog. */
+/** Per-file progress row inside the attach dialog. `loaded/total` exist only
+ *  while uploading (byte progress from the XHR wire path). */
 type BatchStatus = "pending" | "uploading" | "done" | "queued" | "failed";
 interface BatchItem {
   key: string;
   name: string;
   status: BatchStatus;
   note?: string;
+  loaded?: number;
+  total?: number;
 }
 
 const BATCH_STATUS_LABEL: Record<BatchStatus, string> = {
@@ -100,8 +112,8 @@ export default function EvidenceSection({
   const [saving, setSaving] = useState(false);
   const [caption, setCaption] = useState("");
   const [batch, setBatch] = useState<BatchItem[]>([]);
+  const [showCamera, setShowCamera] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const cameraRef = useRef<HTMLInputElement>(null);
   // Upload is available to any assigned account (staff or operator on their
   // own site); the backend + rules re-derive scope. Guests never have a role.
   const canUpload = !!user?.role;
@@ -140,17 +152,37 @@ export default function EvidenceSection({
 
   const resetDialog = useCallback(() => {
     setOpen(false);
+    setShowCamera(false);
     setBatch([]);
     setCaption("");
     if (fileRef.current) fileRef.current.value = "";
-    if (cameraRef.current) cameraRef.current.value = "";
   }, []);
+
+  /** A camera frame joins the batch exactly like a picked file. */
+  const onCameraCaptured = (result: CameraCaptureResult) => {
+    const asFile = new File([result.blob], result.fileName, { type: result.mimeType });
+    setBatch((prev) => [
+      ...prev,
+      {
+        key: `cam-${Date.now()}-${result.fileName}`,
+        name: result.fileName,
+        status: asFile.size > MAX_BYTES ? "failed" : "pending",
+        note: asFile.size > MAX_BYTES ? "Exceeds 25MB" : undefined,
+      },
+    ]);
+    pendingFilesRef.current.push(asFile);
+    toast.success("Photo captured — added to the batch.");
+  };
+
+  // Files waiting to upload: picked files (read once at Upload time) plus
+  // camera captures accumulated since the dialog opened.
+  const pendingFilesRef = useRef<File[]>([]);
 
   const onUpload = async () => {
     if (saving) return;
     const files: File[] = [
       ...Array.from(fileRef.current?.files ?? []),
-      ...Array.from(cameraRef.current?.files ?? []),
+      ...pendingFilesRef.current,
     ];
     if (files.length === 0) {
       toast.error("Choose at least one file first.");
@@ -170,6 +202,10 @@ export default function EvidenceSection({
     const setStatus = (key: string, status: BatchStatus, note?: string) =>
       setBatch((prev) =>
         prev.map((b) => (b.key === key ? { ...b, status, note } : b)),
+      );
+    const setProgress = (key: string, loaded: number, total: number) =>
+      setBatch((prev) =>
+        prev.map((b) => (b.key === key ? { ...b, loaded, total } : b)),
       );
 
     const capturedAt = Date.now();
@@ -198,7 +234,12 @@ export default function EvidenceSection({
           setStatus(item.key, "queued");
           queued++;
         } else {
-          await upload({ ...meta, file });
+          await upload({
+            ...meta,
+            file,
+            onProgress: (p: { loaded: number; total: number }) =>
+              setProgress(item.key, p.loaded, p.total),
+          });
           setStatus(item.key, "done");
           uploaded++;
         }
@@ -238,7 +279,7 @@ export default function EvidenceSection({
     // Clear the inputs so a follow-up selection starts fresh; the progress
     // rows stay visible until the dialog is closed.
     if (fileRef.current) fileRef.current.value = "";
-    if (cameraRef.current) cameraRef.current.value = "";
+    pendingFilesRef.current = [];
     setSaving(false);
   };
 
@@ -315,14 +356,24 @@ export default function EvidenceSection({
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Camera photo</Label>
-              <Input
-                ref={cameraRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                disabled={batchRunning}
-              />
+              <Label>Camera</Label>
+              {showCamera ? (
+                <CameraCapture
+                  onCaptured={onCameraCaptured}
+                  onClose={() => setShowCamera(false)}
+                />
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  disabled={batchRunning}
+                  onClick={() => setShowCamera(true)}
+                >
+                  <Camera className="mr-1.5 size-4" strokeWidth={1.5} />
+                  Take a photo
+                </Button>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label>Caption (optional — applies to every selected file)</Label>
@@ -358,6 +409,35 @@ export default function EvidenceSection({
                   </li>
                 ))}
               </ul>
+            )}
+            {/* Per-file BYTE progress bars (§10) — each bar tracks exactly one
+                file's real XHR progress events; queued/failed files carry no
+                bar because there are no bytes in flight for them. */}
+            {batch.some((b) => b.status === "uploading" && b.total) && (
+              <div className="space-y-1.5">
+                {batch
+                  .filter((b) => b.status === "uploading" && b.total)
+                  .map((b) => {
+                    const pct = Math.min(100, Math.round(((b.loaded ?? 0) / (b.total ?? 1)) * 100));
+                    return (
+                      <div key={`p-${b.key}`}>
+                        <div className="flex justify-between text-[10px] text-muted-foreground">
+                          <span className="truncate">{b.name}</span>
+                          <span>
+                            {pct}% · {((b.loaded ?? 0) / 1024).toFixed(0)}/
+                            {((b.total ?? 0) / 1024).toFixed(0)} KB
+                          </span>
+                        </div>
+                        <div className="h-1 overflow-hidden rounded bg-muted">
+                          <div
+                            className="h-full bg-primary transition-[width] duration-150"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
             )}
           </div>
           <DialogFooter>
