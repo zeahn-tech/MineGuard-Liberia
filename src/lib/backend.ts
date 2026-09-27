@@ -1314,6 +1314,54 @@ export const api = {
         return (data ?? []).map(mapCA);
       }, ["corrective_actions"]),
 
+    /** Compliance obligations for the operator portal (§20): every corrective
+     *  action on sites the caller can access, joined with the finding title
+     *  and site identity. Operators are strictly tenant-scoped by RLS + the
+     *  client mirror; staff get the same feed over their own scope. */
+    listMyCorrectiveActions: () =>
+      live<
+        (CorrectiveAction & {
+          findingTitle: string;
+          findingSeverity: Finding["severity"];
+          siteCode: string;
+          siteName: string;
+          county: string;
+        })[]
+      >(async () => {
+        const user = await requireAuthed(true);
+        if (!user.role) return [];
+        const [caRaw, findingRaw, siteRaw] = await Promise.all([
+          allRows<AnyRow>("corrective_actions"),
+          allRows<AnyRow>("findings"),
+          allRows<AnyRow>("sites"),
+        ]);
+        const findings = new Map(findingRaw.map((r) => [r.id as string, mapFinding(r)]));
+        const sites = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
+        const out = [];
+        for (const r of caRaw) {
+          const ca = mapCA(r);
+          const site = sites.get(ca.siteId);
+          if (!site || !canAccessSite(user, site)) continue;
+          const finding = findings.get(ca.findingId);
+          out.push({
+            ...ca,
+            findingTitle: finding?.title ?? "Compliance finding",
+            findingSeverity: finding?.severity ?? "medium",
+            siteCode: site.code,
+            siteName: site.name,
+            county: site.county,
+          });
+        }
+        // Openest obligations first: open/in_progress/submitted before decided
+        // ones, then by soonest deadline.
+        const openRank = (s: CorrectiveAction["status"]) =>
+          s === "open" ? 0 : s === "in_progress" ? 1 : s === "submitted" ? 2 : s === "escalated" ? 3 : 4;
+        out.sort(
+          (a, b) => openRank(a.status) - openRank(b.status) || a.dueAt - b.dueAt,
+        );
+        return out;
+      }, ["corrective_actions", "findings", "sites"]),
+
     openCorrectiveAction: async (args: {
       findingId: string;
       description: string;

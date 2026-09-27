@@ -8,7 +8,7 @@ require evidence across the dimensions below.
 
 | Dimension | State | Evidence / gap |
 |-----------|-------|----------------|
-| Functionality | 🟡 Substantial | All core modules implemented end-to-end; evidence UI, operator portal surface, template editor outstanding |
+| Functionality | 🟡 Substantial | All core modules implemented end-to-end; operator compliance portal done (Priority B §20, tested); evidence UI, template editor outstanding |
 | Security — authorization | 🟢 Core solid | Centralized authz core; every function guarded; scope + tenant isolation server-side |
 | Security — hardening | 🟡 Gaps | Per-source report rate limiting + evidence signed-URL mint gate (0005/0006) done (repo + live, tested); TOTP MFA + password recovery done in repo (Gap #4, tested) — live project MFA/SMTP configuration + convergence pending |
 | Data integrity | 🟢 Core solid | Provenance, lifecycle states, audit log, verification enums; unique-code guard pending |
@@ -19,7 +19,7 @@ require evidence across the dimensions below.
 | Accessibility | 🟡 Partial | Tokens chosen for contrast; audit of flows not yet done |
 | Deployment | 🟢 Dev only | Dev deployment verified; prod pipeline + backups pending |
 | Recovery | ⚪ Unplanned | Restore test not yet performed |
-| Testing | 🔴 None yet | Strategy documented (doc 13); no suites written |
+| Testing | 🟢 10 suites / 147 tests | SQL layer (PGlite, all migrations), wire-bridge data-layer suites (backend edge, account security, operator portal), offline queues, live anon probes — all green; UI smoke layer [PLANNED] |
 | Documentation | 🟢 Current | Docs 00–16 synchronized with this build |
 
 ## Definition of done for pilot

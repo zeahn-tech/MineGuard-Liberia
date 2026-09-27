@@ -1,13 +1,94 @@
 # 11 — Implementation Status
 
+**Session:** Gap Closure Directive v1.0, Priority B item 5 — Mining Operator Portal (§20)
+**Date:** 2026-09-27
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (147 passing
+across 10 files — 140 prior + 7 new operator-portal tests) · no schema
+migration required (all server machinery existed; this session surfaced and
+wired it)
+
+## This session [2026-09-27 — Priority B §20: Mining Operator Portal]
+
+**Directive item:** Priority B item 5 — the dedicated operator portal surface
+(docs/02 listed it [PLANNED]: "operators currently reach the portal with a
+reduced nav"). The product spec defines the role's whole scope: *own sites
+only, respond to corrective actions*.
+
+**Acceptance criteria (stated before coding):** an operator signing in lands
+on their own compliance surface — not the staff command center; the surface
+shows their licensed sites and every corrective action on them with deadlines
+and status; the respond flow works for the owning operator while the action
+is open and is audit logged; cross-tenant obligations are invisible (RLS, not
+UI filtering); staff surfaces stay staff-only; staff see the same obligation
+feed over their own scope; every claim pinned by tests through the unmodified
+data layer.
+
+**What was found before coding:** `respondCorrectiveAction` — the operator
+role's entire stated purpose — existed in the backend with ZERO UI surface:
+no screen in the product could call it. Operators could read that they were
+obliged to respond (in records seeded for staff views) but had no way to
+respond. That made this less a "new portal" build than surfacing an already-
+authorized but unreachable capability.
+
+**Implementation:**
+
+- `src/lib/backend.ts` [EXTENDED] — `listMyCorrectiveActions()`: the
+  obligation feed — every corrective action on sites the caller can access,
+  joined with finding title/severity and site code/name/county, sorted
+  openest-first then by soonest deadline. Scoping is RLS + the client
+  `canAccessSite` mirror (same as every list); operators are strictly
+  tenant-scoped by operatorName, staff by their own scope. No new server
+  privileges.
+- `src/pages/OperatorPortal.tsx` [NEW] — `/portal/operate` under
+  RequireAuth: open / overdue / awaiting-verification counters, the
+  obligation list (severity chip, site identity, deadline countdown,
+  overdue emphasis, prior response shown) with the respond form, and the
+  own-sites grid linking into existing site detail pages. The page renders
+  only what the server already scoped and states the isolation honestly.
+- `src/pages/PortalLayout.tsx` [EXTENDED] — an `OPERATOR_NAV` (Compliance,
+  My Incidents, Account Security) replaces the old reduced-staff-nav filter
+  for operators; operators opening `/portal` (exact root only — deep links
+  like `/portal/incidents/:id` stay valid) are redirected to
+  `/portal/operate`. Staff and unassigned behaviour unchanged.
+- `src/main.tsx` [EXTENDED] — the route.
+- `tests/operator-portal.test.ts` [NEW] — 7 tests through the wire bridge:
+  operator feed contains only own-tenant rows with the join populated;
+  cross-tenant obligations invisible to the feed (seeded CA on the other
+  tenant proves it is RLS, not UI filtering); staff see the same feed over
+  their scope; unassigned callers get an empty feed; owning operator
+  responds while open (row → `submitted`, `ca.respond` audit row present);
+  second respond FORBIDDEN (one response per action); cross-tenant respond
+  NOT_FOUND (existence masking) and staff respond FORBIDDEN.
+
+**Honest limits of this session:**
+
+1. Operators see incidents on their own sites (existing RLS-scoped list) but
+   cannot file new ones from the operator portal itself — the incident form
+   lives on the shared Incidents page, which operators keep in their nav.
+   Environmental observations remain staff-surface only (operators have no
+   observation duties in the spec).
+2. The respond flow is single-shot by design (guard: open → submitted only,
+   reviewer decides). An operator cannot amend a submitted response — a
+   correction path would need a reviewer reopening action, which the guard
+   does not currently allow and this session did not add.
+3. Risk scores, command-center aggregates and the national map remain
+   staff-only surfaces; the operator portal deliberately does not mirror
+   them (decision-support belongs to the oversight authority).
+4. No migration, so no live-convergence SQL is required; the feature is
+   client-surface only over existing, already-live server machinery.
+
+**Directive §5 classification:** Operator portal surface — **IMPLEMENTED
+(repo, tested)**. Remaining functionality rows in docs/16: evidence field UI
+polish (camera capture, batch upload) and the template editor — **PLANNED**.
+
+## Prior session [2026-09-27 — Gap #4: account recovery + MFA]
+
 **Session:** Gap Closure Directive v1.0, Gap #4 (Priority A) — account recovery + MFA
 **Date:** 2026-09-27
 **Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (140 passing
 across 9 files — 128 prior + 12 new account-security tests) · no schema
 migration required (MFA state lives in GoTrue, not `public.*`) · live
 project MFA/SMTP configuration and convergence NOT done (see honest limits)
-
-## This session [2026-09-27 — Gap #4: account recovery + MFA]
 
 **Directive item:** Priority A gap 4 — account recovery and MFA beyond
 password sign-in (docs/04 gap 2, "configuration pending").

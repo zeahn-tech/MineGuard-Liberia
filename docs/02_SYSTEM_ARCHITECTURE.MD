@@ -61,9 +61,15 @@ Browser (field laptop / office)
 
 ## Known limitations (honest)
 
-- Operators currently reach the portal with a reduced nav, but the backend
+- ~~Operators currently reach the portal with a reduced nav, but the backend
   operator-facing listing endpoints are the same staff endpoints with
-  role-based filtering; a dedicated operator portal surface is [PLANNED].
+  role-based filtering; a dedicated operator portal surface is [PLANNED].~~
+  **Closed 2026-09-27 (Priority B §20):** operators now land on a dedicated
+  compliance surface at `/portal/operate` (own sites, corrective-action
+  obligations with the respond flow, tenant-scoped nav) instead of the staff
+  command center. The underlying listing endpoints remain the same shared,
+  server-scoped queries plus `listMyCorrectiveActions` — one authorization
+  core, two presentations.
 - Evidence file serving uses Convex storage URLs gated by an authenticated
   action; per-record ACLs on file fetch are [PLANNED].
 - The site-code generator scans all sites (fine at national registry scale for a

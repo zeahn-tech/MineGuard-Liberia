@@ -59,6 +59,16 @@ markers; community reports as dashed unverified markers. Verified vs reported ar
 visually distinct. Administrative boundaries not depicted [PLANNED — requires
 authoritative boundary data].
 
+### Operator portal [IMPLEMENTED 2026-09-27]
+Dedicated compliance surface for the Operator role (spec §20): the operator's
+own licensed sites, their corrective-action obligations (open / overdue /
+awaiting verification counters, per-action deadline and finding severity), and
+the respond flow — a described action taken, submitted once, verified and
+closed by the reviewing authority. Strict tenant isolation is enforced
+server-side (RLS + `mg_can_access_site` + the respond guard); the page renders
+only what the server already scoped. Cross-tenant obligations are invisible,
+not hidden in the UI. Every response is attributed in the audit trail.
+
 ### Command center [IMPLEMENTED]
 All statistics computed live from stored data: sites, inspections, findings,
 corrective actions (open/overdue), incidents, fatalities, environmental alerts,
