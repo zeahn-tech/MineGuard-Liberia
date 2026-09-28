@@ -86,7 +86,7 @@ history) and, for data-level incidents, the restore path below.
 performs no third-party upload. A higher-frequency schedule (e.g. hourly
 WAL/PITR via Supabase) is a PROPOSED upgrade requiring owner confirmation.
 
-## Restore path & drill [IMPLEMENTED 2026-09-27]
+## Restore path & drill [IMPLEMENTED 2026-09-27 · REHEARSAL EXECUTED 2026-09-28 — PASS]
 
 `scripts/restore-supabase.sh <path/to/db.dump>`:
 
@@ -102,6 +102,41 @@ WAL/PITR via Supabase) is a PROPOSED upgrade requiring owner confirmation.
 latest dump into a throwaway target (scratch Postgres container or scratch
 Supabase project), record the sanity-check output, delete the target. Never
 restore over live production without an explicit, dated incident decision.
+
+### Rehearsal record [EXECUTED 2026-09-28 — PASS]
+
+Full record: `docs/drills/restore-rehearsal-2026-09-28.md`. Summary of the
+executed rehearsal (real clusters, real dump, not a simulation):
+
+- **Source**: local PostgreSQL 14.24 with all 8 migrations applied plus the
+  Supabase platform surface (roles, auth schema incl. MFA tables, storage
+  schema) and representative seed data (14 data tables populated).
+- **Backup executed**: `pg_dump -Fc` (144,876 bytes), sha256 recorded in
+  manifest, archive verified with `pg_restore --list` — the exact
+  `scripts/backup-supabase.sh` logic.
+- **Post-backup drift test**: new rows (a site, a profile, an audit
+  `drift.marker` row) were written to the source AFTER the backup. The
+  restored copy must not contain them.
+- **Restore executed**: `pg_restore --clean --if-exists` into a fresh
+  `initdb` scratch cluster — zero errors after pre-creating the three
+  Supabase platform roles (cluster-level objects that `pg_dump` does not
+  emit; Supabase provisions them in production).
+- **Verification (all PASS)**: schema identical (15 tables / 33 policies /
+  19 triggers / 96 routines); all 14 row counts identical to baseline; drift
+  rows ABSENT from the restore while present in the live source (point-in-
+  time invariant proven); RLS live on the restored copy (anon 0 rows,
+  operator only own-tenant `LB-BOM-001`, admin 2 rows); guard trigger intact
+  (operator site-write → `FORBIDDEN: admin required to modify the site
+  registry`); a real INSERT round-trips; 0008's delete policy present.
+
+**Runbook additions learned from the rehearsal** (real-Supabase restore
+procedure): (1) pre-create the platform roles `anon`, `authenticated`,
+`service_role` on the target before `pg_restore`; (2) re-apply schema grants
+for those roles after restore on a non-Supabase target (on Supabase the
+platform re-provisions them); (3) GoTrue credential data (password hashes,
+MFA secrets) is platform-managed — after a database-level restore, re-sync
+auth users via Supabase's auth admin tooling (`supabase auth export/import`)
+before sign-in works.
 
 ## One-time activation checklist [REQUIRED — project owner]
 

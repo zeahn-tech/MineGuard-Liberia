@@ -1,13 +1,67 @@
 # 11 — Implementation Status
 
-**Session:** Priority D — production deploy path + backup schedule (operational
-readiness, no feature work)
-**Date:** 2026-09-27
-**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (233 passing
-across 17 files — 219 prior + 14 new operational-readiness tests) · both new
-workflows YAML-validated · shell scripts syntax-checked
+**Session:** Restore-from-backup rehearsal — EXECUTED (Priority D, §16
+definition-of-done item 4)
+**Date:** 2026-09-28
+**Verification:** rehearsal executed for real and **PASS** (record:
+`docs/drills/restore-rehearsal-2026-09-28.md`) · `bun tsc -b --noEmit` ✓ ·
+no application code changed in this session
 
-## This session [2026-09-27 — Priority D: production deploy + backups]
+## This session [2026-09-28 — restore rehearsal executed]
+
+**Directive item:** perform and document an ACTUAL restore test — a
+rehearsal, not a document.
+
+**What was actually executed** (real PostgreSQL 14.24 clusters on the build
+machine, not a mock):
+
+1. **Source database built**: fresh cluster; all 8 migrations applied
+   cleanly (after stubbing the Supabase-provided surface from the test
+   harness: platform roles, `auth` schema incl. MFA tables, `storage`
+   schema, `supabase_realtime` publication); representative data seeded
+   (6 auth users/profiles across admin, two operators, county, national,
+   guest; 2 sites; template; inspection/finding/CA; incident; evidence;
+   community report; 1 MFA factor). Baseline recorded: 15 tables,
+   33 RLS policies, 19 guard triggers, 96 routines.
+2. **Backup executed** with the exact `scripts/backup-supabase.sh` logic:
+   `pg_dump -Fc` (144,876 bytes), SHA-256 + size manifest, archive verified
+   via `pg_restore --list`.
+3. **Post-backup drift injected into the source** (site `LB-BOM-099`, a
+   profile, an audit `drift.marker` row) — deliberately, so the restore can
+   be proven to land at the backup's point in time rather than "now".
+4. **Restore executed** via `pg_restore --clean --if-exists --no-owner
+   --no-privileges` into a fresh `initdb` scratch cluster. Zero errors after
+   pre-creating the three Supabase platform roles (cluster-level objects
+   pg_dump does not emit; Supabase provisions these in production).
+5. **Verification — ALL PASS**:
+   - schema identical (15/33/19/96) and all 14 data-table row counts
+     identical to baseline;
+   - drift rows ABSENT from the restore while present in the live source
+     (point-in-time invariant proven both ways);
+   - RLS live on the restored DB: anon sees 0 sites; the AgriLib operator
+     sees exactly `LB-BOM-001`; admin sees both;
+   - guard triggers enforce on the restored copy: operator site-write →
+     `FORBIDDEN: admin required to modify the site registry`;
+   - a real INSERT round-trips (the restored DB is live, not just readable);
+   - migration 0008's template-delete policy present.
+6. **Teardown**: both drill clusters stopped and removed; only the record
+   remains.
+
+**Runbook knowledge gained (now in docs/14):** on a non-Supabase target a
+restore needs (a) platform roles pre-created and (b) grants re-applied
+before RLS behaves; on the real platform both are provisioned by Supabase.
+Also documented: GoTrue credentials (password hashes, MFA secrets) are
+platform-managed — after a database-level restore, auth users must be
+re-synced via Supabase auth admin tooling before sign-in works.
+
+**Honest scope:** the drill ran against a locally-reconstructed source
+database (the production Supabase project does not exist yet — owner
+prerequisite). The rehearsal validates the TOOLING and the restore/verify
+procedure end-to-end; it must be repeated against the production project
+once it exists, and the weekly automated drill in `backup.yml` then keeps it
+standing.
+
+## Prior session [2026-09-27 — Priority D: production deploy + backups]
 
 **Directive item:** production deployment pipeline + backup schedule — dev
 deployment verified, production was not. Define and implement a backup

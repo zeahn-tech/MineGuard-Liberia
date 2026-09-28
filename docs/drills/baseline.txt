@@ -1,0 +1,19 @@
+=== BASELINE (source DB before backup) 2026-09-28T22:52:37Z ===
+rowcount|audit_log|0
+rowcount|auth.users|6
+rowcount|community_reports|1
+rowcount|corrective_actions|1
+rowcount|environmental_observations|0
+rowcount|evidence|1
+rowcount|findings|1
+rowcount|incidents|1
+rowcount|inspection_templates|1
+rowcount|inspections|1
+rowcount|profiles|6
+rowcount|report_tracking|1
+rowcount|sites|2
+rowcount|storage.objects|1
+schema|tables|15
+schema|policies|33
+schema|triggers|19
+schema|routines|96

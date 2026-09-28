@@ -18,7 +18,7 @@ require evidence across the dimensions below.
 | Performance | ⚪ Unmeasured | No load testing; queries are collect()-based (fine for pilot scale) |
 | Accessibility | 🟡 Partial | Tokens chosen for contrast; audit of flows not yet done |
 | Deployment | 🟢 Pipeline live | Dev deploy verified; production workflow implemented (manual gate, forced pre-deploy backup, seed compiled out + CI-verified, deploy verification) — owner prerequisites (project ref/secret, reviewers) pending |
-| Recovery | 🟢 Implemented | Nightly 03:30 UTC pg_dump (90-day retention, archive-verified, manifest+SHA-256); weekly automated restore drill into throwaway Postgres; restore script requires typed confirmation |
+| Recovery | 🟢 Rehearsed | Nightly 03:30 UTC pg_dump (90-day retention, archive-verified, manifest+SHA-256); weekly automated restore drill; **restore-from-backup rehearsal EXECUTED 2026-09-28 — PASS** (point-in-time + RLS/guard integrity proven, docs/drills/) |
 | Testing | 🟢 17 suites / 233 tests | SQL layer (PGlite, all migrations), wire-bridge data-layer suites (backend edge, account security, operator portal + isolation, template editor, evidence capture/progress, notifications, CSV exports, AI risk explanation, operational readiness), offline queues, live anon probes — all green; UI smoke layer [PLANNED] |
 | Documentation | 🟢 Current | Docs 00–16 synchronized with this build |
 
@@ -27,7 +27,11 @@ require evidence across the dimensions below.
 1. Priorities 1–3 of the test strategy implemented and green in CI.
 2. Evidence attachment UI shipped; media offline queue shipped.
 3. Rate limiting on public endpoints (per-source limiter implemented, tested, and converged live — migration 0005); evidence signed-URL revocation path implemented and tested (migration 0006, repo + live).
-4. Restore-from-backup rehearsal completed and documented.
+4. Restore-from-backup rehearsal completed and documented. **[DONE 2026-09-28 —
+   executed for real (local clusters, real dump, drift test, RLS/guard
+   verification): PASS — see docs/drills/restore-rehearsal-2026-09-28.md and
+   docs/14. Must be repeated against the production Supabase project once it
+   exists.]**
 5. Accessibility pass (keyboard, contrast, screen-reader landmarks) on the five
    core flows.
 6. First-admin provisioning runbook executed on the production deployment.
