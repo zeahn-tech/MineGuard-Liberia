@@ -136,8 +136,17 @@ Delivery channels — CLASSIFICATION:
 - A future persisted-notification table (read receipts, per-user dismissal)
   is PROPOSED, same confirmation gate.
 
-AI assistance, government reporting exports [PROPOSED]
-Not implemented in v1.0. See docs 08 and 14.
+Government reporting exports [PARTIALLY IMPLEMENTED — CSV v1; PDF PROPOSED]
+CSV exports (§9, first format) are serialized client-side from rows the
+requesting user's existing authorization already returned — there is no
+export endpoint, service role, or RPC, so an export cannot exceed what the
+caller's feeds show. Shipped surfaces: the inspections list (staff/operator
+scope per caller) and the operator compliance feed (corrective actions with
+finding, site, deadline state, operator response). RFC 4180-conformant
+(quoted/escaped fields, CRLF, UTF-8 BOM for Excel), dated filenames
+(`mineguard-inspections-YYYY-MM-DD.csv`). PDF rendering is PROPOSED (a
+layout/styling decision for the adopting institution — REQUIRES
+GOVERNMENT/OWNER CONFIRMATION on letterhead and format).
 
 ## Explicit non-goals (v1.0)
 

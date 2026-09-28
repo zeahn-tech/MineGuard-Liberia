@@ -20,6 +20,7 @@ import {
 import { toast } from "sonner";
 import {
   CloudUpload,
+  Download,
   FilePlus2,
   MapPin,
   Plus,
@@ -27,6 +28,7 @@ import {
   Signal,
   WifiOff,
 } from "lucide-react";
+import { exportInspections } from "@/lib/export-csv";
 import {
   deleteDraft,
   enqueueInspectionSubmission,
@@ -71,7 +73,7 @@ export default function Inspections() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <header className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
         <div>
           <p className="kicker">Field operations</p>
           <h1 className="display text-3xl">Inspections</h1>
@@ -85,6 +87,18 @@ export default function Inspections() {
             <FilePlus2 className="size-4" /> New inspection
           </Button>
         )}
+        <Button
+          variant="outline"
+          disabled={!inspections?.length}
+          onClick={() => {
+            // Export serializes ONLY the rows the authorized list query
+            // returned (§9: no unscoped export path exists).
+            const name = exportInspections(inspections ?? []);
+            toast.success(`Exported ${name} (${inspections?.length ?? 0} rows).`);
+          }}
+        >
+          <Download className="size-4" /> Export CSV
+        </Button>
       </header>
 
       {localDrafts.length > 0 && (

@@ -17,10 +17,11 @@ import { Input } from "@/components/ui/input";
 import { useMutation, useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import type { Severity } from "@/lib/types";
-import { AlertTriangle, CheckCircle2, Loader2, Send } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, Loader2, Send } from "lucide-react";
 import { useState } from "react";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
+import { exportComplianceObligations } from "@/lib/export-csv";
 
 const DAY = 86_400_000;
 
@@ -80,15 +81,32 @@ export default function OperatorCorrectiveActions() {
 
   return (
     <div className="space-y-4 p-4 md:p-6">
-      <div>
-        <p className="kicker">Operator portal</p>
-        <h1 className="display text-2xl">Corrective actions</h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Opened by inspectors after findings on your sites. Respond with what
-          your crew did — once per action; the reviewing authority verifies and
-          closes it. Deadlines are binding; overdue actions are visible to the
-          oversight authority.
-        </p>
+      <div className="flex flex-col gap-2">
+        <div>
+          <p className="kicker">Operator portal</p>
+          <h1 className="display text-2xl">Corrective actions</h1>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            Opened by inspectors after findings on your sites. Respond with what
+            your crew did — once per action; the reviewing authority verifies and
+            closes it. Deadlines are binding; overdue actions are visible to the
+            oversight authority.
+          </p>
+        </div>
+        <div className="flex justify-start">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={obligationsQ === undefined || obligations.length === 0}
+            onClick={() => {
+              // Export serializes ONLY the caller-scoped compliance feed
+              // (§9: the operator's export is exactly their obligations).
+              const name = exportComplianceObligations(obligations);
+              toast.success(`Exported ${name} (${obligations.length} rows).`);
+            }}
+          >
+            <Download className="size-4" /> Export CSV
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">

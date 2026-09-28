@@ -19,7 +19,11 @@ templates DELETE policy — migration 0008), `tests/evidence-capture.test.ts`
 (§10 camera capture + batch byte progress + the never-silently-drop queue
 guarantee), `tests/notifications.test.ts` (§1 derived in-app notifications:
 deadline thresholds, decision/report events, role scoping, no-leak, and a
-source-level guard that no delivery channel ships without confirmation), and
+source-level guard that no delivery channel ships without confirmation),
+`tests/export-csv.test.ts` (§9 CSV exports: RFC 4180 format contract, the
+authorization invariant — operator export strictly own-tenant, county
+export excludes other counties, national covers all — and a source-contract
+guard that exports read only the already-authorized list queries), and
 `tests/live-anon.test.ts`
 (probes the live project with the public anon key only). Run by `bun test`,
 wired into CI. [PARTIALLY IMPLEMENTED]

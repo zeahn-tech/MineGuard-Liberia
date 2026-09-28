@@ -1,11 +1,63 @@
 # 11 — Implementation Status
 
-**Session:** §1 — minimal in-app notifications (derived, not stored)
+**Session:** §9 — government reporting exports (CSV v1, client-side)
 **Date:** 2026-09-27
-**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (200 passing
-across 14 files — 188 prior + 12 new notification tests) · delivery-channel
-classification recorded (in-app IMPLEMENTED; email/push/SMS REQUIRES
-GOVERNMENT/OWNER CONFIRMATION) · no schema migration, no new infrastructure
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (211 passing
+across 15 files — 200 prior + 11 new export tests) · no schema migration, no
+export endpoint, no new dependencies
+
+## This session [2026-09-27 — §9: CSV reporting exports]
+
+**Directive item:** §1/§9 — no export capability existed. Scope a first
+format scoped by the requesting user's existing authorization — do not
+build a new unscoped data path.
+
+**Scope decision (the core of the session):** exports are serialized IN THE
+BROWSER from rows the caller's existing authorization already returned.
+There is no export endpoint, service role, or RPC — the acceptance criterion
+("scoped by existing authorization, no new unscoped data path") holds by
+construction: an export can only ever contain rows the caller's feeds
+returned. Verified by test, not assertion (below).
+
+- **`src/lib/export-csv.ts`** (new) — RFC 4180 serializer (quoting of
+  comma/quote/newline, doubled embedded quotes, CRLF, UTF-8 BOM so Excel
+  opens non-ASCII county/operator names correctly), dated filenames
+  (`mineguard-inspections-YYYY-MM-DD.csv`), and two export builders over
+  already-authorized row shapes: `exportInspections` (the
+  `inspections.list` shape — staff see their scope, operators their sites'
+  inspections) and `exportComplianceObligations` (the
+  `listMyCorrectiveActions` shape — finding, site, deadline state, operator
+  response). The DOM anchor download lives inside an injectable default
+  trigger (non-DOM tests). No dependencies added.
+- **UI** — "Export CSV" on the Inspections list (all roles; disabled while
+  the feed is empty) and on the operator Corrective Actions page; each
+  serializes exactly the feed variable already on screen (what you see is
+  what you export), with a toast naming the file and row count.
+- **Tests** — `tests/export-csv.test.ts` (11): the pure format contract
+  (BOM bytes asserted on the File's ArrayBuffer — Bun's text() strips a
+  leading BOM when decoding, so string checks would lie; quoting/escaping;
+  dated filename; empty cells; deadline-state derivation
+  resolved/overdue/open) and the authorization invariant over the RLS wire
+  bridge: operator compliance export is strictly own-tenant (a cross-tenant
+  CA is seeded, proven absent from the serialization, then removed);
+  county-scoped staff export contains their county row but never the
+  Grand Cape Mount row; national staff export covers both counties;
+  unassigned callers export a header-only file. A source-contract test
+  asserts the lib contains no network/DB client at all and the pages feed
+  it only the authorized list variables — wiring anything else into the
+  exports fails this suite.
+
+**Classification (docs/01):** CSV IMPLEMENTED; PDF rendering PROPOSED
+(REQUIRES GOVERNMENT/OWNER CONFIRMATION — letterhead/format is the adopting
+institution's decision). No new data path, table, or infrastructure.
+
+**Honest limits:** exports reflect the live feed at click time (no
+server-side archival or signed report artifacts); date filtering is
+"filter the list, then export" — no date-range picker in v1; serialized
+JSON-free CSV means answer-level detail of a specific inspection is not in
+the v1 column set.
+
+---
 
 ## This session [2026-09-27 — §1: minimal in-app notifications]
 
