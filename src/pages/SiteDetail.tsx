@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { ArrowLeft, MapPin, Sparkles } from "lucide-react";
 import type { Id } from "@/lib/compat-types";
-import { RiskAiPanel } from "@/components/RiskAiPanel";
+import { RiskAiPanel } from "../components/RiskAiPanel";
 
 export default function SiteDetail() {
   const { siteId } = useParams<{ siteId: string }>();
