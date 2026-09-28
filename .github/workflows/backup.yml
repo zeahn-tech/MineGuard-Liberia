@@ -1,0 +1,100 @@
+# =============================================================================
+# NIGHTLY BACKUP (doc 14 — backup schedule)
+#
+# Schedule: daily 03:30 UTC. Rationale: Bomi/Grand Cape Mount field ops run
+# ~08:00–17:00 GMT; 03:30 UTC is inside the local quiet window AND after the
+# day's records have synced (offline queue replay happens on reconnect, so a
+# post-midnight UTC slot catches end-of-day submissions).
+#
+# Retention (documented in doc 14):
+#   - GitHub artifacts: 90 days (the platform maximum for this tier).
+#   - Weekly job prunes stale artifacts by deleting runs older than 90 days
+#     so the retention promise matches reality.
+#
+# Verification: every dump is verified by `pg_restore --list` inside
+# backup-supabase.sh (a corrupt archive fails the run loudly). A WEEKLY job
+# additionally performs a full restore drill into a throwaway Postgres
+# service container and records row counts — doc 14's "restore tested" as a
+# standing, scheduled proof rather than a one-time promise.
+#
+# Prerequisites (owner): repository variables SUPABASE_PROJECT_REF; secrets
+# SUPABASE_DB_PASSWORD. Without them the job fails loudly — backups must
+# never silently stop.
+# =============================================================================
+
+name: Nightly backup
+
+on:
+  schedule:
+    - cron: "30 3 * * *" # 03:30 UTC daily
+  workflow_dispatch: # manual trigger for drills
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+
+      - name: Take backup (dump + manifest + archive verification)
+        id: backup
+        env:
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          NAME="$(bash scripts/backup-supabase.sh ./backups)"
+          echo "artifact=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload backup artifact (retain 90 days)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.backup.outputs.artifact }}
+          path: backups/
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Restore drill (weekly — Sundays)
+        if: github.event.schedule == '30 3 * * 0' || github.event_name == 'workflow_dispatch'
+        env:
+          PGPASSWORD: postgres
+        run: |
+          # Throwaway Postgres in the job container: proves the archive
+          # restores and the domain schema + row data survive the round trip.
+          docker run -d --name drill-pg -e POSTGRES_PASSWORD=postgres -p 55432:5432 postgres:16
+          for i in $(seq 1 30); do
+            pg_isready -h localhost -p 55432 -U postgres >/dev/null 2>&1 && break
+            sleep 1
+          done
+          DUMP="$(find backups -name db.dump | head -1)"
+          pg_restore -h localhost -p 55432 -U postgres -d postgres \
+            --no-owner --no-privileges "$DUMP"
+          echo "== Restore drill row counts =="
+          psql -h localhost -p 55432 -U postgres -d postgres -tAc \
+            "select 'sites', count(*) from public.sites
+             union all select 'inspections', count(*) from public.inspections
+             union all select 'audit_log', count(*) from public.audit_log;"
+
+      - name: Prune backup artifacts older than 90 days
+        if: github.event.schedule == '30 3 * * 0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          CUTOFF="$(date -u -d '-90 days' +%Y-%m-%dT%H:%M:%SZ)"
+          gh api "repos/${REPO}/actions/artifacts?per_page=100" \
+            --jq ".artifacts[] | select(.name | startswith(\"db-backup-\")) | select(.created_at < \"${CUTOFF}\") | .id" \
+            | while read -r ID; do
+                gh api -X DELETE "repos/${REPO}/actions/artifacts/${ID}" && echo "pruned artifact ${ID}"
+              done

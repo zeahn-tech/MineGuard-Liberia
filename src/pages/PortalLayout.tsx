@@ -164,6 +164,13 @@ export default function PortalLayout() {
   const pendingItems = useMemo(() => queue.filter((q) => q.status !== "done"), [queue]);
 
   const handleSeed = async () => {
+    // Production builds carry no demo seeding (doc 14 deploy checklist item 4):
+    // the button is not rendered and the path is refused here as defense in
+    // depth — synthetic records must never enter a production tenant.
+    if (import.meta.env.VITE_MINEGUARD_ENV === "production") {
+      toast.error("Demo seeding is disabled in production deployments.");
+      return;
+    }
     try {
       const result = await seedData({});
       if (result?.seeded) toast.success("Demo data seeded (synthetic records)");
@@ -469,8 +476,8 @@ export default function PortalLayout() {
         </DialogContent>
       </Dialog>
 
-      {/* Dev seed — admin only, visible in footer area via button */}
-      {isAdmin && (
+      {/* Dev seed — admin only, non-production builds only (doc 14 item 4) */}
+      {isAdmin && import.meta.env.VITE_MINEGUARD_ENV !== "production" && (
         <SeedButton onSeed={handleSeed} />
       )}
     </div>

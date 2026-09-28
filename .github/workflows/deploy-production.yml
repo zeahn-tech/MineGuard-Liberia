@@ -1,0 +1,151 @@
+# =============================================================================
+# PRODUCTION DEPLOYMENT (doc 14 — deploy path)
+#
+# The dev deployment (deploy-pages.yml on push to main) is the developer
+# surface. This workflow is the PRODUCTION path and differs in the points
+# doc 14 requires:
+#
+#   1. MANUAL GATE ONLY (workflow_dispatch with a required environment
+#      selection) — production deploys are deliberate acts, never a side
+#      effect of a push.
+#   2. FORCED BACKUP FIRST — the deploy job waits for a fresh Supabase
+#      backup (backup-supabase.sh) so no deploy ever proceeds on a stale
+#      recovery point.
+#   3. PRODUCTION BUILD — VITE_MINEGUARD_ENV=production: demo seeding is
+#      compiled out of the UI and refused at the call site (doc 14 item 4).
+#   4. DEPLOY VERIFICATION — the workflow fails if the SPA endpoint does
+#      not answer, so a half-shipped deploy is visible, not silent.
+#
+# Prerequisites (documented in docs/14_DEPLOYMENT_OPERATIONS.MD):
+#   - GitHub environment "production" created with required reviewers.
+#   - Repository variables: SUPABASE_PROJECT_REF (production project ref).
+#   - Secrets: SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD (production).
+#   - GitHub Pages source: GitHub Actions (same as dev deploy).
+# =============================================================================
+
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_prod:
+        description: 'Type "deploy-production" to confirm'
+        required: true
+        default: ""
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: production-pages
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    environment: production # requires approval from configured reviewers
+    outputs:
+      backup_artifact: ${{ steps.backup.outputs.artifact }}
+    steps:
+      - name: Confirm typed gate
+        run: |
+          if [ "${{ github.event.inputs.confirm_prod }}" != "deploy-production" ]; then
+            echo "Refusing to deploy: confirmation phrase not typed exactly."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck + tests must be green before a prod deploy
+        run: |
+          bun run typecheck
+          bun test
+
+      # Backup BEFORE build/deploy: doc 14 rule — never deploy without a
+      # fresh recovery point. The backup script uploads nothing to third
+      # parties; the dump is stored as a build artifact and (optionally)
+      # synced to object storage by the operator.
+      - name: Backup production database
+        id: backup
+        env:
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          OUT="$(bash scripts/backup-supabase.sh ./backups)"
+          echo "artifact=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload backup artifact (retain 90 days)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.backup.outputs.artifact }}
+          path: backups/
+          retention-days: 90
+          if-no-files-found: error
+
+  build-and-deploy:
+    needs: guard
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build (production flags)
+        run: bun run build
+        env:
+          DISABLE_VLY_PLUGIN: "1"
+          # Production build: demo seeding compiled out of the UI.
+          VITE_MINEGUARD_ENV: production
+
+      - name: Production sanity — seed button absent, production flag present
+        run: |
+          # The compiled bundle must not contain the demo-seed entry point
+          # (doc 14 item 4, verified rather than promised).
+          if grep -r "Load demo data" dist/assets/ >/dev/null 2>&1; then
+            echo "FAIL: demo seed UI present in production bundle"; exit 1
+          fi
+          test -f dist/index.html || { echo "dist/index.html missing"; exit 1; }
+          test -f dist/manifest.webmanifest || { echo "manifest missing"; exit 1; }
+          test -f dist/sw.js || { echo "sw.js missing"; exit 1; }
+
+      - name: SPA fallback (404 → index)
+        run: cp dist/index.html dist/404.html
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages (production)
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Verify deployment answers
+        run: |
+          URL="${{ steps.deployment.outputs.page_url }}"
+          for i in 1 2 3 4 5; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL") || CODE=000
+            [ "$CODE" = "200" ] && { echo "Deploy verified: $URL → 200"; exit 0; }
+            sleep 5
+          done
+          echo "FAIL: production endpoint did not answer 200 ($CODE)"
+          exit 1

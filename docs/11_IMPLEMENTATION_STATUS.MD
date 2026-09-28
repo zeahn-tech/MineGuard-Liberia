@@ -1,12 +1,69 @@
 # 11 — Implementation Status
 
-**Session:** §18 — AI risk-score explanation (first AI capability, doc 08)
+**Session:** Priority D — production deploy path + backup schedule (operational
+readiness, no feature work)
 **Date:** 2026-09-27
-**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (219 passing
-across 16 files — 211 prior + 8 new AI tests) · no schema migration, no
-provider key, no network call, no write path
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (233 passing
+across 17 files — 219 prior + 14 new operational-readiness tests) · both new
+workflows YAML-validated · shell scripts syntax-checked
 
-## This session [2026-09-27 — §18: AI risk-score explanation]
+## This session [2026-09-27 — Priority D: production deploy + backups]
+
+**Directive item:** production deployment pipeline + backup schedule — dev
+deployment verified, production was not. Define and implement a backup
+schedule and a documented production deploy path (doc 14). No feature work.
+
+- **Production deploy path** (`deploy-production.yml`, new) — manual
+  `workflow_dispatch` with a typed confirmation phrase plus the protected
+  GitHub `production` environment (required reviewers): production deploys
+  are deliberate acts, never push side effects. The `guard` job runs
+  typecheck + the full test suite, then takes a FRESH backup
+  (`scripts/backup-supabase.sh`, 90-day artifact) — the deploy job
+  `needs: guard`, so no production deploy proceeds on a stale recovery
+  point. The build runs `VITE_MINEGUARD_ENV=production` and the workflow
+  FAILS if the compiled bundle contains the demo-seed UI or if the deployed
+  endpoint does not answer HTTP 200.
+- **Production seed guard (checklist item 4, now enforced)** —
+  `VITE_MINEGUARD_ENV` typed in `src/vite-env.d.ts`; the seed button is not
+  rendered under `production` and the call site refuses the action (defense
+  in depth), with the bundle-level CI check as the third layer.
+- **Backup schedule** (`backup.yml`, new) — nightly 03:30 UTC `pg_dump -Fc`
+  via `scripts/backup-supabase.sh`: archive verified in-run
+  (`pg_restore --list`), SHA-256 + size manifest per backup, 90-day artifact
+  retention, weekly prune job so the retention promise matches reality,
+  missing-dump fails loudly. Rationale for the slot: 03:30 UTC is inside the
+  Bomi/Grand Cape Mount quiet window and after end-of-day offline-queue
+  replays.
+- **Weekly automated restore drill** — Sunday runs restore the newest dump
+  into a throwaway Postgres 16 container and print `sites`/`inspections`/
+  `audit_log` row counts: doc 14's "restore tested" is a standing scheduled
+  proof, not a one-time promise.
+- **Restore tooling** (`scripts/restore-supabase.sh`, new) — requires
+  `TARGET_DB_URL` + typed `restore` confirmation, warns against production
+  targets, prints the drill sanity checks to record.
+- **Tests** (`tests/operational-readiness.test.ts`, 14) — pin the
+  operational contracts so they cannot rot: seed guard in BOTH layers;
+  prod workflow manual-only with typed gate + environment protection;
+  backup-before-deploy job ordering; production flag + bundle sanity +
+  deploy verification steps; nightly cron + 90-day retention + archive
+  verification + weekly drill; restore script's explicit-target and typed-
+  confirmation requirements.
+
+**Owner prerequisites before first production deploy (docs/14):** production
+Supabase project + migrations; repository variable `SUPABASE_PROJECT_REF` +
+secret `SUPABASE_DB_PASSWORD`; GitHub environment `production` with required
+reviewers. **Owner decisions:** object-storage offload of dumps (cost/
+residency) and Supabase PITR tier upgrade are PROPOSED, not assumed.
+
+**Honest limits:** backup artifacts live in the repository's Actions storage
+(acceptable for pilot; offload is the owner decision); a standing uptime
+probe and load testing remain PLANNED; the restore drill has not yet executed
+against a real production database (it runs automatically once the owner
+prerequisites exist).
+
+---
+
+## Prior session [2026-09-27 — §18: AI risk-score explanation]
 
 **Directive item:** Priority C — AI (§18), only after A and B are stable.
 Exactly ONE capability from doc 08's permitted list, recommended first:

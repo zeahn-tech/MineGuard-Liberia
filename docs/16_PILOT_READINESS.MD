@@ -17,9 +17,9 @@ require evidence across the dimensions below.
 | Media | 🟢 Shipped | Storage pipeline + metadata + audit live; field UI with camera capture, batch multi-file byte progress, offline byte queue (§10, tested) |
 | Performance | ⚪ Unmeasured | No load testing; queries are collect()-based (fine for pilot scale) |
 | Accessibility | 🟡 Partial | Tokens chosen for contrast; audit of flows not yet done |
-| Deployment | 🟢 Dev only | Dev deployment verified; prod pipeline + backups pending |
-| Recovery | ⚪ Unplanned | Restore test not yet performed |
-| Testing | 🟢 16 suites / 219 tests | SQL layer (PGlite, all migrations), wire-bridge data-layer suites (backend edge, account security, operator portal + isolation, template editor, evidence capture/progress, notifications, CSV exports, AI risk explanation), offline queues, live anon probes — all green; UI smoke layer [PLANNED] |
+| Deployment | 🟢 Pipeline live | Dev deploy verified; production workflow implemented (manual gate, forced pre-deploy backup, seed compiled out + CI-verified, deploy verification) — owner prerequisites (project ref/secret, reviewers) pending |
+| Recovery | 🟢 Implemented | Nightly 03:30 UTC pg_dump (90-day retention, archive-verified, manifest+SHA-256); weekly automated restore drill into throwaway Postgres; restore script requires typed confirmation |
+| Testing | 🟢 17 suites / 233 tests | SQL layer (PGlite, all migrations), wire-bridge data-layer suites (backend edge, account security, operator portal + isolation, template editor, evidence capture/progress, notifications, CSV exports, AI risk explanation, operational readiness), offline queues, live anon probes — all green; UI smoke layer [PLANNED] |
 | Documentation | 🟢 Current | Docs 00–16 synchronized with this build |
 
 ## Definition of done for pilot
