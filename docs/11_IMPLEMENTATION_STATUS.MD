@@ -1,12 +1,68 @@
 # 11 — Implementation Status
 
-**Session:** §9 — government reporting exports (CSV v1, client-side)
+**Session:** §18 — AI risk-score explanation (first AI capability, doc 08)
 **Date:** 2026-09-27
-**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (211 passing
-across 15 files — 200 prior + 11 new export tests) · no schema migration, no
-export endpoint, no new dependencies
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (219 passing
+across 16 files — 211 prior + 8 new AI tests) · no schema migration, no
+provider key, no network call, no write path
 
-## This session [2026-09-27 — §9: CSV reporting exports]
+## This session [2026-09-27 — §18: AI risk-score explanation]
+
+**Directive item:** Priority C — AI (§18), only after A and B are stable.
+Exactly ONE capability from doc 08's permitted list, recommended first:
+risk-score explanation. Constraints check done before writing any AI code.
+
+**Constraints check (doc 08), conclusion recorded:** all four constraints
+are implementable as stated — and for THIS capability the strongest form is
+available. Because the recommended first capability is a deterministic
+walkthrough of the existing weighted factors, no provider model is needed:
+"provider keys server-side only" is satisfied structurally (no key, SDK, or
+network call anywhere — source-contract asserted); "human confirmation" is
+exceeded (read-only, no write path exists at all, so nothing can reach the
+authoritative record even with a confirmation flow); "cite-or-abstain" and
+"server-side scoping" are implemented and tested. Conclusion: rules
+tolerated as written; doc 08 updated with the implementation record, rules
+not revised.
+
+- **`src/lib/risk-model.ts`** (new, pure) — `RISK_WEIGHTS` and
+  `computeRiskFactors` extracted from `sites.riskScores` so the computation
+  and its explanation share one source of truth (the AI layer cannot
+  describe anything but the real computation). Each factor now carries the
+  record IDs grounding it — the cite-or-abstain anchors. `riskScores`
+  refactored onto the shared module; behavior verified identical by the
+  existing suites (all prior risk tests green unchanged).
+- **`api.ai.explainRiskScore`** — new data-layer section with the four
+  constraints documented in its header. Inputs assembled by the same scoped
+  queries as `riskScores`; identity re-derived server-side; site access via
+  `canAccessSite`; out-of-scope sites null-mask (not found OR denied → same
+  null, no existence leak). With zero factors it abstains (empty summary,
+  states the empty factor set) rather than inventing narrative; otherwise
+  each sentence names its factor, computed points, and record IDs, and the
+  payload carries a fixed disclaimer shipped in the data itself.
+- **UI** (`src/components/RiskAiPanel.tsx` on SiteDetail) — renders only
+  server payloads behind an unconditional "AI-assisted" badge + Sparkles
+  marker + the payload disclaimer. No mutation hook exists in the component.
+- **Tests** (`tests/ai-risk-explanation.test.ts`, 8) — no-leak: operator
+  explanations cite only records verifiably existing in their scope (each
+  citation checked against the DB), cross-tenant site null-masks, unassigned
+  callers get null; consistency: explanation points sum exactly to the
+  caller's own `riskScores` entry (no second data path); no-fabrication:
+  sentence points match `RISK_WEIGHTS` exactly for seeded high-finding +
+  overdue-CA cases, and citations include the seeded record IDs; abstention
+  for a factor-free site; read-only: DB byte-identical after explanations;
+  source contracts: the `ai` section contains no insert/update/delete, no
+  audit write, no provider/network references, and the panel has no
+  mutation hook and renders the label unconditionally.
+
+**Honest limits:** the explainer narrates the indicator only — it does not
+compare sites, project trends, or recommend actions (that is trend
+identification's gate); abstention text is fixed wording, not generated;
+the "AI-assisted" label describes a deterministic computation honestly —
+no LLM is involved anywhere, which is the point of the first capability.
+
+---
+
+## Prior session [2026-09-27 — §9: CSV reporting exports]
 
 **Directive item:** §1/§9 — no export capability existed. Scope a first
 format scoped by the requesting user's existing authorization — do not
@@ -59,7 +115,7 @@ the v1 column set.
 
 ---
 
-## This session [2026-09-27 — §1: minimal in-app notifications]
+## Prior session [2026-09-27 — §1: minimal in-app notifications]
 
 **Directive item:** §8/§1 — notifications not implemented at all; scope a
 minimal version first (e.g. corrective-action deadlines, community report

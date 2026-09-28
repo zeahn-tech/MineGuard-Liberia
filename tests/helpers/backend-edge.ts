@@ -321,6 +321,20 @@ export async function adminSql(sql: string): Promise<Row[]> {
   });
 }
 
+/** Owner-session multi-statement script (db.exec batch, like the seed).
+ *  Unlike adminSql (one prepared statement), this can carry
+ *  `set local role/claims` prologs needed by guard triggers that read the
+ *  JWT (e.g. the admin-only site-registry guard). */
+export async function adminExec(script: string): Promise<Row[]> {
+  return enqueue(async () => {
+    const db = await getEdgeDb();
+    const results = await db.exec(`begin; ${script}; commit;`);
+    // Payload = last result before COMMIT.
+    const payload = results[results.length - 2];
+    return ((payload && payload.rows) ?? []) as Row[];
+  });
+}
+
 // ---------------------------------------------------------------------------
 // value literals
 // ---------------------------------------------------------------------------

@@ -148,6 +148,15 @@ finding, site, deadline state, operator response). RFC 4180-conformant
 layout/styling decision for the adopting institution — REQUIRES
 GOVERNMENT/OWNER CONFIRMATION on letterhead and format).
 
+AI assistance [PARTIALLY IMPLEMENTED — risk explanation only]
+First (and so far only) AI capability per doc 08: risk-score explanation —
+a deterministic, cite-or-abstain walkthrough of the existing explainable
+weighted factors, server-side scoped through the authorization core,
+read-only (no write path exists), labeled "AI-assisted" in the UI, and
+requiring no provider model or key. Summarization, NL search, and briefing
+drafts remain PROPOSED — each is its own gap. See doc 08 for the governance
+contract as implemented and tested.
+
 ## Explicit non-goals (v1.0)
 
 - No enforcement actions or legal determinations.

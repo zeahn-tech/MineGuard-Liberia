@@ -23,6 +23,12 @@ import {
   uploadWithProgress,
 } from "./supabase";
 import { validateTemplateSections } from "./template-schema";
+import { computeRiskFactors, type RiskFactor } from "./risk-model";
+
+/** doc 08: AI output is labeled as assistance — this label ships with every
+ *  AI payload so no surface can present it as fact without the marker. */
+const AI_DISCLAIMER =
+  "AI-assisted explanation — generated from the recorded risk factors only; decision support, not a determination.";
 import {
   canAccessSite,
   isStaffRole,
@@ -856,6 +862,7 @@ export const api = {
         async () => {
           const user = await requireAuthed(true);
           if (!user.role) return {};
+          const now = Date.now();
           const [sitesRaw, findingsRaw, casRaw, incRaw, envRaw] =
             await Promise.all([
               allRows<AnyRow>("sites"),
@@ -865,105 +872,120 @@ export const api = {
               allRows<AnyRow>("environmental_observations"),
             ]);
           const sites = sitesRaw.map(mapSite).filter((s) => canAccessSite(user, s));
-          const findings = findingsRaw.map(mapFinding);
-          const cas = casRaw.map(mapCA);
-          const incidents = incRaw.map(mapIncident);
-          const env = envRaw.map(mapObservation);
-          const now = Date.now();
-          // Configurable weights — tuned by the program owner, not hardcoded law.
-          const W = {
-            criticalFinding: 10,
-            highFinding: 6,
-            mediumFinding: 3,
-            lowFinding: 1,
-            repeatFinding: 4,
-            overdueCA: 8,
-            fatality: 15,
-            seriousIncident: 7,
-            envAlert: 5,
-          };
-          const out: Record<
+          const byId: Record<
             string,
-            { score: number; factors: { label: string; points: number }[] }
+            { score: number; factors: RiskFactor[] }
           > = {};
           for (const site of sites) {
-            const factors: { label: string; points: number }[] = [];
-            const siteFindings = findings.filter((f) => f.siteId === site._id);
-            let points = 0;
-            const sevCount: Record<string, number> = {
-              low: 0, medium: 0, high: 0, critical: 0,
-            };
-            for (const f of siteFindings) {
-              const p =
-                f.severity === "critical" ? W.criticalFinding
-                : f.severity === "high" ? W.highFinding
-                : f.severity === "medium" ? W.mediumFinding
-                : W.lowFinding;
-              points += p;
-              sevCount[f.severity] = (sevCount[f.severity] ?? 0) + 1;
-            }
-            if (sevCount.critical)
-              factors.push({ label: `${sevCount.critical} critical finding(s)`, points: sevCount.critical * W.criticalFinding });
-            if (sevCount.high)
-              factors.push({ label: `${sevCount.high} high finding(s)`, points: sevCount.high * W.highFinding });
-            if (sevCount.medium)
-              factors.push({ label: `${sevCount.medium} medium finding(s)`, points: sevCount.medium * W.mediumFinding });
-            if (sevCount.low)
-              factors.push({ label: `${sevCount.low} low finding(s)`, points: sevCount.low * W.lowFinding });
-
-            const repeatFactor =
-              siteFindings.length > 3
-                ? W.repeatFinding * Math.floor(siteFindings.length / 4)
-                : 0;
-            if (repeatFactor)
-              factors.push({ label: "Repeat findings at site", points: repeatFactor });
-            points += repeatFactor;
-
-            const overdue = cas.filter(
-              (c) =>
-                c.siteId === site._id &&
-                c.status !== "closed" &&
-                c.status !== "verified" &&
-                c.dueAt < now,
-            ).length;
-            if (overdue) {
-              factors.push({ label: `${overdue} overdue corrective action(s)`, points: overdue * W.overdueCA });
-              points += overdue * W.overdueCA;
-            }
-
-            const fatalities = incidents.filter(
-              (i) => i.siteId === site._id && i.type === "fatality",
-            ).length;
-            if (fatalities) {
-              factors.push({ label: `${fatalities} fatality incident(s)`, points: fatalities * W.fatality });
-              points += fatalities * W.fatality;
-            }
-            const serious = incidents.filter(
-              (i) =>
-                i.siteId === site._id &&
-                i.type !== "fatality" &&
-                (i.severity === "critical" || i.severity === "high"),
-            ).length;
-            if (serious) {
-              factors.push({ label: `${serious} serious incident(s)`, points: serious * W.seriousIncident });
-              points += serious * W.seriousIncident;
-            }
-            const envAlerts = env.filter(
-              (o) =>
-                o.siteId === site._id &&
-                o.status !== "resolved" &&
-                (o.verification === "measured" || o.verification === "verified"),
-            ).length;
-            if (envAlerts) {
-              factors.push({ label: `${envAlerts} verified environmental alert(s)`, points: envAlerts * W.envAlert });
-              points += envAlerts * W.envAlert;
-            }
-            out[site._id] = { score: points, factors };
+            const { score, factors } = computeRiskFactors(site, {
+              findings: findingsRaw.map(mapFinding),
+              correctiveActions: casRaw.map(mapCA),
+              incidents: incRaw.map(mapIncident),
+              observations: envRaw.map(mapObservation),
+            }, now);
+            byId[site._id] = { score, factors };
           }
-          return out;
+          return byId;
         },
         ["sites", "findings", "corrective_actions", "incidents", "environmental_observations"],
       ),
+  },
+
+  // ---------------------------------------------------------------- ai
+  // §18 AI assistance — FIRST capability only: risk-score explanation.
+  // The fixed, user-visible assistance label (doc 08: "output is labeled as
+  // assistance").
+  // Governed by docs/08_AI_GOVERNANCE.MD. Implementation of the four
+  // constraints, as stated:
+  //
+  // 1. SERVER-SIDE SCOPING — the inputs to the explanation are assembled
+  //    by this data layer from the same scoped queries as riskScores; the
+  //    caller's identity is re-derived server-side (requireAuthed), and the
+  //    site access check is the authorization core's canAccessSite. There
+  //    is no prompt-time privilege and no client-supplied content.
+  // 2. CITE-OR-ABSTAIN — every explanation sentence is grounded in the
+  //    factor's record IDs (computeRiskFactors attaches them). With no
+  //    contributing factors the explainer abstains: the output states the
+  //    site has no recorded risk inputs rather than inventing narrative.
+  //    Nothing is ever synthesized beyond the weight arithmetic.
+  // 3. HUMAN CONFIRMATION — the explanation is a read-only walkthrough.
+  //    There is NO write path: no mutation, no draft, no state change —
+  //    the authoritative record cannot be touched by this surface, so no
+  //    confirmation flow is even reachable.
+  // 4. PROVIDER KEYS SERVER-SIDE ONLY — satisfied structurally: this
+  //    capability needs no provider model at all. It is a deterministic
+  //    walkthrough of the existing weighted computation, so there is no
+  //    key, no SDK, and no network call anywhere in the path (asserted by
+  //    the test suite's source contract).
+  //
+  // AI output is LABELLED in the UI (never merged into any record), and
+  // the hard prohibitions hold: no fabrication (cite-or-abstain), no
+  // guilt/violation language (the model counts records, it does not judge),
+  // no autonomous decisions (nothing to decide), no authorization bypass
+  // (same core), no out-of-scope leakage (same core).
+  ai: {
+    explainRiskScore: (args: { siteId: string }) =>
+      live<{
+        siteId: string;
+        generatedAt: number;
+        abstained: boolean;
+        summary: string | null;
+        citations: string[];
+        sentences: { factor: string; points: number; recordIds: string[]; text: string }[];
+        disclaimer: string;
+      } | null>(async () => {
+        const user = await requireAuthed();
+        // Same scoped reads as riskScores; re-derive everything server-side.
+        const site = await getSite(args.siteId);
+        if (!site) return null; // null-masked: not found OR out of scope
+        if (!canAccessSite(user, site)) return null;
+        const [findingsRaw, casRaw, incRaw, envRaw] = await Promise.all([
+          allRows<AnyRow>("findings"),
+          allRows<AnyRow>("corrective_actions"),
+          allRows<AnyRow>("incidents"),
+          allRows<AnyRow>("environmental_observations"),
+        ]);
+        const { score, factors } = computeRiskFactors(
+          site,
+          {
+            findings: findingsRaw.map(mapFinding),
+            correctiveActions: casRaw.map(mapCA),
+            incidents: incRaw.map(mapIncident),
+            observations: envRaw.map(mapObservation),
+          },
+          Date.now(),
+        );
+
+        const citations = [...new Set(factors.flatMap((f) => f.recordIds))].sort();
+        // Cite-or-abstain: with no factors there is nothing to explain —
+        // abstain rather than invent a narrative.
+        if (factors.length === 0) {
+          return {
+            siteId: args.siteId,
+            generatedAt: Date.now(),
+            abstained: true,
+            summary: null,
+            citations: [],
+            sentences: [],
+            disclaimer: AI_DISCLAIMER,
+          };
+        }
+        const sentences = factors.map((f) => ({
+          factor: f.label,
+          points: f.points,
+          recordIds: f.recordIds,
+          text: `${f.label} contribute${f.points === 1 ? "s" : ""} ${f.points} point${f.points === 1 ? "" : "s"} to the indicator at this site.`,
+        }));
+        return {
+          siteId: args.siteId,
+          generatedAt: Date.now(),
+          abstained: false,
+          summary: `The risk indicator of ${score} for ${site.name} (${site.code}) is the sum of ${factors.length} recorded factor${factors.length === 1 ? "" : "s"}; each sentence below names the record it is grounded in.`,
+          citations,
+          sentences,
+          disclaimer: AI_DISCLAIMER,
+        };
+      }, ["sites", "findings", "corrective_actions", "incidents", "environmental_observations"]),
   },
 
   // ----------------------------------------------------------- inspections

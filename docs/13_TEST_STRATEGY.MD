@@ -23,7 +23,12 @@ source-level guard that no delivery channel ships without confirmation),
 `tests/export-csv.test.ts` (§9 CSV exports: RFC 4180 format contract, the
 authorization invariant — operator export strictly own-tenant, county
 export excludes other counties, national covers all — and a source-contract
-guard that exports read only the already-authorized list queries), and
+guard that exports read only the already-authorized list queries),
+`tests/ai-risk-explanation.test.ts` (§18 first AI capability, doc 08:
+no-leak scoping through the authorization core, cite-or-abstain with
+citations verified against real in-scope records, no-fabrication weight
+arithmetic, byte-identical DB after explanations (no write path), and
+source contracts forbidding mutations/provider keys in the AI surface), and
 `tests/live-anon.test.ts`
 (probes the live project with the public anon key only). Run by `bun test`,
 wired into CI. [PARTIALLY IMPLEMENTED]
