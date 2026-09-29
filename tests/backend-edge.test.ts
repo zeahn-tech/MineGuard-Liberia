@@ -314,6 +314,11 @@ describe("sites", () => {
     const entry = scores![f.siteA];
     expect(entry.score).toBeGreaterThan(0);
     expect(entry.factors.some((x) => /overdue/i.test(x.label))).toBe(true);
+    // INVARIANT: the score equals the sum of its own explainable factors
+    // (regression 2026-09-29: a refactor dropped non-finding factors from
+    // the total — caught by the AI explanation-consistency test in CI).
+    const factorSum = entry.factors.reduce((n, x) => n + (x as { points: number }).points, 0);
+    expect(entry.score).toBe(factorSum);
     void due;
   });
 });

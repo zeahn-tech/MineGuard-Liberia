@@ -65,24 +65,33 @@ export function computeRiskFactors(
   const siteFindings = inputs.findings.filter((f) => f.siteId === site._id);
   const factors: RiskFactor[] = [];
   let points = 0;
+  // INVARIANT: score ≡ Σ factor points. Finding-severity points are
+  // accumulated HERE (per finding) and their aggregated factors are pushed
+  // WITHOUT re-adding; every other factor adds its points exactly once via
+  // push(). (Regression note 2026-09-29: the §18 refactor first DROPPED the
+  // non-finding factors from the total, then a naive fix double-counted
+  // severity points — both caught by the AI explanation-consistency test.)
   const sevCount: Record<string, number> = { low: 0, medium: 0, high: 0, critical: 0 };
   for (const f of siteFindings) {
     points += severityPoints(f.severity);
     sevCount[f.severity] = (sevCount[f.severity] ?? 0) + 1;
   }
-  const push = (label: string, pts: number, ids: string[]) => {
-    if (pts > 0) factors.push({ label, points: pts, recordIds: ids });
+  const push = (label: string, pts: number, ids: string[], alreadyCounted = false) => {
+    if (pts > 0) {
+      factors.push({ label, points: pts, recordIds: ids });
+      if (!alreadyCounted) points += pts;
+    }
   };
   const idsFor = (rows: { _id: string }[]) => rows.map((r) => r._id);
 
   if (sevCount.critical)
-    push(`${sevCount.critical} critical finding(s)`, sevCount.critical * RISK_WEIGHTS.criticalFinding, idsFor(siteFindings.filter((f) => f.severity === "critical")));
+    push(`${sevCount.critical} critical finding(s)`, sevCount.critical * RISK_WEIGHTS.criticalFinding, idsFor(siteFindings.filter((f) => f.severity === "critical")), true);
   if (sevCount.high)
-    push(`${sevCount.high} high finding(s)`, sevCount.high * RISK_WEIGHTS.highFinding, idsFor(siteFindings.filter((f) => f.severity === "high")));
+    push(`${sevCount.high} high finding(s)`, sevCount.high * RISK_WEIGHTS.highFinding, idsFor(siteFindings.filter((f) => f.severity === "high")), true);
   if (sevCount.medium)
-    push(`${sevCount.medium} medium finding(s)`, sevCount.medium * RISK_WEIGHTS.mediumFinding, idsFor(siteFindings.filter((f) => f.severity === "medium")));
+    push(`${sevCount.medium} medium finding(s)`, sevCount.medium * RISK_WEIGHTS.mediumFinding, idsFor(siteFindings.filter((f) => f.severity === "medium")), true);
   if (sevCount.low)
-    push(`${sevCount.low} low finding(s)`, sevCount.low * RISK_WEIGHTS.lowFinding, idsFor(siteFindings.filter((f) => f.severity === "low")));
+    push(`${sevCount.low} low finding(s)`, sevCount.low * RISK_WEIGHTS.lowFinding, idsFor(siteFindings.filter((f) => f.severity === "low")), true);
 
   const repeatFactor =
     siteFindings.length > 3

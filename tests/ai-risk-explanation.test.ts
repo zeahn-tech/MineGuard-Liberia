@@ -40,7 +40,7 @@ import {
   EDGE_IDS as f,
   getEdgeDb,
 } from "./helpers/backend-edge";
-import { RISK_WEIGHTS } from "../src/lib/risk-model";
+import { RISK_WEIGHTS, computeRiskFactors } from "../src/lib/risk-model";
 
 let clientSwapped = false;
 
@@ -147,6 +147,54 @@ describe("AI output stays inside the caller's authorization (no-leak)", () => {
 // ------------------------------------------- 2. cite-or-abstain, no fabrication
 
 describe("cite-or-abstain and no fabrication", () => {
+  test("INVARIANT: score ≡ Σ factor points for every factor kind (regression 2026-09-29)", () => {
+    // The §18 refactor of risk-model.ts first dropped non-finding factors
+    // from the total, then double-counted severity points. This pins the
+    // invariant for a synthetic site containing EVERY factor kind.
+    const site = { _id: "s1" } as never as { _id: string };
+    const mkFindings = (sev: string, n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        _id: `f-${sev}-${i}`, inspectionId: "i", siteId: "s1", title: sev,
+        severity: sev as never, status: "open" as never, createdById: "u", createdAt: 0,
+      }));
+    const { score, factors } = computeRiskFactors(
+      site as never,
+      {
+        findings: [
+          ...mkFindings("critical", 2),
+          ...mkFindings("high", 3),
+          ...mkFindings("medium", 4),
+          ...mkFindings("low", 5),
+        ],
+        correctiveActions: Array.from({ length: 2 }, (_, i) => ({
+          _id: `ca-${i}`, findingId: "f", siteId: "s1", description: "d",
+          status: "open" as never, dueAt: 0, openedById: "u", createdAt: 0,
+        })),
+        incidents: [
+          { _id: "inc-f", siteId: "s1", type: "fatality" as never, severity: "critical" as never, description: "d", occurredAt: 0, status: "reported" as never, reportedById: "u", reportSource: "inspector" as never, createdAt: 0 },
+          { _id: "inc-s", siteId: "s1", type: "injury" as never, severity: "high" as never, description: "d", occurredAt: 0, status: "reported" as never, reportedById: "u", reportSource: "inspector" as never, createdAt: 0 },
+        ],
+        observations: [
+          { _id: "obs-1", siteId: "s1", category: "water_pollution" as never, verification: "measured" as never, description: "d", observedAt: 0, status: "open" as never, reportedById: "u", createdAt: 0 },
+        ],
+      },
+      1_000_000_000_000,
+    );
+    const sum = factors.reduce((n, x) => n + x.points, 0);
+    // Independent oracle: compute the expected total straight from the weights.
+    const expected =
+      2 * RISK_WEIGHTS.criticalFinding +
+      3 * RISK_WEIGHTS.highFinding +
+      4 * RISK_WEIGHTS.mediumFinding +
+      5 * RISK_WEIGHTS.lowFinding +
+      RISK_WEIGHTS.repeatFinding * Math.floor((2 + 3 + 4 + 5) / 4) +
+      2 * RISK_WEIGHTS.overdueCA +
+      RISK_WEIGHTS.fatality +
+      RISK_WEIGHTS.seriousIncident +
+      RISK_WEIGHTS.envAlert;
+    expect(score).toBe(expected);
+    expect(sum).toBe(expected); // score ≡ Σ factors — both must hold
+  });
   test("seeded site with a high finding + overdue CA: sentences match the weights exactly", async () => {
     // findingA is high severity (6 pts). Seed an overdue CA (8 pts).
     // description carries a unique marker so cleanup removes THIS suite's

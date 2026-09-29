@@ -37,12 +37,25 @@ to measure network latency or multi-user contention.
 ceiling for a field tool on rural connectivity. Anything under budget passes;
 the deliverable is the NUMBERS.
 
-## Results (median / worst over 5 runs, after warm-up)
+## Correction 2026-09-29: risk-model score bug fixed before these numbers
+
+CI (bun 1.4.2) caught that the §18 refactor of `src/lib/risk-model.ts` had
+broken the risk indicator's total: non-finding factors (overdue CAs,
+incidents, environmental alerts, repeat findings) were excluded from
+`score` while still listed as factors — then a first fix double-counted
+severity points. The invariant **score ≡ Σ factor points** is now asserted
+three ways: a synthetic all-factor-kinds oracle test
+(`tests/ai-risk-explanation.test.ts`), the data-layer risk test in
+`tests/backend-edge.test.ts`, and the AI explanation-consistency test. The
+baseline numbers below were measured AFTER the fix. Any site with
+overdue CAs or incidents previously showed an understated indicator — the
+direction of the error was conservative (understating risk), but it was a
+real defect and it is fixed and pinned.
 
 | # | Flow | Surface (identity) | Median | Worst | vs budget |
 |---|------|--------------------|-------:|------:|-----------|
 | 1 | F3 staff | `stats.commandCenter` (admin, national — reads 7 tables, aggregates everything) | 115 ms | 187 ms | ✅ 17× headroom |
-| 2 | F3 staff | `sites.riskScores` (42 site entries, explainable factors) | 111 ms | 130 ms | ✅ 18× |
+| 2 | F3 staff | `sites.riskScores` (42 site entries, explainable factors, score≡Σfactors) | 111 ms | 130 ms | ✅ 18× |
 | 3 | F3 staff | `sites.list` (40 sites + open-action counts) | 16 ms | 19 ms | ✅ 125× |
 | 4 | F3 staff | `inspections.list` (321 rows, site join + scope filter) | 25 ms | 50 ms | ✅ 80× |
 | 5 | F3 staff | `records.listIncidents` (80) | 8 ms | 10 ms | ✅ 250× |
