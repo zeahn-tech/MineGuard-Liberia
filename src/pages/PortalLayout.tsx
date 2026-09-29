@@ -280,6 +280,12 @@ export default function PortalLayout() {
                 MineGuard Liberia
               </Link>
               <div className="ml-auto flex items-center gap-2">
+                {/* Mobile-only bell: on ≥md the sidebar footer bell serves
+                    staff/admins; below md the sidebar is hidden, so the
+                    notification entry point must live in the header. */}
+                <div className="md:hidden">
+                  <NotificationBell />
+                </div>
                 {pendingItems.length > 0 ? (
                   <button
                     onClick={handleSyncNow}
@@ -287,8 +293,15 @@ export default function PortalLayout() {
                     className="flex items-center gap-1.5 rounded-sm border border-destructive/40 bg-destructive/5 px-2.5 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
                   >
                     <CloudOff className="size-3.5" />
-                    {pendingItems.length} queued offline
-                    {syncing ? " — syncing…" : " — tap to sync"}
+                    {/* Keep the label compact on phones so the bell beside it
+                        stays visible; full wording on ≥sm. */}
+                    <span>
+                      {pendingItems.length} queued
+                      <span className="hidden sm:inline"> offline</span>
+                    </span>
+                    <span className="hidden sm:inline">
+                      {syncing ? " — syncing…" : " — tap to sync"}
+                    </span>
                   </button>
                 ) : (
                   <button

@@ -1,5 +1,43 @@
 # 11 — Implementation Status
 
+**Session:** Mobile visibility pass — AI feature + admin notifications on
+phones
+**Date:** 2026-09-29
+**Verification:** `bun tsc -b --noEmit` ✓ · `bun test tests/backend-edge.test.ts`
+46/46 ✓
+
+## This session [2026-09-29 — mobile visibility]
+
+**Directive item:** ensure the §18 AI feature and the §1 admin notification
+surface are visible on a mobile phone.
+
+**Audit findings:**
+- **Admin notifications (§1) invisible on phones** — in the staff portal
+  (`PortalLayout`) `NotificationBell` was rendered ONLY in the desktop
+  sidebar footer (`hidden … md:flex`); below `md` the whole aside is hidden,
+  so staff/admins on a phone had no notification entry point at all. (The
+  operator portal already did this correctly — bell in the mobile header.)
+- **AI panel (§18) narrow-width hazards** — the panel rendered full-width
+  block content, but the per-sentence citation record-IDs are a single
+  unbroken `font-mono` token that overflows a phone viewport, and the panel
+  header row could not wrap.
+
+**Fixes:**
+- `PortalLayout` — mobile-only bell added to the sticky header
+  (`md:hidden` wrapper; desktop keeps the sidebar bell — no duplicate
+  mount, one live() subscription still drives both). Sync chip label is
+  compacted below `sm` so the bell isn't crowded out.
+- `NotificationBell` — dropdown width `w-72 → sm:w-80` with
+  `max-w-[calc(100vw-2rem)]` so it never clips a 320 px viewport; the same
+  component now serves both shells at any width.
+- `RiskAiPanel` — header row `flex-wrap`; citations get `break-all` so UUID
+  tokens wrap within a phone width instead of overflowing.
+
+**Verification:** typecheck clean; backend-edge suite 46/46 (the
+notifications query + admin scopes exercise the bell's data path).
+
+---
+
 **Session:** Load/performance baseline — established at realistic pilot scale
 (§16 "unmeasured" closed)
 **Date:** 2026-09-28

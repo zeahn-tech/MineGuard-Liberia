@@ -69,7 +69,8 @@ export default function NotificationBell() {
           {/* click-away layer (pointer-only; keyboard users close via
               Escape or the toggle button) */}
           <div className="fixed inset-0 z-40" aria-hidden="true" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-50 mt-1 w-80 rounded border border-border bg-card shadow-lg">
+          {/* Width respects narrow phones (w-80 would clip a 320px viewport). */}
+          <div className="absolute right-0 z-50 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded border border-border bg-card shadow-lg sm:w-80">
             <div className="flex items-center justify-between border-b border-border px-3 py-2">
               <p className="kicker text-[10px]">Notifications</p>
               {notifQ === undefined && <Loader2 className="size-3 animate-spin text-muted-foreground" />}

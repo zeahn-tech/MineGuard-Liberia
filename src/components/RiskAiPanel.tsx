@@ -24,7 +24,7 @@ export function RiskAiPanel({ siteId }: { siteId: string }) {
 
   return (
     <div className="mt-4 rounded-none border border-dashed border-primary/40 bg-primary/5 p-3">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Sparkles className="size-3.5 text-primary" strokeWidth={1.5} />
         <span className="rounded-full border border-primary/40 bg-background px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
           AI-assisted
@@ -44,7 +44,9 @@ export function RiskAiPanel({ siteId }: { siteId: string }) {
             {ai.sentences.map((s) => (
               <li key={s.factor} className="text-sm">
                 <span className="text-muted-foreground">{s.text}</span>{" "}
-                <span className="font-mono text-[10px] text-muted-foreground">
+                {/* break-all: concatenated UUID citations are one long
+                    unbroken token — without it they overflow a phone width. */}
+                <span className="break-all font-mono text-[10px] text-muted-foreground">
                   ({s.recordIds.join(", ")})
                 </span>
               </li>
