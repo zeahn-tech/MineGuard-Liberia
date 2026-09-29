@@ -164,6 +164,42 @@ Supabase; they never enter the client bundle.
 Build-time flag: `VITE_MINEGUARD_ENV=production` disables demo seeding
 (button + call site + bundle-level CI check).
 
+## Incident 2026-09-29: blank screen + manifest 404 on GitHub Pages [ROOT-CAUSED]
+
+**Symptom:** the Pages site rendered a blank screen; `manifest.webmanifest`
+and every asset 404'd.
+
+**Diagnosis (from the served HTML):** the live page contained the raw dev
+template (`<script src="/src/main.tsx">`) and **zero** built assets — GitHub
+Pages was serving the repository's `index.html` (i.e. the branch), not the
+workflow's `dist/` artifact. A raw `.tsx` entry cannot execute in a browser,
+hence the blank screen; the manifest 404 was the same plumbing failure, not
+a missing file (`dist/manifest.webmanifest` is verified present by the
+workflow's sanity check).
+
+**Contributing cause:** the workflow's `bun test` step exited 1 (the
+risk-model regression + AI-test order sensitivity, fixed 2026-09-29), so the
+deploy job never ran and the broken state persisted.
+
+**Fixes applied in-repo:**
+1. Test failures fixed (see docs/11 — risk-model score invariant +
+   order-tolerant AI suite).
+2. `deploy-pages.yml` now verifies post-deploy that the served page contains
+   the built bundle (`/assets/index-…`) **and** `manifest.webmanifest`
+   answers 200 — a stale/wrong-source deployment fails loudly instead of
+   showing a blank screen.
+3. Build sanity check rejects an `index.html` that still references
+   `/src/main.tsx` or lacks the `/<repo>/assets/` base path.
+
+**Owner action required (cannot be done from the repo):**
+- GitHub **Settings → Pages → Build and deployment → Source** must be
+  **"GitHub Actions"** (not "Deploy from a branch"). With the wrong source,
+  the workflow's artifact is ignored and the branch is served — exactly the
+  observed failure.
+- After switching, run the workflow once (push or *Actions → Deploy to
+  GitHub Pages → Run workflow*); the new verification step then proves the
+  bundle + manifest are live.
+
 ## Deployment checklist (pilot)
 
 1. Typecheck + tests green in CI (both workflows enforce this).

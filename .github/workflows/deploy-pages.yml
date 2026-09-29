@@ -55,6 +55,17 @@ jobs:
           # GitHub Pages runs Jekyll by default and 404s/hides some dotfiles
           # and non-standard MIME assets; .nojekyll disables that processing.
           touch dist/.nojekyll
+          # The compiled entry MUST be a built bundle under the repo base
+          # path — a deployed index.html still referencing /src/main.tsx is
+          # the raw dev template and renders a BLANK page (observed live
+          # 2026-09-29 when Pages served the branch instead of the artifact).
+          REPO_BASE="/${GITHUB_REPOSITORY#*/}/"
+          grep -q "src=\"${REPO_BASE}assets/" dist/index.html || {
+            echo "FAIL: dist/index.html does not reference ${REPO_BASE}assets/ — vite base is misconfigured.";
+            grep -oE '<script[^>]*src="[^"]*"' dist/index.html || true;
+            exit 1;
+          }
+          grep -q '/src/main.tsx' dist/index.html && { echo "FAIL: raw dev entry in built index.html"; exit 1; }
           ls -la dist
 
       - name: Upload artifact
@@ -72,3 +83,27 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Verify built bundle + manifest are served
+        run: |
+          URL="${{ steps.deployment.outputs.page_url }}"
+          for i in 1 2 3 4 5; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL") || CODE=000
+            [ "$CODE" = "200" ] && break
+            sleep 5
+          done
+          [ "$CODE" = "200" ] || { echo "FAIL: endpoint did not answer 200 ($CODE)"; exit 1; }
+          # The served page must contain the BUILT entry (base-path assets),
+          # not the raw dev template. If this fails, the Pages SOURCE is
+          # probably "Deploy from a branch" — switch Settings → Pages →
+          # Build and deployment → Source to "GitHub Actions".
+          HTML=$(curl -s "$URL")
+          echo "$HTML" | grep -q "/assets/index-" || {
+            echo "FAIL: served page is not the built bundle."
+            echo "$HTML" | grep -oE '<script[^>]*src="[^"]*"' || true
+            echo "→ Fix: repo Settings → Pages → Source = GitHub Actions"
+            exit 1
+          }
+          MANIFEST_CODE=$(curl -s -o /dev/null -w '%{http_code}' "${URL}manifest.webmanifest")
+          [ "$MANIFEST_CODE" = "200" ] || { echo "FAIL: manifest.webmanifest → $MANIFEST_CODE"; exit 1; }
+          echo "Deploy verified: built bundle + manifest both 200 at $URL"
