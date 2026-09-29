@@ -52,6 +52,9 @@ jobs:
           test -f dist/manifest.webmanifest || { echo "dist/manifest.webmanifest missing"; exit 1; }
           test -f dist/sw.js || { echo "dist/sw.js missing"; exit 1; }
           test -d dist/icons || { echo "dist/icons missing"; exit 1; }
+          # GitHub Pages runs Jekyll by default and 404s/hides some dotfiles
+          # and non-standard MIME assets; .nojekyll disables that processing.
+          touch dist/.nojekyll
           ls -la dist
 
       - name: Upload artifact

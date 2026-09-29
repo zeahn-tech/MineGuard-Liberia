@@ -100,7 +100,11 @@ as $$
 $$;
 
 -- Row-arg form: RETURNING re-checks can no longer fail for lack of visibility.
-drop policy "sites read" on public.sites;
+-- IF EXISTS: on re-apply (or on a live lineage where the select policy was
+-- renamed or the row-arg form already applied), the bare DROP would fail
+-- with 42704 and abort the whole migration. The create below is the
+-- authoritative shape either way. Reported in CI 2026-09-29.
+drop policy if exists "sites read" on public.sites;
 create policy "sites read" on public.sites
   for select using (public.mg_can_access_site_row(county, operator_name));
 

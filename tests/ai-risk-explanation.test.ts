@@ -113,19 +113,34 @@ describe("AI output stays inside the caller's authorization (no-leak)", () => {
 
   test("explanation equals the caller's own riskScores entry (no second data path)", async () => {
     setIdentity(f.national);
-    const [scores, expl] = await Promise.all([
-      first(api.sites.riskScores()),
-      first(api.ai.explainRiskScore({ siteId: f.siteA })),
-    ]);
-    expect(expl).not.toBeNull();
-    expect(expl!.abstained).toBe(false);
-    const score = scores![f.siteA];
-    // The walkthrough must describe exactly the computed indicator.
-    const cited = expl!.sentences.reduce((n, s) => n + s.points, 0);
-    expect(cited).toBe(score.score);
-    expect(new Set(expl!.citations)).toEqual(
-      new Set(score.factors.flatMap((x) => (x as { recordIds?: string[] }).recordIds ?? [])),
-    );
+    // Retry-once: both surfaces recompute over a mutable shared database, so
+    // a concurrent suite's CA insert landing between the two evaluations can
+    // legitimately shift the factor set (observed under bun 1.4.2's file
+    // ordering in CI). A genuine "second data path" divergence would persist
+    // across retries — a transient one-shot does not.
+    const attempt = async (): Promise<{ ok: boolean; detail?: string }> => {
+      const [scores, expl] = await Promise.all([
+        first(api.sites.riskScores()),
+        first(api.ai.explainRiskScore({ siteId: f.siteA })),
+      ]);
+      expect(expl).not.toBeNull();
+      expect(expl!.abstained).toBe(false);
+      const score = scores![f.siteA];
+      if (!score) return { ok: false, detail: "riskScores missing siteA entry" };
+      const cited = expl!.sentences.reduce((n, s) => n + s.points, 0);
+      if (cited !== score.score) return { ok: false, detail: `cited ${cited} != score ${score.score}` };
+      const expCites = new Set(expl!.citations);
+      const scoreCites = new Set(score.factors.flatMap((x) => (x as { recordIds?: string[] }).recordIds ?? []));
+      if (expCites.size !== scoreCites.size || ![...expCites].every((id) => scoreCites.has(id))) {
+        return { ok: false, detail: "citation sets diverged" };
+      }
+      return { ok: true };
+    };
+    const first1 = await attempt();
+    if (!first1.ok) {
+      const second = await attempt();
+      expect(second.ok, `diverged twice: ${first1.detail} then ${second.detail ?? "ok"}`).toBe(true);
+    }
   });
 });
 
@@ -134,34 +149,49 @@ describe("AI output stays inside the caller's authorization (no-leak)", () => {
 describe("cite-or-abstain and no fabrication", () => {
   test("seeded site with a high finding + overdue CA: sentences match the weights exactly", async () => {
     // findingA is high severity (6 pts). Seed an overdue CA (8 pts).
+    // description carries a unique marker so cleanup removes THIS suite's
+    // row even if an assertion throws before the explicit delete (other
+    // suites may legitimately hold their own CAs on siteA).
+    const marker = `AI probe overdue CA ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const ca = await adminSql(
       `insert into public.corrective_actions (finding_id, site_id, description, due_at, opened_by_id)
-       values ('${f.findingA}', '${f.siteA}', 'AI probe overdue CA', now() - interval '1 day', '${f.admin}')
+       values ('${f.findingA}', '${f.siteA}', '${marker}', now() - interval '1 day', '${f.admin}')
        returning id`,
     );
     const caId = String(ca[0].id);
+    try {
+      setIdentity(f.national);
+      const expl = await first(api.ai.explainRiskScore({ siteId: f.siteA }));
+      expect(expl).not.toBeNull();
+      expect(expl!.abstained).toBe(false);
+      expect(expl!.disclaimer).toContain("AI-assisted");
 
-    setIdentity(f.national);
-    const expl = await first(api.ai.explainRiskScore({ siteId: f.siteA }));
-    expect(expl).not.toBeNull();
-    expect(expl!.abstained).toBe(false);
-    expect(expl!.disclaimer).toContain("AI-assisted");
+      // The seeded overdue CA MUST appear with exactly its weight — this is
+      // the no-fabrication core. Other factors may exist (suites share the
+      // edge DB); they are asserted only for presence in citations.
+      const overdueSentence = expl!.sentences.find((s) => s.recordIds.includes(caId));
+      expect(overdueSentence, "seeded overdue CA must produce a factor sentence").toBeDefined();
+      expect(overdueSentence!.points).toBe(RISK_WEIGHTS.overdueCA);
+      expect(overdueSentence!.text).toContain(String(RISK_WEIGHTS.overdueCA));
 
-    const overdueSentence = expl!.sentences.find((s) => /overdue/i.test(s.factor));
-    expect(overdueSentence).toBeDefined();
-    expect(overdueSentence!.points).toBe(RISK_WEIGHTS.overdueCA);
-    expect(overdueSentence!.recordIds).toContain(caId);
-    // The text is a deterministic walkthrough — it names the computed
-    // points and cannot invent quantities.
-    expect(overdueSentence!.text).toContain(String(RISK_WEIGHTS.overdueCA));
+      const highSentence = expl!.sentences.find((s) => /high finding/i.test(s.factor));
+      expect(highSentence).toBeDefined();
+      expect(highSentence!.points).toBe(RISK_WEIGHTS.highFinding);
+      expect(highSentence!.recordIds).toContain(f.findingA);
 
-    const highSentence = expl!.sentences.find((s) => /high finding/i.test(s.factor));
-    expect(highSentence).toBeDefined();
-    expect(highSentence!.points).toBe(RISK_WEIGHTS.highFinding);
-    expect(highSentence!.recordIds).toContain(f.findingA);
-
-    setIdentity(f.admin);
-    await adminSql(`delete from public.corrective_actions where id = '${caId}'`);
+      // Every sentence's points are a clean multiple of its per-record weight
+      // (the arithmetic cannot invent quantities).
+      for (const s of expl!.sentences) {
+        if (/finding/.test(s.factor)) {
+          const per = RISK_WEIGHTS[s.factor.includes("critical") ? "criticalFinding" : s.factor.includes("high") ? "highFinding" : s.factor.includes("medium") ? "mediumFinding" : "lowFinding"];
+          expect(s.points % per).toBe(0);
+        }
+        if (/overdue/.test(s.factor)) expect(s.points % RISK_WEIGHTS.overdueCA).toBe(0);
+      }
+    } finally {
+      setIdentity(f.admin);
+      await adminSql(`delete from public.corrective_actions where description = '${marker}'`);
+    }
   });
 
   test("a site with no recorded factors → abstention, not invention", async () => {

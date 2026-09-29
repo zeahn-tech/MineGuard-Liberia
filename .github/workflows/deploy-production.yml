@@ -127,8 +127,10 @@ jobs:
           test -f dist/manifest.webmanifest || { echo "manifest missing"; exit 1; }
           test -f dist/sw.js || { echo "sw.js missing"; exit 1; }
 
-      - name: SPA fallback (404 → index)
-        run: cp dist/index.html dist/404.html
+      - name: SPA fallback + nojekyll (Pages must not Jekyll-process the bundle)
+        run: |
+          cp dist/index.html dist/404.html
+          touch dist/.nojekyll
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

@@ -17,6 +17,9 @@ with required reviewers).
   (`public/icons/`, regenerate via `bun run icons`). GitHub Pages deployment
   ships via `.github/workflows/deploy-pages.yml` (Settings → Pages → Source:
   GitHub Actions). Other static hosts: `bun run build` → serve `dist/`.
+  **`.nojekyll` ships in `public/` and is also forced into `dist/` by both
+  deploy workflows (added 2026-09-29): without it, GitHub Pages runs Jekyll
+  over the bundle and 404s `manifest.webmanifest` (observed live).**
 - Supabase project (Postgres + Auth + Storage under the Supabase project;
   migrations in `supabase/migrations/` are the schema source of truth):
   - **Postgres** — all domain data (tables per doc 03), RLS-enforced.
