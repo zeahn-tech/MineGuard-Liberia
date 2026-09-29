@@ -71,6 +71,16 @@ The build is repository-aware: on GitHub Pages it automatically serves from `/<r
 > 3. After fixing the source setting, push again (or use *Actions → Deploy to
 >    GitHub Pages → Run workflow*) and hard-refresh (Ctrl+Shift+R).
 
+### GitHub Actions setup checklist
+
+| Workflow | Trigger | Needs |
+|----------|---------|-------|
+| `deploy-pages.yml` | push to `main`/`master`, manual | **Settings → Pages → Source = GitHub Actions** (nothing else) |
+| `backup.yml` | nightly 03:30 UTC (+ Sunday drill), manual | Repo **variables** `SUPABASE_PROJECT_REF`, `SUPABASE_DB_HOST` (session-pooler host), `SUPABASE_DB_USER` (`postgres.<ref>`); **secret** `SUPABASE_DB_PASSWORD`. Skipped (not failed) until `SUPABASE_PROJECT_REF` is set |
+| `deploy-production.yml` | manual only | Environment `production` with reviewers + the same Supabase variables/secret |
+
+Live-database tests (`tests/live-anon.test.ts`) are opt-in: `RUN_LIVE_TESTS=1 bun test tests/live-anon.test.ts`.
+
 ## Project structure
 
 ```

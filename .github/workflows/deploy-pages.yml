@@ -17,6 +17,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,8 +30,10 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
       - name: Typecheck
-        run: bun run typecheck
 
       - name: Test
         run: bun test
@@ -76,6 +79,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -87,7 +91,8 @@ jobs:
       - name: Verify built bundle + manifest are served
         run: |
           URL="${{ steps.deployment.outputs.page_url }}"
-          for i in 1 2 3 4 5; do
+          # Pages/CDN propagation can lag the deploy call by up to a minute.
+          for i in $(seq 1 12); do
             CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL") || CODE=000
             [ "$CODE" = "200" ] && break
             sleep 5

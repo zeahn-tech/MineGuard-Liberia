@@ -17,16 +17,21 @@
 # service container and records row counts — doc 14's "restore tested" as a
 # standing, scheduled proof rather than a one-time promise.
 #
-# Prerequisites (owner): repository variables SUPABASE_PROJECT_REF; secrets
-# SUPABASE_DB_PASSWORD. Without them the job fails loudly — backups must
-# never silently stop.
+# Prerequisites (owner): repository variables SUPABASE_PROJECT_REF,
+# SUPABASE_DB_HOST (session-pooler host — GitHub runners are IPv4-only and the
+# direct db.<ref>.supabase.co host is IPv6-only) and SUPABASE_DB_USER
+# ("postgres.<project-ref>"); secret SUPABASE_DB_PASSWORD.
+# Until SUPABASE_PROJECT_REF is configured the job is SKIPPED (visible as
+# "skipped" in the Actions tab) instead of failing red every night. Once it is
+# configured, any backup failure fails loudly — backups must not silently stop.
 # =============================================================================
 
 name: Nightly backup
 
 on:
   schedule:
-    - cron: "30 3 * * *" # 03:30 UTC daily
+    - cron: "30 3 * * *" # 03:30 UTC daily backup
+    - cron: "30 4 * * 0" # 04:30 UTC Sundays: backup + restore drill + prune
   workflow_dispatch: # manual trigger for drills
 
 permissions:
@@ -38,20 +43,30 @@ concurrency:
 
 jobs:
   backup:
+    # Not configured yet -> skip cleanly rather than fail every night.
+    if: ${{ vars.SUPABASE_PROJECT_REF != '' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install PostgreSQL client
+      # pg_dump refuses to dump a server newer than itself; Supabase runs
+      # PostgreSQL 17, while ubuntu-latest ships an older client by default.
+      - name: Install PostgreSQL 17 client
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client
+          sudo apt-get install -y -qq postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -qq postgresql-client-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
 
       - name: Take backup (dump + manifest + archive verification)
         id: backup
         env:
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_HOST: ${{ vars.SUPABASE_DB_HOST }}
+          SUPABASE_DB_USER: ${{ vars.SUPABASE_DB_USER }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           NAME="$(bash scripts/backup-supabase.sh ./backups)"
@@ -66,20 +81,40 @@ jobs:
           if-no-files-found: error
 
       - name: Restore drill (weekly — Sundays)
-        if: github.event.schedule == '30 3 * * 0' || github.event_name == 'workflow_dispatch'
+        if: github.event.schedule == '30 4 * * 0' || github.event_name == 'workflow_dispatch'
         env:
           PGPASSWORD: postgres
         run: |
           # Throwaway Postgres in the job container: proves the archive
           # restores and the domain schema + row data survive the round trip.
-          docker run -d --name drill-pg -e POSTGRES_PASSWORD=postgres -p 55432:5432 postgres:16
+          docker run -d --name drill-pg -e POSTGRES_PASSWORD=postgres -p 55432:5432 postgres:17
           for i in $(seq 1 30); do
             pg_isready -h localhost -p 55432 -U postgres >/dev/null 2>&1 && break
             sleep 1
           done
+          # Supabase platform roles are cluster-level (not part of pg_dump);
+          # pg_restore needs them to exist (docs/drills/restore-rehearsal-*).
+          psql -h localhost -p 55432 -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          declare r text;
+          begin
+            foreach r in array array['anon','authenticated','service_role','authenticator',
+              'supabase_admin','supabase_auth_admin','supabase_storage_admin',
+              'dashboard_user','supabase_read_only_user','supabase_replication_admin','pgbouncer']
+            loop
+              if not exists (select 1 from pg_roles where rolname = r) then
+                execute format('create role %I nologin', r);
+              end if;
+            end loop;
+          end $$;
+          SQL
           DUMP="$(find backups -name db.dump | head -1)"
+          # Platform-managed extensions/objects can emit non-fatal restore
+          # errors on vanilla Postgres. The row-count query below is the real
+          # pass/fail gate, so do not abort on pg_restore's exit code alone.
           pg_restore -h localhost -p 55432 -U postgres -d postgres \
-            --no-owner --no-privileges "$DUMP"
+            --no-owner --no-privileges "$DUMP" \
+            || echo "::warning::pg_restore reported non-fatal errors; verifying row counts"
           echo "== Restore drill row counts =="
           psql -h localhost -p 55432 -U postgres -d postgres -tAc \
             "select 'sites', count(*) from public.sites
@@ -87,7 +122,7 @@ jobs:
              union all select 'audit_log', count(*) from public.audit_log;"
 
       - name: Prune backup artifacts older than 90 days
-        if: github.event.schedule == '30 3 * * 0'
+        if: github.event.schedule == '30 4 * * 0'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}

@@ -2,7 +2,7 @@
   "name": "MineGuard Liberia — Mining Oversight Platform",
   "short_name": "MineGuard",
   "description": "National mining oversight, safety, compliance, environmental monitoring and intelligence platform. Designed for potential government adoption — not an official Government of Liberia system.",
-  "id": "/",
+  "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

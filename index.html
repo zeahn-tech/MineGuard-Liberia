@@ -9,16 +9,16 @@
     content="National mining oversight, safety, compliance, environmental monitoring and intelligence platform. Designed for potential government adoption — not an official Government of Liberia system." />
 
   <!-- PWA -->
-  <link rel="manifest" href="./manifest.webmanifest" />
-  <meta name="theme-color" content="#F0EEE6" />
+  <link rel="manifest" href="%BASE_URL%manifest.webmanifest" />
+  <meta name="theme-color" content="#232019" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="MineGuard" />
 
-  <!-- Icons (relative paths: required for GitHub Pages subdirectory hosting) -->
-  <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png" />
-  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+  <!-- Icons (%BASE_URL% is replaced by Vite with the configured base, e.g. /MineGuard-Liberia/) -->
+  <link rel="icon" type="image/png" sizes="32x32" href="%BASE_URL%icons/favicon-32.png" />
+  <link rel="apple-touch-icon" href="%BASE_URL%icons/apple-touch-icon.png" />
 
   <!-- Open Graph / social preview -->
   <meta property="og:type" content="website" />

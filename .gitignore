@@ -22,3 +22,6 @@ src/convex/_generated
 .vscode/*
 !.vscode/extensions.json
 .idea
+
+# local backup output
+backups/

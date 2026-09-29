@@ -60,8 +60,10 @@ describe("production deploy path (gated, backed-up, verified)", () => {
   test("production deploy is preceded by a forced fresh backup", () => {
     const wf = prodWorkflow();
     expect(wf).toContain("backup-supabase.sh");
-    // Job ordering: guard (backup) runs before build-and-deploy.
-    expect(wf).toMatch(/guard:[\s\S]*build-and-deploy:\s*\n\s*needs: guard/);
+    // Job ordering: guard (backup) -> build -> deploy (github-pages env).
+    expect(wf).toMatch(/guard:[\s\S]*\n  build:\s*\n\s*needs: guard/);
+    expect(wf).toMatch(/\n  deploy:\s*\n\s*needs: build/);
+    expect(wf).toContain("name: github-pages");
     expect(wf).toContain("if-no-files-found: error");
   });
 

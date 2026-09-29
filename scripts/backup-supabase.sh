@@ -18,6 +18,17 @@
 #   SUPABASE_PROJECT_REF   production project ref (from supabase dashboard)
 #   SUPABASE_DB_PASSWORD   production database password
 #
+# Optional environment (needed on GitHub-hosted runners):
+#   SUPABASE_DB_HOST       default db.<ref>.supabase.co. That direct host is
+#                          IPv6-only; GitHub-hosted runners are IPv4-only, so
+#                          set this to your project's SESSION POOLER host
+#                          (Dashboard -> Connect -> Session pooler, port 5432).
+#   SUPABASE_DB_USER       default "postgres". The pooler requires
+#                          "postgres.<project-ref>".
+#
+# stdout contract: the ONLY line written to stdout is the artifact name (CI
+# captures it with $(...)). All progress logging goes to stderr.
+#
 # The script performs NO third-party upload: the dump lands in ./backups on
 # the caller (CI workspace), and retention is artifact-based. Copying to
 # object storage is an operator/owner decision (cost + residency).
@@ -35,22 +46,18 @@ mkdir -p "$DEST_DIR"
 
 DUMP_PATH="${DEST_DIR}/db.dump"
 
-echo "[backup] dumping project ${SUPABASE_PROJECT_REF} at ${STAMP}Z"
-# Supabase DB host pattern (session pooler on port 5432 for pg_dump):
-DB_HOST="aws-0-${SUPABASE_PROJECT_REF}.pooler.supabase.com"
-# The direct host form used by Supabase's own CLI is:
-#   db.<project-ref>.supabase.co — try direct first, fall back to pooler.
-if ! pg_isready -h "db.${SUPABASE_PROJECT_REF}.supabase.co" -p 5432 -t 5 >/dev/null 2>&1; then
-  DB_HOST="db.${SUPABASE_PROJECT_REF}.supabase.co"
-fi
+echo "[backup] dumping project ${SUPABASE_PROJECT_REF} at ${STAMP}Z" >&2
+
+DB_HOST="${SUPABASE_DB_HOST:-db.${SUPABASE_PROJECT_REF}.supabase.co}"
+DB_USER="${SUPABASE_DB_USER:-postgres}"
 
 PGPASSWORD="$SUPABASE_DB_PASSWORD" pg_dump \
-  -h "db.${SUPABASE_PROJECT_REF}.supabase.co" \
+  -h "$DB_HOST" \
   -p 5432 \
-  -U postgres \
+  -U "$DB_USER" \
   -d postgres \
   -Fc \
-  -f "$DUMP_PATH"
+  -f "$DUMP_PATH" >&2
 
 SIZE="$(du -h "$DUMP_PATH" | cut -f1)"
 SHA="$(sha256sum "$DUMP_PATH" | cut -d' ' -f1)"
@@ -64,17 +71,17 @@ size:          ${SIZE}
 sha256:        ${SHA}
 EOF
 
-echo "[backup] wrote ${DUMP_PATH} (${SIZE}, sha256 ${SHA:0:12}…)"
+echo "[backup] wrote ${DUMP_PATH} (${SIZE}, sha256 ${SHA:0:12}…)" >&2
 
 # Verify the dump is loadable metadata-wise (list contents) — a corrupt or
 # empty archive fails the caller loudly instead of surfacing at restore time.
 pg_restore --list "$DUMP_PATH" >/dev/null
-echo "[backup] archive verified (pg_restore --list ok)"
+echo "[backup] archive verified (pg_restore --list ok)" >&2
 
 # Retention: prune local backups older than 90 days when pruning is enabled.
 if [ "${BACKUP_PRUNE_OLDER_THAN_DAYS:-0}" -gt 0 ] 2>/dev/null; then
   find "$DEST_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime +"$BACKUP_PRUNE_OLDER_THAN_DAYS" -exec rm -rf {} \;
-  echo "[backup] pruned local backups older than ${BACKUP_PRUNE_OLDER_THAN_DAYS} days"
+  echo "[backup] pruned local backups older than ${BACKUP_PRUNE_OLDER_THAN_DAYS} days" >&2
 fi
 
 # Emit the artifact name for CI callers (stable, collision-free per run).

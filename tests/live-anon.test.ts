@@ -45,7 +45,10 @@ const SENSITIVE_TABLES = [
   "rate_limits",
 ];
 
-describe("live DB: anonymous client (anon key, no session)", () => {
+// Opt-in: this suite talks to the real Supabase project, so it must never make
+// a normal CI/deploy run red because of network or remote-data state.
+//   RUN_LIVE_TESTS=1 bun test tests/live-anon.test.ts
+describe.skipIf(!process.env.RUN_LIVE_TESTS)("live DB: anonymous client (anon key, no session)", () => {
   test("reads zero rows from every sensitive table", async () => {
     for (const table of SENSITIVE_TABLES) {
       const { status, body } = await rest(`${table}?select=*&limit=10`);
