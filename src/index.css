@@ -69,7 +69,10 @@
   --secondary-foreground: #232019;
 
   --muted: #e6e3d8;
-  --muted-foreground: #6b6558;
+  /* Accessibility audit 2026-09-28: #6b6558 measured 4.20:1 on --accent
+     (below WCAG AA 4.5:1). Darkened to #5d5648 → ≥4.95:1 on every surface
+     it renders against (paper 6.25, card 6.77, secondary 5.66, accent 5.27). */
+  --muted-foreground: #5d5648;
 
   --accent: #dfdccb;
   --accent-foreground: #232019;

@@ -337,8 +337,17 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
         {sections.map((sec, si) => (
           <Card key={si} className="paper rounded-none border-border shadow-none">
             <CardHeader
-              className="cursor-pointer pb-2"
+              role="button"
+              tabIndex={0}
+              aria-expanded={openSection === si}
+              className="cursor-pointer pb-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
               onClick={() => setOpenSection(openSection === si ? -1 : si)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setOpenSection(openSection === si ? -1 : si);
+                }
+              }}
             >
               <div className="flex items-center gap-2">
                 {openSection === si ? (

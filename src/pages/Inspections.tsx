@@ -159,8 +159,16 @@ export default function Inspections() {
                 {inspections.map((i) => (
                   <tr
                     key={i._id}
-                    className="cursor-pointer hover:bg-accent/50"
+                    tabIndex={0}
+                    aria-label={`Open inspection for ${i.siteName}`}
+                    className="cursor-pointer hover:bg-accent/50 focus-visible:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
                     onClick={() => navigate(`/portal/inspections/${i._id}`)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        navigate(`/portal/inspections/${i._id}`);
+                      }
+                    }}
                   >
                     <td className="px-2 py-3">
                       <div className="font-mono text-xs">{i.siteCode}</div>
@@ -234,8 +242,9 @@ function NewInspectionDialog({
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label>Site</Label>
+            <Label htmlFor="new-insp-site">Site</Label>
             <select
+              id="new-insp-site"
               className="w-full rounded-sm border border-input bg-card px-3 py-2 text-sm"
               value={siteId}
               onChange={(e) => setSiteId(e.target.value)}
@@ -249,8 +258,9 @@ function NewInspectionDialog({
             </select>
           </div>
           <div className="space-y-1.5">
-            <Label>Template</Label>
+            <Label htmlFor="new-insp-template">Template</Label>
             <select
+              id="new-insp-template"
               className="w-full rounded-sm border border-input bg-card px-3 py-2 text-sm"
               value={templateId}
               onChange={(e) => setTemplateId(e.target.value)}
@@ -404,7 +414,7 @@ export function LocalInspectionForm() {
                 const val = draft.answers[key];
                 return (
                   <div key={key} className="space-y-1.5">
-                    <Label>
+                    <Label htmlFor={`q-${key}`}>
                       {q.label}
                       {q.required && <span className="text-destructive"> *</span>}
                     </Label>
@@ -431,6 +441,7 @@ export function LocalInspectionForm() {
                     )}
                     {q.answerType === "select" && (
                       <select
+                        id={`q-${key}`}
                         className="w-full max-w-sm rounded-sm border border-input bg-card px-3 py-2 text-sm"
                         value={typeof val === "string" ? val : ""}
                         onChange={(e) =>
@@ -446,6 +457,7 @@ export function LocalInspectionForm() {
                     {q.answerType === "number" && (
                       <Input
                         type="number"
+                        id={`q-${key}`}
                         className="max-w-[180px]"
                         value={typeof val === "number" ? val : ""}
                         onChange={(e) =>
@@ -458,6 +470,7 @@ export function LocalInspectionForm() {
                     {q.answerType === "text" && (
                       <Textarea
                         rows={2}
+                        id={`q-${key}`}
                         value={typeof val === "string" ? val : ""}
                         onChange={(e) =>
                           saveDraft({ answers: { ...draft.answers, [key]: e.target.value } })

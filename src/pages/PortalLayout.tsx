@@ -201,6 +201,13 @@ export default function PortalLayout() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Accessibility: keyboard users skip the sidebar straight to content */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-sm focus:border focus:border-border focus:bg-card focus:px-3 focus:py-1.5 focus:text-sm"
+      >
+        Skip to main content
+      </a>
       <div className="mx-auto flex min-h-screen w-full max-w-[1400px]">
         {/* Sidebar */}
         <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar md:flex">
@@ -297,7 +304,7 @@ export default function PortalLayout() {
             </div>
           </header>
 
-          <main className="flex-1 px-4 py-6 md:px-8 md:py-8">
+          <main id="main-content" className="flex-1 px-4 py-6 md:px-8 md:py-8">
             <Outlet />
           </main>
 

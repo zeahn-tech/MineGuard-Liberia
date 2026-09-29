@@ -257,6 +257,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     name="password"
                     type="password"
                     placeholder="New password (min. 6 characters)"
+                    aria-label="New password"
                     autoComplete="new-password"
                     minLength={6}
                     disabled={isLoading}
@@ -266,6 +267,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     name="confirm"
                     type="password"
                     placeholder="Confirm new password"
+                    aria-label="Confirm new password"
                     autoComplete="new-password"
                     disabled={isLoading}
                     required
@@ -295,6 +297,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     value={mfaCode}
                     onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                     placeholder="123456"
+                    aria-label="6-digit authenticator code"
                     inputMode="numeric"
                     autoComplete="one-time-code"
                     maxLength={6}
@@ -355,15 +358,16 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     <CardContent className="space-y-3">
                       <div className="relative">
                         <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                        <Input
-                          name="email"
-                          type="email"
-                          placeholder="name@example.gov"
-                          className="pl-9"
-                          autoComplete="email"
-                          disabled={isLoading}
-                          required
-                        />
+                      <Input
+                        name="email"
+                        type="email"
+                        placeholder="name@example.gov"
+                        aria-label="Email address"
+                        className="pl-9"
+                        autoComplete="email"
+                        disabled={isLoading}
+                        required
+                      />
                       </div>
                       {error && <p className="text-sm text-destructive">{error}</p>}
                     </CardContent>
@@ -405,6 +409,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         name="email"
                         placeholder="name@example.gov"
                         type="email"
+                        aria-label="Email address"
                         className="pl-9"
                         autoComplete="email"
                         disabled={isLoading}
@@ -415,6 +420,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       name="password"
                       placeholder="Password"
                       type="password"
+                      aria-label="Password"
                       autoComplete="current-password"
                       disabled={isLoading}
                       required
@@ -469,6 +475,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     <Input
                       name="name"
                       placeholder="Full name"
+                      aria-label="Full name"
                       autoComplete="name"
                       disabled={isLoading}
                       required
@@ -477,6 +484,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       name="email"
                       placeholder="name@example.gov"
                       type="email"
+                      aria-label="Email address"
                       autoComplete="email"
                       disabled={isLoading}
                       required
@@ -485,6 +493,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       name="password"
                       placeholder="Password (min. 6 characters)"
                       type="password"
+                      aria-label="Password"
                       autoComplete="new-password"
                       minLength={6}
                       disabled={isLoading}
@@ -493,6 +502,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     <Input
                       name="confirm"
                       placeholder="Confirm password"
+                      aria-label="Confirm password"
                       type="password"
                       autoComplete="new-password"
                       disabled={isLoading}

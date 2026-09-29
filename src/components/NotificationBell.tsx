@@ -45,7 +45,12 @@ export default function NotificationBell() {
         size="sm"
         className="relative text-muted-foreground"
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setOpen(false);
+        }}
         aria-label={`Notifications${notifs.length > 0 ? ` (${notifs.length})` : ""}`}
+        aria-expanded={open}
+        aria-haspopup="true"
       >
         <Bell className="size-4" strokeWidth={1.5} />
         {notifs.length > 0 && (
@@ -61,8 +66,9 @@ export default function NotificationBell() {
 
       {open && (
         <>
-          {/* click-away layer */}
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          {/* click-away layer (pointer-only; keyboard users close via
+              Escape or the toggle button) */}
+          <div className="fixed inset-0 z-40" aria-hidden="true" onClick={() => setOpen(false)} />
           <div className="absolute right-0 z-50 mt-1 w-80 rounded border border-border bg-card shadow-lg">
             <div className="flex items-center justify-between border-b border-border px-3 py-2">
               <p className="kicker text-[10px]">Notifications</p>

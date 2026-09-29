@@ -135,8 +135,16 @@ export default function Sites() {
                     return (
                       <tr
                         key={s._id}
-                        className="cursor-pointer transition-colors hover:bg-accent/50"
+                        tabIndex={0}
+                        aria-label={`Open site ${s.name}`}
+                        className="cursor-pointer transition-colors hover:bg-accent/50 focus-visible:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
                         onClick={() => navigate(`/portal/sites/${s._id}`)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            navigate(`/portal/sites/${s._id}`);
+                          }
+                        }}
                       >
                         <td className="px-4 py-3 font-mono text-xs">{s.code}</td>
                         <td className="px-4 py-3">
