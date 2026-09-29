@@ -1,14 +1,54 @@
 # 11 — Implementation Status
 
-**Session:** Accessibility audit — five core flows (§16 definition-of-done
-item 5); findings documented, confirmed defects fixed
+**Session:** Load/performance baseline — established at realistic pilot scale
+(§16 "unmeasured" closed)
 **Date:** 2026-09-28
-**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (253
-passing across 18 files — 233 prior + 20 new a11y contract tests) · contrast
-defect fixed at the token level (one CSS variable), all other fixes localized
-to the affected components
+**Verification:** baseline measured — every surface ≥17× under the 2 s
+interactive budget (record: `docs/17_PERFORMANCE_BASELINE.MD`; bench:
+`tests/perf-baseline.test.ts`, 12 tests) · `bun tsc -b --noEmit` ✓
 
-## This session [2026-09-28 — accessibility audit, five core flows]
+## This session [2026-09-28 — performance baseline]
+
+**Directive item:** §16 marks Performance as explicitly blank ("No load
+testing; queries are collect()-based"). Establish a baseline at realistic
+pilot scale before claiming any performance characteristic.
+
+**Scale (from the program's pilot planning numbers):** 40 sites across 4
+counties and 2 operators, 25 staff, 320 inspections, 640 findings, 320
+corrective actions, 80 incidents (incl. fatalities), 60 observations, 4,000
+audit rows, 200 community reports.
+
+**Method:** the REAL data layer over the RLS-enforcing wire bridge (same
+harness as the backend-edge suite — real RLS policies, real guard triggers,
+real error mapping, per-request identity). The seed is deterministic,
+idempotent, and asserts its own completeness (a baseline over silently-
+missing data would be worthless — three seed defects were caught exactly
+this way and fixed: enum-value mismatches, a UUID collision with the edge
+seed, and a trigger-created stub profile). Each surface is warmed, then
+measured 5× (median + worst); in-surface result-set sizes are printed.
+
+**Results (median, budget 2,000 ms):** command center 115 ms (slowest —
+reads 7 tables and aggregates), riskScores 111 ms (42 entries), operator
+compliance feed 94 ms (161 joined rows), notifications 96 ms, county-scoped
+inspections list 40 ms, full inspections list 25 ms, audit log 60 ms of 4k,
+sites list 16 ms, incidents 8 ms, **full write path 3 ms** (auth + dedupe
+probe + guard + insert + audit + public-stats refresh), clientRef dedupe
+replay 1 ms. Every surface ≥17× under budget.
+
+**Analysis (recorded in docs/17):** aggregators dominate (O(n) over domain
+tables) and are the first optimization site at ~10× growth; scoped reads add
+negligible cost over unscoped; writes are fixed-overhead-dominated, and the
+offline replay guarantee costs effectively nothing per item.
+
+**Honest limits (docs/17):** single-session, in-process engine (no network
+RTT, no concurrent contention); volumes are projections, re-runnable at any
+scale via the SCALE constant; production load testing remains [PLANNED] and
+requires the production project. The bench doubles as a regression gate: a
+surface exceeding its budget fails `bun test`.
+
+---
+
+## Prior session [2026-09-28 — accessibility audit, five core flows]
 
 **Directive item:** audit keyboard navigation, contrast, and screen-reader
 landmarks on the five core flows; document findings and fix confirmed

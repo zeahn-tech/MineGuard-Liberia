@@ -15,11 +15,11 @@ require evidence across the dimensions below.
 | Offline behavior | 🟢 Inspections | Local-first, retry, dedupe; media offline queue pending |
 | Synchronization | 🟢 Inspections | Idempotent clientRef sync; conflict strategy documented |
 | Media | 🟢 Shipped | Storage pipeline + metadata + audit live; field UI with camera capture, batch multi-file byte progress, offline byte queue (§10, tested) |
-| Performance | ⚪ Unmeasured | No load testing; queries are collect()-based (fine for pilot scale) |
+| Performance | 🟢 Baseline | Pilot-scale baseline established (docs/17): all surfaces ≥17× under the 2 s budget (slowest: command center 115 ms, risk scores 111 ms at 40 sites/320 inspections/12.8k audit rows); bench re-runnable as regression gate — production load test [PLANNED] |
 | Accessibility | 🟢 Audited | Five core flows audited 2026-09-28: 7 confirmed defects fixed (contrast token 4.20→≥4.95:1, skip links, keyboard rows/accordion, input labels, disclosure semantics); fixes pinned by `tests/accessibility-audit.test.ts` — live AT pass [PLANNED] |
 | Deployment | 🟢 Pipeline live | Dev deploy verified; production workflow implemented (manual gate, forced pre-deploy backup, seed compiled out + CI-verified, deploy verification) — owner prerequisites (project ref/secret, reviewers) pending |
 | Recovery | 🟢 Rehearsed | Nightly 03:30 UTC pg_dump (90-day retention, archive-verified, manifest+SHA-256); weekly automated restore drill; **restore-from-backup rehearsal EXECUTED 2026-09-28 — PASS** (point-in-time + RLS/guard integrity proven, docs/drills/) |
-| Testing | 🟢 18 suites / 253 tests | SQL layer (PGlite, all migrations), wire-bridge data-layer suites (backend edge, account security, operator portal + isolation, template editor, evidence capture/progress, notifications, CSV exports, AI risk explanation, operational readiness, accessibility audit), offline queues, live anon probes — all green; UI smoke layer [PLANNED] |
+| Testing | 🟢 19 suites / 265 tests | SQL layer (PGlite, all migrations), wire-bridge data-layer suites (backend edge, account security, operator portal + isolation, template editor, evidence capture/progress, notifications, CSV exports, AI risk explanation, operational readiness, accessibility audit, performance baseline), offline queues, live anon probes — all green; UI smoke layer [PLANNED] |
 | Documentation | 🟢 Current | Docs 00–16 synchronized with this build |
 
 ## Definition of done for pilot
