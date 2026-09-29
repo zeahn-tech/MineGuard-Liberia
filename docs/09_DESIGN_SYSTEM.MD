@@ -50,3 +50,51 @@ Radius is deliberately small (`0.25rem`) for a crisp, print-like feel.
 - Body text ≥ 14px; muted text tested against paper background.
 - Contrast: ink on paper ≈ 13:1; muted text ≈ 5.5:1.
 - Focus visible via ring token; touch targets ≥ 36px.
+
+## Accessibility audit [EXECUTED 2026-09-28 — five core flows]
+
+Per docs/16 definition-of-done item 5. Method: static source audit of every
+interactive element, dialog, form control, image, and landmark across the
+target flows (F1 public report, F2 sign-in, F3 staff sites, F4 field
+inspections, F5 operator compliance), plus programmatic WCAG contrast
+computation over the actual design tokens. Findings and fixes recorded in
+`tests/accessibility-audit.test.ts`, which pins the fixes so they cannot
+regress.
+
+**Confirmed defects found and fixed:**
+
+1. **Contrast (WCAG AA failure)** — `--muted-foreground` #6b6558 on
+   `--accent` measured **4.20:1** (min 4.5). Token darkened to #5d5648:
+   ≥4.95:1 on every surface it renders against (paper 6.25, card 6.77,
+   secondary 5.66, accent 5.27).
+2. **No skip navigation** — neither portal shell had a skip link and `<main>`
+   carried no id. Both shells now render a "Skip to main content" link
+   (visually hidden until focused) targeting `#main-content`.
+3. **Keyboard-unreachable navigation rows** — the Inspections and Sites
+   tables activate on click only. Rows are now `tabIndex={0}` with
+   Enter/Space activation, a focus-visible outline, and an aria-label.
+4. **Keyboard-unreachable accordion** — the template editor's section
+   headers were clickable divs. Now `role="button"`, `tabIndex={0}`,
+   `aria-expanded`, Enter/Space handling.
+5. **Placeholder-only form inputs** — all seven Auth page inputs (sign-in,
+   sign-up, MFA code, recovery, new-password) announced nothing to screen
+   readers; each now carries an `aria-label`.
+6. **Unassociated labels** — the new-inspection dialog's two selects and the
+   draft form's question controls (select/number/text per answer key) had no
+   label association; fixed with htmlFor/id pairs keyed `q-si:qi`.
+7. **Notification bell disclosure semantics** — no `aria-expanded` /
+   `aria-haspopup`, no Escape close, keyboard-tabbable click-away layer.
+   Fixed: expanded state exposed, Escape closes, click-away `aria-hidden`.
+
+**Verified already compliant (no change needed):** Radix dialogs (focus
+trap, Escape, aria-modal, labelled via DialogTitle — all audited dialogs
+have one); native `<select>` controls (keyboard-operable by default);
+icon-only buttons carried aria-labels; evidence thumbnails and the MFA QR
+code have alt text; the evidence opener is a real `<button>`.
+
+**Residual honest limits:** the audit is static-source + token-mathematics;
+it cannot execute a live screen reader or measure real focus order inside
+running dialogs. A guided assistive-technology pass (NVDA/VoiceOver on the
+deployed app) remains [PLANNED] and is recommended before pilot launch.
+Touch-target size is enforced by the design system (buttons ≥ 36px) but not
+per-element measured here.

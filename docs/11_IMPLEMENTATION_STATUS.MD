@@ -1,13 +1,63 @@
 # 11 — Implementation Status
 
-**Session:** Restore-from-backup rehearsal — EXECUTED (Priority D, §16
-definition-of-done item 4)
+**Session:** Accessibility audit — five core flows (§16 definition-of-done
+item 5); findings documented, confirmed defects fixed
 **Date:** 2026-09-28
-**Verification:** rehearsal executed for real and **PASS** (record:
-`docs/drills/restore-rehearsal-2026-09-28.md`) · `bun tsc -b --noEmit` ✓ ·
-no application code changed in this session
+**Verification:** `bun tsc -b --noEmit` ✓ (0 errors) · `bun test` ✓ (253
+passing across 18 files — 233 prior + 20 new a11y contract tests) · contrast
+defect fixed at the token level (one CSS variable), all other fixes localized
+to the affected components
 
-## This session [2026-09-28 — restore rehearsal executed]
+## This session [2026-09-28 — accessibility audit, five core flows]
+
+**Directive item:** audit keyboard navigation, contrast, and screen-reader
+landmarks on the five core flows; document findings and fix confirmed
+defects — do not merely assert compliance.
+
+**Method:** static source audit of every interactive element, dialog, form
+control, image, and landmark across the five flows (F1 public report, F2
+sign-in, F3 staff sites, F4 field inspections, F5 operator compliance), plus
+programmatic WCAG contrast computation over the real design-token values.
+No simulator was trusted; each defect was confirmed in source before fixing.
+
+**Confirmed defects — 7 found, 7 fixed:**
+
+1. **Contrast WCAG AA failure** — `--muted-foreground` #6b6558 on `--accent`
+   = 4.20:1. Fixed at the token: darkened to #5d5648 (≥4.95:1 on every
+   surface it appears against). The failing pair's ratio is asserted
+   `< 4.5` in the test so the regression cannot return silently.
+2. **No skip navigation** — both portal shells now render a skip link to
+   `#main-content` (visually hidden until focused).
+3. **Keyboard-unreachable table navigation** — Inspections and Sites rows
+   (click-to-navigate) are now focusable with Enter/Space activation,
+   focus-visible outlines, and aria-labels.
+4. **Keyboard-unreachable accordion** — template editor section headers now
+   `role="button"` + `tabIndex` + `aria-expanded` + key handling.
+5. **Placeholder-only inputs (7)** — every Auth page input (sign-in,
+   sign-up, MFA code, recovery, new-password) gained an `aria-label`.
+6. **Unassociated labels** — new-inspection dialog selects and the draft
+   form's per-question controls (id `q-si:qi`) are now label-associated.
+7. **Notification bell disclosure** — `aria-expanded`/`aria-haspopup`,
+   Escape-to-close, click-away layer `aria-hidden`.
+
+**Verified compliant without change:** Radix dialog semantics (trap, Escape,
+titles — all audited dialogs have one), native selects, existing aria-labels
+on icon-only buttons, image alt text, evidence opener as a real button.
+
+**Tests** (`tests/accessibility-audit.test.ts`, 20): the contrast table is
+COMPUTED from hex values (WCAG relative-luminance math, not eyeballed);
+landmarks/skip links, keyboard handlers, label associations, and disclosure
+semantics are pinned per file — any regression fails CI with the exact
+defect named.
+
+**Honest limits:** static + token-mathematics audit; a live assistive-
+technology pass (NVDA/VoiceOver on the deployed app) is [PLANNED] and
+recommended before pilot launch. Touch-target rule enforced by the design
+system, not per-element measured.
+
+---
+
+## Prior session [2026-09-28 — restore rehearsal executed]
 
 **Directive item:** perform and document an ACTUAL restore test — a
 rehearsal, not a document.

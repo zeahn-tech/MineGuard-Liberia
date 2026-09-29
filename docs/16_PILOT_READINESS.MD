@@ -16,10 +16,10 @@ require evidence across the dimensions below.
 | Synchronization | 🟢 Inspections | Idempotent clientRef sync; conflict strategy documented |
 | Media | 🟢 Shipped | Storage pipeline + metadata + audit live; field UI with camera capture, batch multi-file byte progress, offline byte queue (§10, tested) |
 | Performance | ⚪ Unmeasured | No load testing; queries are collect()-based (fine for pilot scale) |
-| Accessibility | 🟡 Partial | Tokens chosen for contrast; audit of flows not yet done |
+| Accessibility | 🟢 Audited | Five core flows audited 2026-09-28: 7 confirmed defects fixed (contrast token 4.20→≥4.95:1, skip links, keyboard rows/accordion, input labels, disclosure semantics); fixes pinned by `tests/accessibility-audit.test.ts` — live AT pass [PLANNED] |
 | Deployment | 🟢 Pipeline live | Dev deploy verified; production workflow implemented (manual gate, forced pre-deploy backup, seed compiled out + CI-verified, deploy verification) — owner prerequisites (project ref/secret, reviewers) pending |
 | Recovery | 🟢 Rehearsed | Nightly 03:30 UTC pg_dump (90-day retention, archive-verified, manifest+SHA-256); weekly automated restore drill; **restore-from-backup rehearsal EXECUTED 2026-09-28 — PASS** (point-in-time + RLS/guard integrity proven, docs/drills/) |
-| Testing | 🟢 17 suites / 233 tests | SQL layer (PGlite, all migrations), wire-bridge data-layer suites (backend edge, account security, operator portal + isolation, template editor, evidence capture/progress, notifications, CSV exports, AI risk explanation, operational readiness), offline queues, live anon probes — all green; UI smoke layer [PLANNED] |
+| Testing | 🟢 18 suites / 253 tests | SQL layer (PGlite, all migrations), wire-bridge data-layer suites (backend edge, account security, operator portal + isolation, template editor, evidence capture/progress, notifications, CSV exports, AI risk explanation, operational readiness, accessibility audit), offline queues, live anon probes — all green; UI smoke layer [PLANNED] |
 | Documentation | 🟢 Current | Docs 00–16 synchronized with this build |
 
 ## Definition of done for pilot
@@ -33,7 +33,9 @@ require evidence across the dimensions below.
    docs/14. Must be repeated against the production Supabase project once it
    exists.]**
 5. Accessibility pass (keyboard, contrast, screen-reader landmarks) on the five
-   core flows.
+   core flows. **[Audit EXECUTED 2026-09-28 — 7 defects found and fixed,
+   pinned by tests; see docs/09. Live assistive-technology pass [PLANNED]
+   before pilot launch.]**
 6. First-admin provisioning runbook executed on the production deployment.
 7. This board re-scored with evidence links.
 
