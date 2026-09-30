@@ -101,6 +101,39 @@ describe("route isolation: /portal is staff-gated, /operate is operator-gated", 
     expect(mainSrc).toMatch(/path="\/operate"[\s\S]{0,600}OperatorOverview/);
   });
 
+  test("every operator navigation tab is a link to a registered /operate route", () => {
+    const layoutSrc = readFileSync(
+      join(import.meta.dir, "..", "src", "pages", "operate", "OperatorLayout.tsx"),
+      "utf8",
+    );
+    const start = mainSrc.indexOf('path="/operate"');
+    const end = mainSrc.indexOf("{/* Authenticated STAFF portal");
+    const routeBlock = mainSrc.slice(start, end);
+    const navPaths = [...layoutSrc.matchAll(/\{ to: "(\/operate[^\"]*)", label:/g)].map(
+      ([, path]) => path,
+    );
+
+    expect(navPaths).toEqual([
+      "/operate",
+      "/operate/sites",
+      "/operate/findings",
+      "/operate/corrective-actions",
+      "/operate/incidents",
+      "/operate/security",
+    ]);
+    expect(layoutSrc).toContain("<NavLink");
+    expect(layoutSrc).toContain("to={item.to}");
+    expect((layoutSrc.match(/<OperatorNavLinks/g) ?? []).length).toBe(2);
+
+    for (const path of navPaths) {
+      if (path === "/operate") {
+        expect(routeBlock).toContain("<Route index");
+      } else {
+        expect(routeBlock).toContain(`path="${path.slice("/operate/".length)}"`);
+      }
+    }
+  });
+
   test("no staff page is routed inside the /operate subtree", () => {
     // From the /operate block up to the staff-portal comment: no staff page
     // component may appear.
