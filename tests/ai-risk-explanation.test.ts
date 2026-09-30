@@ -220,7 +220,7 @@ describe("cite-or-abstain and no fabrication", () => {
       const overdueSentence = expl!.sentences.find((s) => s.recordIds.includes(caId));
       expect(overdueSentence, "seeded overdue CA must produce a factor sentence").toBeDefined();
       expect(overdueSentence!.points).toBe(overdueSentence!.recordIds.length * RISK_WEIGHTS.overdueCA);
-      expect(overdueSentence!.text).toContain(String(RISK_WEIGHTS.overdueCA));
+      expect(overdueSentence!.text).toContain(String(overdueSentence!.points));
 
       const highSentence = expl!.sentences.find((s) => /high finding/i.test(s.factor));
       expect(highSentence).toBeDefined();
