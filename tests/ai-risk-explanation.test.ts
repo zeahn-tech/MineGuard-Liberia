@@ -224,7 +224,7 @@ describe("cite-or-abstain and no fabrication", () => {
 
       const highSentence = expl!.sentences.find((s) => /high finding/i.test(s.factor));
       expect(highSentence).toBeDefined();
-      expect(highSentence!.points).toBe(RISK_WEIGHTS.highFinding);
+      expect(highSentence!.points).toBe(highSentence!.recordIds.length * RISK_WEIGHTS.highFinding);
       expect(highSentence!.recordIds).toContain(f.findingA);
 
       // Every sentence's points are a clean multiple of its per-record weight
