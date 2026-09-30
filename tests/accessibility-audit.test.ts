@@ -128,12 +128,13 @@ describe("keyboard access (defects A3, A4, A7 fixed)", () => {
     expect(src).toContain("onKeyDown=");
   });
 
-  test("notification bell exposes expanded state and Escape-to-close; click-away is aria-hidden", () => {
+  test("notification bell uses an accessible Popover trigger with managed dismissal", () => {
     const src = read("src/components/NotificationBell.tsx");
-    expect(src).toContain("aria-expanded={open}");
-    expect(src).toContain('aria-haspopup="true"');
-    expect(src).toContain('if (e.key === "Escape") setOpen(false);');
-    expect(src).toContain('aria-hidden="true"');
+    expect(src).toContain("<Popover open={open} onOpenChange={setOpen}>");
+    expect(src).toContain("<PopoverTrigger asChild>");
+    expect(src).toContain("<PopoverContent");
+    expect(src).toContain('aria-label={`Notifications${notifs.length > 0 ? ` (${notifs.length})` : ""}`}');
+    expect(src).not.toContain('onKeyDown={(e) =>');
   });
 });
 
