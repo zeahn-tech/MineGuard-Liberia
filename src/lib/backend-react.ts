@@ -149,12 +149,17 @@ let authEpoch = 0;
 let authReadySeen = false;
 const epochListeners = new Set<Listener>();
 
+function notifyAuthEpochChanged() {
+  for (const listener of epochListeners) listener();
+}
+
 onAuthStateChangedSupabase((uid) => {
   authReadySeen = isAuthReady();
   // Any identity change (including signed-out → anonymous guest) invalidates
   // auth-bound subscriptions; emits only fire on the supabase store's own
   // change events, so identical states don't loop.
   authEpoch++;
+  notifyAuthEpochChanged();
   void uid;
 });
 
@@ -163,6 +168,7 @@ onAuthStateChangedSupabase((uid) => {
 // changes re-derive without a sign-out/in cycle.
 onProfileVersionChanged(() => {
   authEpoch++;
+  notifyAuthEpochChanged();
 });
 
 function useAuthEpoch(): number {

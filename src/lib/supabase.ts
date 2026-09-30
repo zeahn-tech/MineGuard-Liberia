@@ -43,9 +43,10 @@ const profileListeners = new Set<ProfileListener>();
 
 function setUserId(id: string | null) {
   const changed = id !== currentUserId;
+  const becameReady = !authReady;
   currentUserId = id;
   authReady = true;
-  if (changed) {
+  if (changed || becameReady) {
     // A different signed-in identity invalidates every auth-bound cache entry.
     profileVersion = 0;
     for (const l of listeners) l(id);

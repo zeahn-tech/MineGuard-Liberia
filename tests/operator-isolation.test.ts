@@ -170,6 +170,16 @@ describe("route isolation: /portal is staff-gated, /operate is operator-gated", 
     expect(guardSrc).toMatch(/RequireOperator[\s\S]*Navigate\s+to="\/portal"/);
   });
 
+  test("auth and profile changes notify React subscribers without a page reload", () => {
+    const authSrc = readFileSync(join(import.meta.dir, "..", "src", "lib", "supabase.ts"), "utf8");
+    const reactSrc = readFileSync(join(import.meta.dir, "..", "src", "lib", "backend-react.ts"), "utf8");
+
+    expect(authSrc).toContain("const becameReady = !authReady;");
+    expect(authSrc).toContain("if (changed || becameReady)");
+    expect(reactSrc).toMatch(/onAuthStateChangedSupabase\(\(uid\) => \{[\s\S]*?authEpoch\+\+;\s*notifyAuthEpochChanged\(\);/);
+    expect(reactSrc).toMatch(/onProfileVersionChanged\(\(\) => \{\s*authEpoch\+\+;\s*notifyAuthEpochChanged\(\);/);
+  });
+
   test("sign-in without returnTo lands each identity in its own section", () => {
     const authSrc = readFileSync(join(import.meta.dir, "..", "src", "pages", "Auth.tsx"), "utf8");
     expect(authSrc).toMatch(/role === "operator"\) return "\/operate"/);
