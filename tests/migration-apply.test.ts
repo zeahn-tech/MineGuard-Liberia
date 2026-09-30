@@ -46,6 +46,7 @@ describe("migrations apply to a clean database", () => {
     expect(MIGRATIONS).toContain("0002_grants_and_storage.sql");
     expect(MIGRATIONS).toContain("0003_profiles_read_hardening.sql");
     expect(MIGRATIONS).toContain("0005_per_source_report_rate_limit.sql");
+    expect(MIGRATIONS).toContain("0009_submit_community_report_overload_cleanup.sql");
   });
 
   test("0001 core objects exist (tables, RLS, triggers, RPCs)", async () => {
@@ -140,6 +141,46 @@ describe("migrations apply to a clean database", () => {
     expect(sig.rows[0]?.identity).toBe(
       "p_tracking_code text, p_category text, p_description text, p_county text, p_district text, p_community text, p_latitude double precision, p_longitude double precision, p_contact_phone text",
     );
+  });
+
+  test("0009 removes legacy enum overloads and leaves one client RPC", async () => {
+    const db = await getDb();
+    await db.exec(`create function public.submit_community_report(
+      p_tracking_code text,
+      p_category public.report_category,
+      p_description text,
+      p_county text,
+      p_district text default null,
+      p_community text default null,
+      p_latitude double precision default null,
+      p_longitude double precision default null,
+      p_contact_phone text default null
+    ) returns jsonb language sql as $$ select '{}'::jsonb $$`);
+
+    const sql = readFileSync(
+      join(ROOT, "supabase", "migrations", "0009_submit_community_report_overload_cleanup.sql"),
+      "utf8",
+    );
+    await db.exec(sql);
+    await db.exec(sql);
+
+    const rpc = await db.query<{
+      count: string;
+      identity: string;
+      anon_can_execute: boolean;
+    }>(
+      `select count(*)::text as count,
+              min(pg_get_function_identity_arguments(p.oid)) as identity,
+              bool_and(has_function_privilege('anon', p.oid, 'EXECUTE')) as anon_can_execute
+         from pg_proc p
+         join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname = 'submit_community_report'`,
+    );
+    expect(rpc.rows[0]?.count).toBe("1");
+    expect(rpc.rows[0]?.identity).toBe(
+      "p_tracking_code text, p_category text, p_description text, p_county text, p_district text, p_community text, p_latitude double precision, p_longitude double precision, p_contact_phone text",
+    );
+    expect(rpc.rows[0]?.anon_can_execute).toBe(true);
   });
 
   test("0005's limiter helper is stable and NOT security definer", async () => {
