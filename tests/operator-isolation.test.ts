@@ -99,6 +99,7 @@ describe("route isolation: /portal is staff-gated, /operate is operator-gated", 
     expect(mainSrc).toMatch(/path="\/operate"/);
     expect(mainSrc).toContain("OperatorLayout");
     expect(mainSrc).toMatch(/path="\/operate"[\s\S]{0,600}OperatorOverview/);
+    expect(mainSrc).toContain("<HashRouter useTransitions={false}>");
   });
 
   test("every operator navigation tab is a link to a registered /operate route", () => {

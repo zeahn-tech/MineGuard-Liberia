@@ -124,7 +124,7 @@ createRoot(document.getElementById("root")!).render(
       {/* HashRouter: static hosts (GitHub Pages) serve only index.html;
           hash routing keeps every deep link (/portal, /report, /auth)
           working with zero server-side rewrite configuration. */}
-      <HashRouter>
+        <HashRouter useTransitions={false}>
         <Suspense fallback={<RouteLoading />}>
           <Routes>
             {/* Public */}
