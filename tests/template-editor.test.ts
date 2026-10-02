@@ -13,11 +13,11 @@
 // 2. THE ADMIN WORKFLOW (through the REAL data layer over the wire bridge):
 //    admin creates → publishes → edits (sections/questions) → the edited
 //    template is immediately offered to listTemplates (the field flow's
-//    query); delete is refused while inspections reference the template;
-//    unpublish removes it from the field flow without deleting history.
+//    query); archive is refused while inspections reference the template;
+//    unpublish removes it from the field flow without touching history.
 //    Non-admin identities (inspector, supervisor, operator) cannot save,
-//    publish or delete — the editor is admin surface, enforced server-side
-//    and audit logged.
+//    publish or archive — the editor is admin surface, enforced server-side
+//    and audit logged (server-written rows since 0009).
 // ---------------------------------------------------------------------------
 
 import { beforeAll, describe, expect, test } from "bun:test";
@@ -55,6 +55,12 @@ function first<T>(q: { subscribe: (cb: (v: T) => void) => () => void }): Promise
       resolve(v);
     });
   });
+}
+
+/** PGlite decodes jsonb into JS objects already; tolerate strings too. */
+function asJson(v: unknown): Record<string, any> {
+  if (typeof v === "string") return JSON.parse(v) as Record<string, any>;
+  return v as Record<string, any>;
 }
 
 async function expectError(fn: () => Promise<unknown>, token: string) {
@@ -190,9 +196,10 @@ describe("template editor workflow (§11)", () => {
     });
     expect(id).toBeTruthy();
 
-    // Audit rows for create exist.
+    // The server-written audit row for the INSERT (0009: the client no
+    // longer writes audit_log — mg_audit_row triggers do).
     const audit = await adminSql(
-      `select 1 from public.audit_log where action = 'template.create' and entity_id = '${id}'`,
+      `select 1 from public.audit_log where action = 'inspection_templates.insert' and entity_id = '${id}'`,
     );
     expect(audit.length).toBe(1);
 
@@ -231,11 +238,12 @@ describe("template editor workflow (§11)", () => {
       sections: edited,
     });
 
-    // The update audit row exists.
+    // The server-written audit row for the UPDATE exists, with the diff.
     const audit = await adminSql(
-      `select 1 from public.audit_log where action = 'template.update' and entity_id = '${id}'`,
+      `select details from public.audit_log where action = 'inspection_templates.update' and entity_id = '${id}'`,
     );
     expect(audit.length).toBe(1);
+    expect(asJson(audit[0].details).after.name).toBe("Edit-me template (v2)");
 
     // What inspectors are offered IS the edited shape.
     setIdentity(f.national);
@@ -284,27 +292,40 @@ describe("template editor workflow (§11)", () => {
     expect(row[0].active).toBe(false);
   });
 
-  test("delete: refused while inspections reference the template; allowed otherwise", async () => {
+  test("archive: refused while inspections reference the template; allowed otherwise", async () => {
     setIdentity(f.admin);
     // The seeded template is referenced by the seeded inspection.
-    await expectError(() => api.inspections.deleteTemplate({ templateId: f.template }), "TEMPLATE_IN_USE");
+    await expectError(() => api.inspections.archiveTemplate({ templateId: f.template }), "TEMPLATE_IN_USE");
 
-    // An unreferenced template deletes cleanly.
+    // An unreferenced template archives cleanly — the row SURVIVES (0009:
+    // soft lifecycle; client DELETE is revoked outright for every role).
     const id = await api.inspections.saveTemplate({
-      name: "Delete-me template",
+      name: "Archive-me template",
       active: false,
       sections: validSections(),
     });
-    await api.inspections.deleteTemplate({ templateId: id });
-    const row = await adminSql(`select 1 from public.inspection_templates where id = '${id}'`);
-    expect(row.length).toBe(0);
+    await api.inspections.archiveTemplate({ templateId: id });
+    const row = await adminSql(
+      `select archived_at, row_version, updated_by from public.inspection_templates where id = '${id}'`,
+    );
+    expect(row.length).toBe(1);
+    expect(row[0].archived_at).not.toBeNull();
+    expect(Number(row[0].row_version)).toBe(2); // insert + archive update
+    expect(row[0].updated_by).toBe(f.admin);    // server-stamped actor
+    // Exactly one server-written audit row, carrying the archive in its diff.
     const audit = await adminSql(
-      `select 1 from public.audit_log where action = 'template.delete' and entity_id = '${id}'`,
+      `select details from public.audit_log where action = 'inspection_templates.update' and entity_id = '${id}'`,
     );
     expect(audit.length).toBe(1);
+    expect(asJson(audit[0].details).after.archived_at).toBeTruthy();
+    // Archived ⇒ gone from every surface — that IS this app's delete.
+    const all = await first(api.inspections.listTemplatesAll());
+    expect(all!.some((t) => t._id === id)).toBe(false);
+    const field = await first(api.inspections.listTemplates());
+    expect(field!.some((t) => t._id === id)).toBe(false);
   });
 
-  test("non-admin identities cannot save, publish or delete templates", async () => {
+  test("non-admin identities cannot save, publish or archive templates", async () => {
     const args = { name: "Nope", active: true, sections: validSections() };
     for (const uid of [f.national, f.county, f.opA]) {
       setIdentity(uid);
@@ -313,7 +334,7 @@ describe("template editor workflow (§11)", () => {
         () => api.inspections.setTemplateActive({ templateId: f.template, active: false }),
         "FORBIDDEN",
       );
-      await expectError(() => api.inspections.deleteTemplate({ templateId: f.template }), "FORBIDDEN");
+      await expectError(() => api.inspections.archiveTemplate({ templateId: f.template }), "FORBIDDEN");
     }
     // …but staff/operators still READ templates (using them is their job).
     setIdentity(f.opA);

@@ -21,6 +21,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import {
   affectedRows,
   getFixture,
+  IDS,
   withRole,
   type Runner,
 } from "./helpers/pglite-db";
@@ -279,15 +280,21 @@ describe("operator (tenant-locked)", () => {
     );
   });
 
-  test("cannot delete sites (registry is append-only)", async () => {
+  test("cannot delete sites (DELETE revoked; registry is lifecycle-only)", async () => {
     const f = await getFixture();
     await withRole(
       "authenticated",
       { sub: f.opA, role: "authenticated" },
       async (run) => {
-        expect(
-          await affectedRows(run, `delete from public.sites where id = '${f.siteA}' returning 1`),
-        ).toBe(0);
+        // SEC-3 (migration 0009): the privilege layer refuses before RLS or
+        // the sites guard are ever consulted.
+        let message = "";
+        try {
+          await run(`delete from public.sites where id = '${f.siteA}' returning 1`);
+        } catch (e) {
+          message = e instanceof Error ? e.message : String(e);
+        }
+        expect(message).toContain("permission denied for table sites");
       },
     );
   });
@@ -334,26 +341,37 @@ describe("national supervisor (staff)", () => {
         // Directory read is self-or-admin by design (0003): a non-admin
         // staff account sees exactly one profile — their own.
         expect(await count(run, "select count(*) from public.profiles")).toBe(1);
-        // Staff read of audit_log (append-only table).
-        expect(await count(run, "select count(*) from public.audit_log")).toBe(1);
+        // Staff read of audit_log. Since 0009 every seeded mutation has
+        // produced a server-written row (mg_audit_row triggers), so the
+        // trail is well past the single hand-written seed row.
+        expect(await count(run, "select count(*) from public.audit_log")).toBeGreaterThan(1);
       },
     );
   });
 
-  test("audit_log is append-only: no update/delete path exists", async () => {
+  test("audit_log is closed to clients: no insert/update/delete path exists", async () => {
+    // SEC-1 (migration 0009): "audit append" dropped + client write grants
+    // revoked — every write fails at the privilege layer, for staff too.
     await withRole(
       "authenticated",
       { sub: (await getFixture()).national, role: "authenticated" },
       async (run) => {
-        expect(
-          await affectedRows(
-            run,
-            `update public.audit_log set summary = 'tampered' returning 1`,
-          ),
-        ).toBe(0);
-        expect(
-          await affectedRows(run, `delete from public.audit_log returning 1`),
-        ).toBe(0);
+        for (const stmt of [
+          `update public.audit_log set summary = 'tampered'`,
+          `delete from public.audit_log`,
+          `insert into public.audit_log (actor_label, action, entity_type, summary)
+             values ('Mallory', 'forged.action', 'audit_log', 'forged entry')`,
+        ]) {
+          let message = "";
+          try {
+            await run(`${stmt} returning 1`);
+          } catch (e) {
+            message = e instanceof Error ? e.message : String(e);
+          }
+          expect(message, stmt.trim().slice(0, 48)).toContain(
+            "permission denied for table audit_log",
+          );
+        }
       },
     );
   });
@@ -517,6 +535,230 @@ describe("evidence storage policies", () => {
               returning 1`,
           ),
         ).toBe(0);
+      },
+    );
+  });
+});
+
+// ===========================================================================
+// SEC-1/2/3 — audit & integrity foundation (migration 0009).
+//
+// Acceptance for the security roadmap's Session 1:
+//   * forged audit insert fails for EVERY client role
+//   * every mutation produces exactly one server-written audit row (actor
+//     from the session, before/after diff) with no client logging involved
+//   * no DELETE succeeds for any client role — archive/status instead
+//   * row_version increments; spoofed row_version/updated_by are overwritten
+// ===========================================================================
+
+const CLIENT_IDENTITIES: Array<
+  ["anon" | "authenticated", Record<string, unknown> | null]
+> = [
+  ["anon", null],
+  ["authenticated", { sub: IDS.admin, role: "authenticated" }],
+  ["authenticated", { sub: IDS.opA, role: "authenticated" }],
+  ["authenticated", { sub: IDS.county, role: "authenticated" }],
+  ["authenticated", { sub: IDS.national, role: "authenticated" }],
+  ["authenticated", { sub: IDS.guest, role: "authenticated" }],
+];
+
+/** PGlite decodes jsonb columns into JS objects already; be liberal about
+ *  strings too so the same helper works against any driver shape. */
+function j(v: unknown): Record<string, unknown> {
+  if (typeof v === "string") return JSON.parse(v) as Record<string, unknown>;
+  return v as Record<string, unknown>;
+}
+
+describe("SEC-1: the audit trail is written only by the server", () => {
+  test("forged audit insert fails for every client role", async () => {
+    const f = await getFixture();
+    for (const [role, claims] of CLIENT_IDENTITIES) {
+      await withRole(role, claims, async (run) => {
+        let message = "";
+        try {
+          await run(
+            `insert into public.audit_log (actor_id, actor_label, action, entity_type, entity_id, summary)
+               values ('${f.admin}', 'Mallory', 'forged.action', 'sites', null, 'forged entry')
+               returning 1`,
+          );
+        } catch (e) {
+          message = e instanceof Error ? e.message : String(e);
+        }
+        expect(
+          message,
+          `forged audit insert must fail for ${role} ${JSON.stringify(claims)}`,
+        ).toContain("permission denied for table audit_log");
+      });
+    }
+  });
+
+  test("exactly one server-written audit row per mutation, actor = session user", async () => {
+    const f = await getFixture();
+    // The client never writes the log (logAudit is a console breadcrumb),
+    // so this doubles as the "client crashes" proof: the rows below exist
+    // purely because the mutations committed — atomically, same transaction.
+    await withRole(
+      "authenticated",
+      { sub: f.admin, role: "authenticated" },
+      async (run) => {
+        const [created] = await run(
+          `insert into public.sites (code, name, operator_name, county, created_by)
+             values ('LB-AUDIT-PROBE', 'Audit probe', 'AgriLib Mining', 'Bomi', '${f.admin}')
+             returning id, row_version, updated_by`,
+        );
+        // SEC-2: INSERT stamps are server-written, not client-supplied.
+        expect(Number(created.row_version)).toBe(1);
+        expect(created.updated_by).toBe(f.admin);
+        const siteId = String(created.id);
+
+        await run(`update public.sites set notes = 'first touch' where id = '${siteId}'`);
+        // Spoof attempt: the client sends its own row_version and actor —
+        // both must be overwritten by the server.
+        await run(
+          `update public.sites set notes = 'second touch', row_version = 77,
+                  updated_by = '${f.opB}'
+            where id = '${siteId}'`,
+        );
+
+        // Read the trail as superuser (no persona-scoping interference).
+        await run("set local role postgres");
+        const insertRows = await run(
+          `select actor_id, actor_label, entity_type, details from public.audit_log
+            where action = 'sites.insert' and entity_id = '${siteId}'`,
+        );
+        expect(insertRows.length).toBe(1);
+        expect(insertRows[0].actor_id).toBe(f.admin);
+        expect(insertRows[0].entity_type).toBe("sites");
+        expect(
+          j(insertRows[0].details).after,
+        ).toMatchObject({ code: "LB-AUDIT-PROBE" });
+
+        const updateRows = await run(
+          `select actor_id, details from public.audit_log
+            where action = 'sites.update' and entity_id = '${siteId}'`,
+        );
+        // Exactly one row per UPDATE statement — no more, no fewer.
+        expect(updateRows.length).toBe(2);
+        expect(updateRows.every((r) => r.actor_id === f.admin)).toBe(true);
+        const diffs = updateRows
+          .map((r) => j(r.details))
+          .map((d) => `${d.before.notes} -> ${d.after.notes}`)
+          .sort();
+        expect(diffs).toEqual([
+          "first touch -> second touch",
+          "null -> first touch",
+        ]);
+
+        const [row] = await run(
+          `select row_version, updated_by, updated_at, notes
+             from public.sites where id = '${siteId}'`,
+        );
+        expect(Number(row.row_version)).toBe(3); // 1 + two updates; 77 ignored
+        expect(row.updated_by).toBe(f.admin);    // spoofed opB ignored
+        expect(row.updated_at).not.toBeNull();
+        expect(row.notes).toBe("second touch");
+      },
+    );
+  });
+
+  test("status transitions land in the before/after diff", async () => {
+    const f = await getFixture();
+    await withRole(
+      "authenticated",
+      { sub: f.admin, role: "authenticated" },
+      async (run) => {
+        const [site] = await run(
+          `insert into public.sites (code, name, operator_name, county, created_by)
+             values ('LB-STATUS-PROBE', 'Status probe', 'AgriLib Mining', 'Bomi', '${f.admin}')
+             returning id, status`,
+        );
+        const siteId = String(site.id);
+        await run(
+          `update public.sites set status = 'active' where id = '${siteId}'`,
+        );
+
+        await run("set local role postgres");
+        const rows = await run(
+          `select summary, details from public.audit_log
+            where action = 'sites.update' and entity_id = '${siteId}'
+              and details -> 'after' ->> 'status' is not null`,
+        );
+        expect(rows.length).toBe(1);
+        expect(String(rows[0].summary)).toContain(
+          `status: ${site.status} -> active`,
+        );
+        const d = j(rows[0].details);
+        expect(d.before.status).toBe(site.status);
+        expect(d.after.status).toBe("active");
+      },
+    );
+  });
+});
+
+describe("SEC-2/3: no client role can DELETE — lifecycle only", () => {
+  test("DELETE is refused at the privilege layer for anon and every persona", async () => {
+    const tables = [
+      "profiles",
+      "sites",
+      "inspection_templates",
+      "inspections",
+      "findings",
+      "corrective_actions",
+      "incidents",
+      "environmental_observations",
+      "community_reports",
+      "evidence",
+      "audit_log",
+      "meta",
+      "report_tracking",
+      "rate_limits",
+    ];
+    for (const [role, claims] of CLIENT_IDENTITIES) {
+      await withRole(role, claims, async (run) => {
+        for (const table of tables) {
+          let message = "";
+          try {
+            await run(`delete from public.${table} returning 1`);
+          } catch (e) {
+            message = e instanceof Error ? e.message : String(e);
+          }
+          expect(message, `DELETE ${table} must fail for ${role}`).toContain(
+            `permission denied for table ${table}`,
+          );
+        }
+      });
+    }
+  });
+
+  test("even an admin cannot delete a template — archive is the lifecycle", async () => {
+    const f = await getFixture();
+    await withRole(
+      "authenticated",
+      { sub: f.admin, role: "authenticated" },
+      async (run) => {
+        let message = "";
+        try {
+          await run(
+            `delete from public.inspection_templates where id = '${f.template}' returning 1`,
+          );
+        } catch (e) {
+          message = e instanceof Error ? e.message : String(e);
+        }
+        // Privilege revoke first; behind it the guard refuses with
+        // ARCHIVE_ONLY (belt and braces — neither path deletes).
+        expect(message).toContain(
+          "permission denied for table inspection_templates",
+        );
+
+        // The sanctioned lifecycle path: archive via UPDATE.
+        const archived = await run(
+          `update public.inspection_templates
+              set archived_at = now()
+            where id = '${f.template}' returning row_version, updated_by`,
+        );
+        expect(archived.length).toBe(1);
+        expect(Number(archived[0].row_version)).toBe(2);
+        expect(archived[0].updated_by).toBe(f.admin);
       },
     );
   });

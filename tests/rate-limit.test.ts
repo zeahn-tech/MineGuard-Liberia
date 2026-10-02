@@ -12,8 +12,9 @@
 //   * withRole() transactions ALWAYS roll back — so every multi-step proof
 //     (exhaust source A, then submit from source B) must live inside ONE
 //     transaction, exactly like one wall-clock minute on the real edge.
-//   * anon has no SELECT policy on rate_limits / community_reports: those
-//     reads return ZERO ROWS silently (not an error). Success is therefore
+//   * since 0009 (SEC-3) anon holds NO table grants at all: reads of
+//     rate_limits / community_reports are refused at the privilege layer
+//     (permission denied), never silently filtered. Success is therefore
 //     confirmed through the world-readable report_tracking mirror; bucket
 //     rows are introspected from postgres sessions.
 //   * Errors raised by the RPC abort only their statement — runIn()'s
@@ -259,12 +260,18 @@ describe("privacy: no raw client address is persisted", () => {
     });
   });
 
-  test("rate_limits stays definer-only: anon sees zero rows, not an error", async () => {
-    // Mirrors the rls.test.ts pattern: no policies exist on rate_limits, so
-    // anon's SELECT is silently filtered to nothing. That is the contract.
+  test("rate_limits stays definer-only: anon's SELECT is refused outright", async () => {
+    // 0009 (SEC-3) revoked anon's table grants entirely, so the refusal now
+    // happens at the privilege layer — before RLS is even consulted. Either
+    // way the contract holds: anon learns nothing about the bucket rows.
     await withRole("anon", null, async (run) => {
-      const rows = await run(`select count(*) as n from public.rate_limits`);
-      expect(Number(rows[0]?.n)).toBe(0);
+      let message = "";
+      try {
+        await run(`select count(*) as n from public.rate_limits`);
+      } catch (e) {
+        message = e instanceof Error ? e.message : String(e);
+      }
+      expect(message).toContain("permission denied for table rate_limits");
     });
   });
 });

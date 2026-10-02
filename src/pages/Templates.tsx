@@ -4,7 +4,7 @@
 //
 // Admin surface: create/edit templates (sections → questions → answer
 // types boolean/text/select/number, required flags, select options),
-// publish/unpublish, delete (refused while inspections reference the
+// publish/unpublish, archive (refused while inspections reference the
 // template). The shape contract lives in src/lib/template-schema.ts and is
 // enforced BOTH live in the editor and authoritatively in the data layer
 // (saveTemplate re-validates before persisting — the UI is never trusted).
@@ -36,6 +36,7 @@ import { useMutation, useQuery } from "@/lib/backend-react";
 import { api, validateTemplateSections } from "@/lib/backend";
 import type { InspectionTemplate, TemplateSection } from "@/lib/types";
 import {
+  Archive,
   ArrowLeft,
   ChevronDown,
   ChevronUp,
@@ -65,7 +66,7 @@ function friendlyError(err: unknown, fallback: string): string {
   }
   if (msg.includes("TEMPLATE_NAME_REQUIRED")) return "Give the template a name.";
   if (msg.includes("TEMPLATE_IN_USE"))
-    return "This template is used by existing inspections — it cannot be deleted (history keeps its shape). Unpublish it instead.";
+    return "This template is used by existing inspections — it cannot be archived (history keeps its shape). Unpublish it instead.";
   return fallback;
 }
 
@@ -76,7 +77,7 @@ function friendlyError(err: unknown, fallback: string): string {
 export function TemplateList() {
   const templatesQ = useQuery(api.inspections.listTemplatesAll);
   const setActive = useMutation(api.inspections.setTemplateActive);
-  const remove = useMutation(api.inspections.deleteTemplate);
+  const archive = useMutation(api.inspections.archiveTemplate);
   const [busy, setBusy] = useState(false);
 
   const templates = templatesQ ?? [];
@@ -93,13 +94,13 @@ export function TemplateList() {
     }
   };
 
-  const doDelete = async (t: InspectionTemplate) => {
+  const doArchive = async (t: InspectionTemplate) => {
     setBusy(true);
     try {
-      await remove({ templateId: t._id });
-      toast.success("Template deleted.");
+      await archive({ templateId: t._id });
+      toast.success("Template archived — it no longer appears in any list.");
     } catch (err) {
-      toast.error(friendlyError(err, "Could not delete the template."));
+      toast.error(friendlyError(err, "Could not archive the template."));
     } finally {
       setBusy(false);
     }
@@ -170,8 +171,15 @@ export function TemplateList() {
                   <Button variant="outline" size="sm" disabled={busy} onClick={() => void toggleActive(t)}>
                     {t.active ? "Unpublish" : "Publish"}
                   </Button>
-                  <Button variant="outline" size="sm" disabled={busy} onClick={() => void doDelete(t)}>
-                    <Trash2 className="size-3.5" />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    aria-label={`Archive template ${t.name}`}
+                    title="Archive template (never deleted — kept for history)"
+                    onClick={() => void doArchive(t)}
+                  >
+                    <Archive className="size-3.5" />
                   </Button>
                 </div>
               </CardContent>
@@ -486,11 +494,13 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
       </div>
 
       <p className="text-xs leading-relaxed text-muted-foreground">
-        Templates already used by submitted inspections are never deleted
-        (history keeps its shape) — unpublish them instead to stop new use.
-        Every change is attributed in the audit trail. Shape is re-validated
-        server-side on save; this editor cannot persist a template the field
-        app cannot render.
+        Templates already used by submitted inspections can only be
+        unpublished, never archived or deleted (history keeps its shape).
+        Archiving is this app&apos;s delete: the row, its history and its audit
+        trail stay server-side — rows are never removed. Every change is
+        attributed in the audit trail. Shape is re-validated server-side on
+        save; this editor cannot persist a template the field app cannot
+        render.
       </p>
     </div>
   );
@@ -508,7 +518,7 @@ export function TemplateEditor() {
     return (
       <div className="p-6">
         <p className="text-sm text-muted-foreground">
-          Template not found. It may have been deleted.
+          Template not found. It may have been archived.
         </p>
       </div>
     );

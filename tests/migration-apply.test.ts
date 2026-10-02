@@ -46,6 +46,7 @@ describe("migrations apply to a clean database", () => {
     expect(MIGRATIONS).toContain("0002_grants_and_storage.sql");
     expect(MIGRATIONS).toContain("0003_profiles_read_hardening.sql");
     expect(MIGRATIONS).toContain("0005_per_source_report_rate_limit.sql");
+    expect(MIGRATIONS).toContain("0009_audit_integrity.sql");
   });
 
   test("0001 core objects exist (tables, RLS, triggers, RPCs)", async () => {
@@ -85,6 +86,17 @@ describe("migrations apply to a clean database", () => {
     // unchanged afterwards (no duplicate/overwritten policies).
     await db.exec(sql);
     await db.exec(sql);
+    // 0002 is the historical GRANTS file: re-running it re-opens the client
+    // surface (SELECT/INSERT/UPDATE/DELETE to anon + authenticated, and the
+    // permissive default privileges). This suite shares ONE database with
+    // every other test file, so re-apply 0009 (idempotent by design) to
+    // restore the SEC-3 hardened state before any later test observes it.
+    await db.exec(
+      readFileSync(
+        join(ROOT, "supabase", "migrations", "0009_audit_integrity.sql"),
+        "utf8",
+      ),
+    );
     const storage = await db.query<{ n: string }>(
       `select count(*)::text as n from pg_policies
         where schemaname = 'storage' and tablename = 'objects'`,
@@ -399,5 +411,174 @@ describe("RLS policy hygiene (§0.1 regression suite)", () => {
         expect(rows[0].id).toBe(f.evidenceA);
       },
     );
+  });
+});
+
+describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
+  test("0009 is idempotent — it can be re-run without error", async () => {
+    const db = await getDb();
+    const sql = readFileSync(
+      join(ROOT, "supabase", "migrations", "0009_audit_integrity.sql"),
+      "utf8",
+    );
+    await db.exec(sql);
+    await db.exec(sql);
+    // Re-running must not duplicate triggers or revive dropped policies.
+    const trig = await db.query<{ touch: string; audit: string }>(
+      `select
+         (select count(*)::text from pg_trigger
+           where tgname like '%\_touch' and not tgisinternal) as touch,
+         (select count(*)::text from pg_trigger
+           where tgname like '%\_audit' and not tgisinternal) as audit`,
+    );
+    expect(Number(trig.rows[0]?.touch)).toBe(10); // one per domain table
+    expect(Number(trig.rows[0]?.audit)).toBe(10); // exactly one ⇒ "one row per mutation"
+    // "audit append" (0001) stays gone; only the staff-read policy remains.
+    const pol = await db.query<{ n: string }>(
+      `select count(*)::text as n from pg_policies
+        where schemaname = 'public' and tablename = 'audit_log'`,
+    );
+    expect(Number(pol.rows[0]?.n)).toBe(1);
+    // 0008's admin DELETE policy stays dropped — archive is the lifecycle.
+    const tpl = await db.query<{ n: string }>(
+      `select count(*)::text as n from pg_policies
+        where schemaname = 'public' and tablename = 'inspection_templates'
+          and policyname ilike '%delete%'`,
+    );
+    expect(Number(tpl.rows[0]?.n)).toBe(0);
+  });
+
+  test("SEC-1: audit_log grants are read-only for clients", async () => {
+    const db = await getDb();
+    const audit = await db.query<{ p: string | null }>(
+      `select string_agg(privilege_type, ',' order by privilege_type) as p
+         from information_schema.table_privileges
+        where table_schema = 'public' and table_name = 'audit_log'
+          and grantee in ('anon', 'authenticated')`,
+    );
+    // authenticated keeps SELECT ("audit staff read" is the row filter);
+    // anon holds nothing; neither holds any write privilege.
+    expect(audit.rows[0]?.p).toBe("SELECT");
+  });
+
+  test("SEC-3: no DELETE for any client role; anon trimmed to the mirrors", async () => {
+    const db = await getDb();
+    const rows = (
+      await db.query<{
+        t: string;
+        a_del: boolean;
+        a_ins: boolean;
+        n_sel: boolean;
+        n_ins: boolean;
+      }>(
+        `select c.relname::text as t,
+                has_table_privilege('authenticated', c.oid::regclass, 'DELETE') as a_del,
+                has_table_privilege('authenticated', c.oid::regclass, 'INSERT') as a_ins,
+                has_table_privilege('anon', c.oid::regclass, 'SELECT') as n_sel,
+                has_table_privilege('anon', c.oid::regclass, 'INSERT') as n_ins
+           from pg_class c
+           join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = 'public' and c.relkind = 'r'
+          order by c.relname`,
+      )
+    ).rows;
+    expect(rows.length).toBeGreaterThanOrEqual(15);
+    for (const r of rows) {
+      expect(r.a_del, `authenticated must not hold DELETE on ${r.t}`).toBe(false);
+      expect(r.a_ins, `authenticated INSERT on ${r.t}`).toBe(r.t !== "audit_log");
+      expect(r.n_ins, `anon must not hold INSERT on ${r.t}`).toBe(false);
+      const anonReadable = r.t === "meta" || r.t === "report_tracking";
+      expect(r.n_sel, `anon SELECT surface on ${r.t}`).toBe(anonReadable);
+    }
+  });
+
+  test("SEC-2: integrity columns, audit diff column, archive column", async () => {
+    const db = await getDb();
+    const cols = await db.query<{ n: string }>(
+      `select count(*)::text as n from information_schema.columns
+        where table_schema = 'public'
+          and table_name in ('profiles','sites','inspection_templates','inspections',
+                             'findings','corrective_actions','incidents',
+                             'environmental_observations','community_reports','evidence')
+          and column_name in ('updated_at','updated_by','row_version')`,
+    );
+    expect(Number(cols.rows[0]?.n)).toBe(30); // 10 domain tables × 3 columns
+
+    const extra = await db.query<{ n: string }>(
+      `select count(*)::text as n from information_schema.columns
+        where table_schema = 'public'
+          and ((table_name = 'audit_log' and column_name = 'details')
+            or (table_name = 'inspection_templates' and column_name = 'archived_at'))`,
+    );
+    expect(Number(extra.rows[0]?.n)).toBe(2);
+
+    const rv = await db.query<{ column_default: string; is_nullable: string }>(
+      `select column_default, is_nullable from information_schema.columns
+        where table_schema = 'public' and table_name = 'sites'
+          and column_name = 'row_version'`,
+    );
+    expect(String(rv.rows[0]?.column_default)).toContain("1");
+    expect(rv.rows[0]?.is_nullable).toBe("NO");
+  });
+
+  test("SEC-1/2: trigger functions are SECURITY DEFINER; triage writes no manual audit row", async () => {
+    const db = await getDb();
+    const fns = await db.query<{ proname: string; prosecdef: boolean }>(
+      `select p.proname, p.prosecdef
+         from pg_proc p
+         join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public'
+          and p.proname in ('mg_audit_row', 'mg_touch_row')
+        order by p.proname`,
+    );
+    expect(fns.rows.length).toBe(2);
+    // mg_audit_row MUST be definer (clients hold no audit INSERT privilege);
+    // mg_touch_row is definer for search_path/consistency parity.
+    expect(fns.rows.every((r) => r.prosecdef)).toBe(true);
+
+    const triage = await db.query<{ def: string; identity: string }>(
+      `select pg_get_functiondef(p.oid) as def,
+              pg_get_function_identity_arguments(p.oid) as identity
+         from pg_proc p
+         join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname = 'triage_community_report'`,
+    );
+    // Public contract unchanged (0002's EXECUTE grant names this signature),
+    // but the hand-rolled audit INSERT is gone — triggers own the trail.
+    expect(triage.rows[0]?.identity).toBe(
+      "p_report_id uuid, p_decision text, p_note text",
+    );
+    expect(triage.rows[0]?.def).not.toContain("insert into public.audit_log");
+
+    const guard = await db.query<{ def: string }>(
+      `select pg_get_functiondef(p.oid) as def
+         from pg_proc p
+         join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname = 'mg_guard_template_write'`,
+    );
+    expect(guard.rows[0]?.def).toContain("ARCHIVE_ONLY");
+  });
+
+  test("default privileges: future tables start closed", async () => {
+    // 0002's default privileges handed anon+authenticated SELECT/INSERT/
+    // UPDATE/DELETE to every future table. 0009 rewrote them: authenticated
+    // gets SELECT/INSERT/UPDATE (RLS still the row boundary), anon gets
+    // nothing — verified on a freshly created table's inherited ACL.
+    await withRole("postgres", null, async (run) => {
+      await run("create table public._mg0009_acl_probe (id int)");
+      const rows = await run(
+        `select has_table_privilege('anon', 'public._mg0009_acl_probe', 'SELECT') as n_sel,
+                has_table_privilege('anon', 'public._mg0009_acl_probe', 'INSERT') as n_ins,
+                has_table_privilege('authenticated', 'public._mg0009_acl_probe', 'SELECT') as a_sel,
+                has_table_privilege('authenticated', 'public._mg0009_acl_probe', 'INSERT') as a_ins,
+                has_table_privilege('authenticated', 'public._mg0009_acl_probe', 'DELETE') as a_del`,
+      );
+      expect(rows[0].n_sel).toBe(false);
+      expect(rows[0].n_ins).toBe(false);
+      expect(rows[0].a_sel).toBe(true);
+      expect(rows[0].a_ins).toBe(true);
+      expect(rows[0].a_del).toBe(false);
+      await run("drop table public._mg0009_acl_probe");
+    });
   });
 });

@@ -255,8 +255,10 @@ describe("sites", () => {
     expect(row[0].status).toBe("pending_verification");
     expect(String(row[0].code)).toMatch(/^MGL-BOMI-\d{4}$/);
     expect(row[0].operator_name).toBe("AgriLib Mining");
+    // SEC-1 (0009): the audit row is written by the server's mg_audit_row
+    // trigger — the client no longer writes audit_log at all.
     const audit = await adminSql(
-      `select 1 from public.audit_log where action = 'site.create' and entity_id = '${id}'`,
+      `select 1 from public.audit_log where action = 'sites.insert' and entity_id = '${id}'`,
     );
     expect(audit.length).toBe(1);
 
@@ -319,7 +321,13 @@ describe("sites", () => {
     // the total — caught by the AI explanation-consistency test in CI).
     const factorSum = entry.factors.reduce((n, x) => n + (x as { points: number }).points, 0);
     expect(entry.score).toBe(factorSum);
-    void due;
+    // Cleanup: leave siteA exactly as we found it. Suites share this
+    // database and run in arbitrary file order — a leftover past-due CA
+    // would double the overdue factor for any later exact-weight assertion
+    // (caught by the AI explanation suite after an order flip).
+    await adminSql(
+      `delete from public.corrective_actions where id = '${due[0].id}'`,
+    );
   });
 });
 
@@ -660,7 +668,7 @@ describe("stats and users", () => {
     // Deterministic audit row: the just-observed observation write.
     asNational();
     const log = await first(api.stats.recentAuditLog());
-    expect(log!.some((a) => a.action === "observation.report")).toBe(true);
+    expect(log!.some((a) => a.action === "environmental_observations.insert")).toBe(true);
     asOpA();
     const opLog = await first(api.stats.recentAuditLog());
     expect(opLog).toEqual([]);

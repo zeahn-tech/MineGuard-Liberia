@@ -126,8 +126,10 @@ describe("operator portal: respond flow", () => {
       `select operator_note, status from public.corrective_actions where id = '${caId}'`,
     );
     expect(row[0].status).toBe("submitted");
+    // SEC-1 (0009): the response's audit row comes from the server-side
+    // mg_audit_row trigger (one UPDATE ⇒ exactly one row).
     const audit = await adminSql(
-      `select 1 from public.audit_log where action = 'ca.respond' and entity_id = '${caId}'`,
+      `select 1 from public.audit_log where action = 'corrective_actions.update' and entity_id = '${caId}'`,
     );
     expect(audit.length).toBe(1);
   });

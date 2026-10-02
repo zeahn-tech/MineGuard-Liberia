@@ -5,7 +5,10 @@
 // function re-derives authorization from the caller's profile BEFORE touching
 // data (defense in depth); Postgres RLS + guard triggers + security-definer
 // RPCs (supabase/migrations/0001_initial_schema.sql) are the authoritative
-// server-side boundary. Every consequential write appends to audit_log.
+// server-side boundary. Every consequential write is appended to audit_log
+// by the SERVER (mg_audit_row() SECURITY DEFINER triggers — migration
+// 0009_audit_integrity.sql): clients hold no INSERT privilege on the audit
+// trail, so nothing in this file can forge or lose an audit row.
 //
 // Timestamp contract: the UI speaks epoch-ms numbers (the former Firestore
 // shape). Postgres timestamptz values are mapped to ms numbers at this edge,
@@ -336,6 +339,13 @@ async function actorLabel(user: UserProfile): Promise<string> {
   return user.email ?? user.name ?? user.uid;
 }
 
+/** NON-AUTHORITATIVE breadcrumb (SEC-1, migration 0009).
+ *  The authoritative audit trail is written by the server: every mutation
+ *  fires mg_audit_row(), which records the session actor (auth.uid(), never
+ *  client-supplied), entity, timestamp and before/after diff in the SAME
+ *  transaction as the write — so a client crash can neither lose nor forge a
+ *  row. audit_log INSERT/UPDATE/DELETE is revoked from all client roles.
+ *  This helper now only leaves a console trace of what the UI intended. */
 async function logAudit(entry: {
   actorId?: string;
   actorLabel: string;
@@ -344,15 +354,13 @@ async function logAudit(entry: {
   entityId?: string;
   summary: string;
 }) {
-  const { error } = await supabase.from("audit_log").insert({
-    actor_id: entry.actorId ?? null,
-    actor_label: entry.actorLabel,
-    action: entry.action,
-    entity_type: entry.entityType,
-    entity_id: entry.entityId ?? null,
-    summary: entry.summary,
-  });
-  if (error) console.warn("[backend] audit write skipped:", error.message);
+  console.debug(
+    "[audit:breadcrumb]",
+    entry.action,
+    `${entry.entityType}:${entry.entityId ?? "-"}`,
+    entry.summary,
+    `(${entry.actorLabel})`,
+  );
 }
 
 async function getSite(siteId: string): Promise<Site | null> {
@@ -998,7 +1006,8 @@ export const api = {
           .select("*")
           .eq("active", true);
         if (error) throw backendError(error);
-        return (data ?? []).map(mapTemplate);
+        // 0009: archived templates (soft-deleted) leave every surface.
+        return (data ?? []).filter((r) => !r.archived_at).map(mapTemplate);
       }, ["inspection_templates"]),
 
     /** ALL templates regardless of active flag — the template editor's list
@@ -1016,7 +1025,9 @@ export const api = {
           .select("*")
           .order("created_at", { ascending: false });
         if (error) throw backendError(error);
-        return (data ?? []).map(mapTemplate);
+        // 0009: archived templates are gone from the editor list too —
+        // archive is this app's delete (row stays for history/audit).
+        return (data ?? []).filter((r) => !r.archived_at).map(mapTemplate);
       }, ["inspection_templates"]),
 
     /** Create or update a template. The sections JSON is validated here —
@@ -1092,10 +1103,12 @@ export const api = {
       });
     },
 
-    /** Delete a template. The guard trigger allows admin only; templates
-     *  referenced by existing inspections are NOT deleted — the data layer
-     *  refuses with IN_USE so history keeps its template shape. */
-    deleteTemplate: async (args: { templateId: string }) => {
+    /** Archive a template — the soft-delete lifecycle (SEC-2, migration
+     *  0009): client DELETE is revoked outright and the guard trigger
+     *  refuses hard DELETE for everyone, so archiving (archived_at stamp,
+     *  server-audited) is how templates are retired. Refused while
+     *  inspections reference the template so history keeps its shape. */
+    archiveTemplate: async (args: { templateId: string }) => {
       const user = await requireAdminUser();
       const used = await supabase
         .from("inspections")
@@ -1104,18 +1117,20 @@ export const api = {
         .limit(1);
       if (used.error) throw backendError(used.error);
       if ((used.data ?? []).length > 0) throw new Error("TEMPLATE_IN_USE");
+      // archived_at is the only client-supplied piece (wall clock); the
+      // attribution (updated_by) and the audit row are stamped server-side.
       const { error } = await supabase
         .from("inspection_templates")
-        .delete()
+        .update({ archived_at: new Date().toISOString() })
         .eq("id", args.templateId);
       if (error) throw backendError(error);
       await logAudit({
         actorId: user.uid,
         actorLabel: await actorLabel(user),
-        action: "template.delete",
+        action: "template.archive",
         entityType: "inspection_templates",
         entityId: args.templateId,
-        summary: "Template deleted",
+        summary: "Template archived",
       });
     },
 
@@ -2678,13 +2693,7 @@ async function runSeed() {
     );
   if (trkErr) throw backendError(trkErr);
 
-  await supabase.from("audit_log").insert({
-    actor_id: uid,
-    actor_label: label,
-    action: "system.seed",
-    entity_type: "sites",
-    summary: "Dev seed data inserted (synthetic demonstration records only)",
-  });
-
+  // No client-side audit insert here anymore (SEC-1): every seeded row above
+  // already produced a server-written audit_log entry via mg_audit_row().
   await refreshPublicStats();
 }
