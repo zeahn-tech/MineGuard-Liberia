@@ -1,5 +1,101 @@
 # 11 — Implementation Status
 
+**Session:** Security roadmap Session 1 — audit & integrity foundation
+(SEC-1 / SEC-2 / SEC-3)
+**Date:** 2026-10-02
+**Verification:** `bun tsc -b --noEmit` ✓ · `bun test` **273 pass / 4 skip
+(opt-in live) / 0 fail** (277 tests, 19 files) ✓
+
+## This session [2026-10-02 — SEC-1/2/3 audit & integrity foundation]
+
+**Directive item:** SECURITY DEFINER audit triggers on every mutable table
+(actor from the session, never client-supplied; before/after diff; entity;
+timestamp), REVOKE client writes on `audit_log`, demote client `logAudit`,
+integrity columns via trigger, archive instead of DELETE, REVOKE DELETE,
+trim anon grants to the minimum. Acceptance: forged audit insert fails for
+every role; every mutation produces exactly one server-written audit row
+(even if the client crashes); no DELETE for any client role; row_version
+increments; tests added to the rls/migration suites.
+
+**Migration `supabase/migrations/0009_audit_integrity.sql`** (one
+transaction, idempotent, re-runnable):
+
+- **SEC-1 — the audit trail is written only by the server.** New
+  `mg_audit_row()` SECURITY DEFINER trigger, attached `AFTER INSERT OR
+  UPDATE` to all ten domain tables (one trigger ⇒ exactly one row per
+  mutation). Each row carries `actor_id = auth.uid()` derived from the
+  SESSION and filtered through `profiles` (FK-safe; definer/system writes
+  land as `system` / `unregistered:<sub>`), `entity_type` = table,
+  `entity_id` = row id, server `created_at`, and a structured before/after
+  diff in the new `audit_log.details` jsonb (full row on insert; changed
+  business columns only on update — stamp columns excluded), with a human
+  summary incl. `status: old -> new` transitions. Written in the same
+  transaction as the mutation ⇒ a client crash can neither drop nor forge
+  a row. The `"audit append"` policy (0001) is dropped and
+  `INSERT/UPDATE/DELETE on audit_log` is revoked from anon +
+  authenticated (SELECT stays: `"audit staff read"` is the row filter).
+  `triage_community_report()` was re-created WITHOUT its hand-rolled audit
+  INSERT (identity signature unchanged) so triggers are the single writer.
+- **SEC-2 — integrity columns + lifecycle.** `updated_at` / `updated_by` /
+  `row_version` on all ten domain tables, stamped by `mg_touch_row()`
+  BEFORE INSERT/UPDATE which OVERWRITES any client-supplied value (insert
+  ⇒ version 1; update ⇒ old+1, actor = session). Templates gain
+  `archived_at`: `deleteTemplate` → `archiveTemplate` in the data layer,
+  the guard now raises `ARCHIVE_ONLY` on DELETE, and 0008's
+  `"templates delete"` policy is dropped — archive (UPDATE, audited) is
+  the only retirement path, and archived rows leave every list.
+- **SEC-3 — least privilege.** `REVOKE DELETE` on every public table from
+  anon + authenticated; anon trimmed to `SELECT` on the two public mirrors
+  (`meta`, `report_tracking`) plus its documented RPC execute surface
+  (public flows go through SECURITY DEFINER RPCs and need no table
+  grants); `alter default privileges` rewritten so FUTURE tables start
+  closed (authenticated select/insert/update, anon nothing, no anon
+  sequence grants).
+
+**Client (`src/lib/backend.ts`, `src/pages/Templates.tsx`):** `logAudit()`
+is now a non-authoritative console breadcrumb (no DB write — all 24 call
+sites unchanged); the seed's direct audit insert was removed (the triggers
+already audit every seeded row); template lists filter `archived_at`;
+the Templates page archives (Archive icon, aria-label, updated copy).
+
+**Tests — 11 net-new (suite 266 → 277), existing assertions retargeted:**
+- `tests/rls.test.ts` new SEC-1/2/3 block: forged audit insert denied for
+  anon + all five personas (`permission denied for table audit_log`);
+  exactly one audit row per mutation with actor = session user and
+  full before/after details; spoofed `row_version = 77` / foreign
+  `updated_by` overwritten (version 1 → 2 → 3); status transition lands in
+  the diff; DELETE refused at the privilege layer for every client role ×
+  14 tables; even an admin cannot DELETE a template (archive via UPDATE
+  works). Older silent-0 delete/append-only expectations were rewritten as
+  privilege denials — that is the state 0009 actually creates.
+- `tests/migration-apply.test.ts`: 0009 auto-discovered + idempotent
+  (re-run ×2 with stable trigger/policy counts: 10 `_touch`, 10 `_audit`,
+  audit_log policy count 1, no template DELETE policy); grant-matrix
+  assertions (no client DELETE anywhere; anon SELECT exactly
+  {meta, report_tracking}; audit_log read-only for clients); 30 integrity
+  columns + `details` + `archived_at`; trigger functions SECURITY DEFINER;
+  triage carries no manual audit INSERT; default-privilege probe table
+  starts closed. The 0002 idempotency test now re-applies 0009 after its
+  own re-run — re-running the historical grants file was re-opening the
+  client surface inside the shared test database.
+- Action-name assertions moved to server naming: `sites.insert`,
+  `corrective_actions.update`, `environmental_observations.insert`,
+  `inspection_templates.insert/update`.
+- Cross-suite isolation fixes surfaced by a test-file order flip:
+  `backend-edge` now cleans up its overdue-CA and high-severity finding
+  probes (they leaked into the AI explanation suite's exact-weight
+  assertions), and `rate-limit`'s anon contract is now "refused outright"
+  rather than "zero rows".
+
+**Honest follow-ups:** the live project still runs migrations 0001–0008 —
+**owner must apply `supabase db push` (0009) before the deployed database
+matches this posture**; until then the live audit log remains
+client-appendable. Anonymous REST reads of trimmed tables now return
+privilege errors instead of `200 []` (the opt-in live suite accepts both;
+the public mirrors `meta` / `report_tracking` stay `200`).
+
+---
+
 **Session:** Mobile visibility pass — AI feature + admin notifications on
 phones
 **Date:** 2026-09-29

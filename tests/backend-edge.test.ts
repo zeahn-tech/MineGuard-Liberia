@@ -420,6 +420,12 @@ describe("inspections lifecycle", () => {
     // Admin (reviewer) may resolve.
     asAdmin();
     await api.inspections.updateFindingStatus({ findingId: fid, status: "resolved" });
+
+    // Cleanup: leave the fixture as we found it. Suites share this database
+    // and run in arbitrary file order — a leftover high-severity finding on
+    // siteA doubles the high-finding factor for any later exact-weight
+    // assertion (caught by the AI explanation suite after an order flip).
+    await adminSql(`delete from public.findings where id = '${fid}'`);
   });
 
   test("corrective actions: staff opens, operator responds, reviewer closes; respond by non-matching operator FORBIDDEN", async () => {
