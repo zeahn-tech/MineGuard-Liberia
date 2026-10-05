@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// RLS ROLE MATRIX — per-role allow/deny assertions against a real Postgres
+// RLS ROLE MATRIX — per-role allow/deny assertions against a real Postgres (SEC-1/2/3 + SEC-5/SITE-1)
 // seeded from supabase/migrations (docs/11 remediation prompt, Priority 1).
 //
 // Every case impersonates a Postgres role + JWT claims exactly the way
@@ -761,5 +761,380 @@ describe("SEC-2/3: no client role can DELETE — lifecycle only", () => {
         expect(archived[0].updated_by).toBe(f.admin);
       },
     );
+  });
+});
+
+// ===========================================================================
+// SEC-5 / SITE-1 — tenancy keyed on organization UUIDs (migration 0010).
+//
+// Acceptance for the security roadmap's Session 2:
+//   * renamed operator → isolation unchanged (organization_id), display follows
+//   * same-name operators → distinct tenants
+//   * site-scoped staff → exactly the assigned site; none assigned → nothing
+//   * cross-county / cross-tenant reads and writes stay denied
+//   * no behaviour regression: every pre-0010 persona keeps its access
+//
+// Every case runs inside withRole's always-rolled-back transaction, so the
+// shared fixture stays byte-identical for the suites that follow.
+// ===========================================================================
+describe("SEC-5/SITE-1: tenancy on organization UUIDs (0010)", () => {
+  /** Mid-transaction identity swap: re-points request.jwt.claims so ONE
+   *  rolled-back transaction can read as a second persona. */
+  function claims(sub: string): string {
+    return `set local request.jwt.claims = '${JSON.stringify({ sub, role: "authenticated" })}'`;
+  }
+
+  test("renamed operator: isolation keys on organization_id, display follows", async () => {
+    const f = await getFixture();
+    await withRole(
+      "authenticated",
+      { sub: f.admin, role: "authenticated" },
+      async (run) => {
+        const [site] = await run(
+          `select organization_id, operator_name from public.sites where id = '${f.siteA}'`,
+        );
+        expect(site.organization_id).not.toBeNull();
+        expect(site.operator_name).toBe("AgriLib Mining");
+        const orgId = String(site.organization_id);
+
+        // The admin renames the tenant in the registry…
+        const renamed = await run(
+          `update public.organizations set name = 'AgriLib Renamed Ltd'
+            where id = '${orgId}' returning id`,
+        );
+        expect(renamed.length).toBe(1);
+
+        // …the display mirror cascades onto every bound row…
+        const [siteAfter] = await run(
+          `select operator_name from public.sites where id = '${f.siteA}'`,
+        );
+        expect(siteAfter.operator_name).toBe("AgriLib Renamed Ltd");
+        const [profileAfter] = await run(
+          `select operator_name, organization_id from public.profiles where id = '${f.opA}'`,
+        );
+        expect(profileAfter.operator_name).toBe("AgriLib Renamed Ltd");
+        expect(String(profileAfter.organization_id)).toBe(orgId); // key untouched
+        const [sibling] = await run(
+          `select operator_name from public.sites where id = '${f.siteB}'`,
+        );
+        expect(sibling.operator_name).toBe("OreCo Liberia"); // other tenant untouched
+
+        // …and the rename lands in the audit trail as a server-written diff.
+        await run("set local role postgres");
+        const audit = await run(
+          `select actor_id, details from public.audit_log
+            where action = 'organizations.update' and entity_id = '${orgId}'`,
+        );
+        const renames = audit.filter(
+          (r) => j(r.details).after?.name === "AgriLib Renamed Ltd",
+        );
+        expect(renames.length).toBeGreaterThanOrEqual(1);
+        expect(renames[0].actor_id).toBe(f.admin);
+        expect(j(renames[0].details).before?.name).toBe("AgriLib Mining");
+
+        // Isolation is unchanged: the operator still sees exactly the own
+        // tenant — keyed by UUID, not by the (now different) display name.
+        await run("set local role authenticated");
+        await run(claims(f.opA));
+        const opASites = await run("select id from public.sites");
+        expect(opASites.map((r) => String(r.id))).toEqual([f.siteA]);
+        const opAOrgs = await run("select id from public.organizations");
+        expect(opAOrgs.map((r) => String(r.id))).toEqual([orgId]);
+      },
+    );
+  });
+
+  test("same-name operators are distinct tenants (isolation keys on the UUID)", async () => {
+    const f = await getFixture();
+    await withRole(
+      "authenticated",
+      { sub: f.admin, role: "authenticated" },
+      async (run) => {
+        // Two registry entries deliberately sharing one display name…
+        const [o1] = await run(
+          `insert into public.organizations (name) values ('Twin Mining') returning id`,
+        );
+        const [o2] = await run(
+          `insert into public.organizations (name) values ('Twin Mining') returning id`,
+        );
+        expect(String(o1.id)).not.toBe(String(o2.id));
+
+        // …bound to the fixture tenants. `name` is display only from here.
+        await run(
+          `update public.sites set organization_id = '${o1.id}' where id = '${f.siteA}'`,
+        );
+        await run(
+          `update public.sites set organization_id = '${o2.id}' where id = '${f.siteB}'`,
+        );
+        await run(
+          `update public.profiles set organization_id = '${o1.id}' where id = '${f.opA}'`,
+        );
+        await run(
+          `update public.profiles set organization_id = '${o2.id}' where id = '${f.opB}'`,
+        );
+
+        // Both sites now carry the SAME display string…
+        const displays = await run(
+          `select distinct operator_name from public.sites`,
+        );
+        expect(displays.map((r) => r.operator_name)).toEqual(["Twin Mining"]);
+
+        // …yet each operator sees exactly its own tenant, and the registry
+        // itself is scoped: one organization visible, never the sibling.
+        await run(claims(f.opA));
+        const aSites = await run("select id from public.sites");
+        expect(aSites.map((r) => String(r.id))).toEqual([f.siteA]);
+        const aOrgs = await run("select id from public.organizations");
+        expect(aOrgs.map((r) => String(r.id))).toEqual([String(o1.id)]);
+
+        await run(claims(f.opB));
+        const bSites = await run("select id from public.sites");
+        expect(bSites.map((r) => String(r.id))).toEqual([f.siteB]);
+        const bOrgs = await run("select id from public.organizations");
+        expect(bOrgs.map((r) => String(r.id))).toEqual([String(o2.id)]);
+      },
+    );
+  });
+
+  test("scope='site' staff: exactly the assigned sites, nothing with no assignment", async () => {
+    const f = await getFixture();
+    await withRole(
+      "authenticated",
+      { sub: f.admin, role: "authenticated" },
+      async (run) => {
+        // The county inspector is re-scoped to explicit site membership…
+        await run(
+          `update public.profiles set scope = 'site' where id = '${f.county}'`,
+        );
+
+        // …and with no assignment recorded sees NO sites at all.
+        await run(claims(f.county));
+        expect(await count(run, "select count(*) from public.sites")).toBe(0);
+
+        // One grant → exactly that site.
+        await run(claims(f.admin));
+        await run(
+          `insert into public.site_assignments (user_id, site_id, assigned_by)
+            values ('${f.county}', '${f.siteA}', '${f.admin}')`,
+        );
+        await run(claims(f.county));
+        const one = await run("select id from public.sites");
+        expect(one.map((r) => String(r.id))).toEqual([f.siteA]);
+
+        // A second grant extends the visible set; the unique index refuses
+        // a duplicate (user, site) pair outright.
+        await run(claims(f.admin));
+        await run(
+          `insert into public.site_assignments (user_id, site_id, assigned_by)
+            values ('${f.county}', '${f.siteB}', '${f.admin}')`,
+        );
+        let dupMsg = "";
+        try {
+          await run(
+            `insert into public.site_assignments (user_id, site_id)
+              values ('${f.county}', '${f.siteA}') returning 1`,
+          );
+        } catch (e) {
+          dupMsg = e instanceof Error ? e.message : String(e);
+        }
+        expect(dupMsg).toContain("duplicate key");
+
+        await run(claims(f.county));
+        const both = await run("select id from public.sites order by id");
+        expect(both.map((r) => String(r.id))).toEqual([f.siteA, f.siteB]);
+      },
+    );
+  });
+
+  test("cross-county and cross-tenant writes stay denied under the UUID matrix", async () => {
+    const f = await getFixture();
+    // Operator A: site B is invisible (read AND write), and the own site's
+    // registry row is not writable either — operators hold no sites.update.
+    await withRole(
+      "authenticated",
+      { sub: f.opA, role: "authenticated" },
+      async (run) => {
+        expect(
+          await affectedRows(
+            run,
+            `update public.sites set notes = 'probe' where id = '${f.siteB}' returning 1`,
+          ),
+        ).toBe(0);
+        expect(
+          await affectedRows(
+            run,
+            `update public.sites set notes = 'probe' where id = '${f.siteA}' returning 1`,
+          ),
+        ).toBe(0);
+        expect(
+          await countOrDenied(
+            run,
+            `insert into public.sites (code, name, operator_name, county, created_by)
+               values ('LB-EVIL','Evil','Twin Mining','Bomi','${f.opA}') returning 1`,
+          ),
+        ).toBeLessThanOrEqual(0);
+
+        // Moving an own row into the foreign tenant is refused — WITH CHECK
+        // or the row guard, whichever reaches the statement first.
+        let message = "";
+        try {
+          await run(
+            `update public.findings set site_id = '${f.siteB}'
+              where id = '${f.findingA}' returning 1`,
+          );
+        } catch (e) {
+          message = e instanceof Error ? e.message : String(e);
+        }
+        expect(message).toMatch(/row-level security|FORBIDDEN/);
+      },
+    );
+
+    // County inspector: the other county's site is neither read nor written.
+    await withRole(
+      "authenticated",
+      { sub: f.county, role: "authenticated" },
+      async (run) => {
+        expect(
+          await count(run, `select count(*) from public.sites where id = '${f.siteB}'`),
+        ).toBe(0);
+        expect(
+          await affectedRows(
+            run,
+            `update public.sites set notes = 'probe' where id = '${f.siteB}' returning 1`,
+          ),
+        ).toBe(0);
+      },
+    );
+  });
+
+  test("the permission matrix drives the site guard — deleting an admin's row revokes the capability", async () => {
+    const f = await getFixture();
+    await withRole("postgres", null, async (run) => {
+      // Baseline: the admin holds sites.update and the write lands.
+      await run("set local role authenticated");
+      await run(claims(f.admin));
+      const before = await run(
+        `select public.mg_has_permission('sites.update') as v`,
+      );
+      expect(before[0].v).toBe(true);
+      expect(
+        await affectedRows(
+          run,
+          `update public.sites set notes = 'matrix probe'
+            where id = '${f.siteA}' returning 1`,
+        ),
+      ).toBe(1);
+
+      // Revoke the single matrix row (the matrix is migration-managed,
+      // so only direct database maintenance can delete it)…
+      await run("set local role postgres");
+      const deleted = await run(
+        `delete from public.permissions
+          where role = 'admin' and permission = 'sites.update' returning 1`,
+      );
+      expect(deleted.length).toBe(1);
+
+      // …and the SAME admin session instantly loses the capability: the
+      // helper returns false, the policy filters the row away, and new
+      // writes are refused at WITH CHECK — all without editing policy SQL.
+      await run("set local role authenticated");
+      await run(claims(f.admin));
+      const after = await run(
+        `select public.mg_has_permission('sites.update') as v`,
+      );
+      expect(after[0].v).toBe(false);
+      expect(
+        await affectedRows(
+          run,
+          `update public.sites set notes = 'matrix probe 2'
+            where id = '${f.siteA}' returning 1`,
+        ),
+      ).toBe(0);
+      let message = "";
+      try {
+        await run(
+          `insert into public.sites (code, name, operator_name, county, created_by)
+             values ('LB-PERM-PROBE','Perm probe','AgriLib Mining','Bomi','${f.admin}')
+             returning 1`,
+        );
+      } catch (e) {
+        message = e instanceof Error ? e.message : String(e);
+      }
+      expect(message).toContain("row-level security");
+      await run("set local role postgres");
+    });
+  });
+
+  test("the seeded role → permission matrix is what the policies consume", async () => {
+    const f = await getFixture();
+    const matrix: Array<{ sub: string; expect: Record<string, boolean> }> = [
+      {
+        sub: f.admin,
+        expect: {
+          "sites.update": true,
+          "organizations.write": true,
+          "audit.read": true,
+          "records.submit": false,
+        },
+      },
+      {
+        sub: f.national,
+        expect: { "sites.update": false, "reports.triage": true, "audit.read": true },
+      },
+      {
+        sub: f.county,
+        expect: { "audit.read": true, "records.status": true, "sites.update": false },
+      },
+      {
+        sub: f.opA,
+        expect: {
+          "records.submit": true,
+          "audit.read": false,
+          "sites.update": false,
+          "organizations.write": false,
+        },
+      },
+      // No assigned role → mg_profile() is role-less → no matrix rows.
+      { sub: f.guest, expect: { "audit.read": false, "sites.update": false } },
+    ];
+    for (const persona of matrix) {
+      await withRole(
+        "authenticated",
+        { sub: persona.sub, role: "authenticated" },
+        async (run) => {
+          for (const [permission, wanted] of Object.entries(persona.expect)) {
+            const got = await run(
+              `select public.mg_has_permission('${permission}') as v`,
+            );
+            expect(got[0].v, `${persona.sub} / ${permission}`).toBe(wanted);
+          }
+        },
+      );
+    }
+  });
+
+  test("no behaviour regression: every pre-0010 persona keeps its access", async () => {
+    const f = await getFixture();
+    const expected: Array<{
+      role: "anon" | "authenticated";
+      claims: Record<string, unknown> | null;
+      sites: number; // -1 = privilege-denied at the grant layer
+    }> = [
+      { role: "anon", claims: null, sites: -1 },
+      { role: "authenticated", claims: { sub: f.guest, role: "authenticated" }, sites: 0 },
+      { role: "authenticated", claims: { sub: f.opA, role: "authenticated" }, sites: 1 },
+      { role: "authenticated", claims: { sub: f.opB, role: "authenticated" }, sites: 1 },
+      { role: "authenticated", claims: { sub: f.county, role: "authenticated" }, sites: 1 },
+      { role: "authenticated", claims: { sub: f.national, role: "authenticated" }, sites: 2 },
+      { role: "authenticated", claims: { sub: f.admin, role: "authenticated" }, sites: 2 },
+    ];
+    for (const persona of expected) {
+      await withRole(persona.role, persona.claims, async (run) => {
+        const seen = await countOrDenied(run, "select count(*) from public.sites");
+        expect(seen, `sites visible to ${JSON.stringify(persona.claims)}`).toBe(
+          persona.sites,
+        );
+      });
+    }
   });
 });
