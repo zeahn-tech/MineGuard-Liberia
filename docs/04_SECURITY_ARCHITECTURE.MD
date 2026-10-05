@@ -80,6 +80,22 @@ Verified by `tests/evidence-url.test.ts` and live (docs/11).
    future RPC that relies on the privilege layer alone would be anon-callable
    on lineages provisioned before 2026-09-25. New deployments from the
    repository migrations get both layers.
+   **Repo half closed 2026-10-05 (migration 0011):** a probe-verified audit
+   found the repository surface far wider than this entry assumed — anon held
+   all 37 non-extension functions (0002's blanket grant), and the built-in
+   PUBLIC `=X` grant on post-0002 functions DEFEATED 0009's and 0010's
+   per-function `revoke … from anon` (anon could still execute
+   `triage_community_report` and `mg_resolve_organization` through PUBLIC;
+   `ALTER DEFAULT PRIVILEGES` cannot remove the PUBLIC default for new
+   functions on this PostgreSQL). 0011 resets the surface deny-by-default —
+   anon executes exactly the two public flows, authenticated executes the
+   seven documented RPCs + authorization helpers, extensions excluded — and
+   `tests/migration-apply.test.ts` (GAP-0) pins the exact allowlists, forbids
+   PUBLIC grants, and requires every client-reachable SECURITY DEFINER
+   function to self-authorize or be a reviewed helper. The live lineage
+   still runs 0001–0008: until the owner pushes 0009–0011, this entry's
+   original wording (internal checks as the only backstop) remains accurate
+   THERE.
 1. Rate limiting on the public report endpoint. Since migration 0005 the
    `submit_community_report` security-definer RPC enforces a 30-reports-per-
    minute rolling bucket **per client source**: the source is derived

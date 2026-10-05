@@ -48,6 +48,7 @@ describe("migrations apply to a clean database", () => {
     expect(MIGRATIONS).toContain("0005_per_source_report_rate_limit.sql");
     expect(MIGRATIONS).toContain("0009_audit_integrity.sql");
     expect(MIGRATIONS).toContain("0010_organizations_scopes_permissions.sql");
+    expect(MIGRATIONS).toContain("0011_function_execute_surface.sql");
   });
 
   test("0001 core objects exist (tables, RLS, triggers, RPCs)", async () => {
@@ -92,9 +93,10 @@ describe("migrations apply to a clean database", () => {
     // surface (SELECT/INSERT/UPDATE/DELETE to anon + authenticated, and the
     // permissive default privileges — including EXECUTE on every function,
     // which revives mg_resolve_organization for anon). This suite shares ONE
-    // database with every other test file, so re-apply 0009 (SEC-3 hardening)
-    // and 0010 (the anon execute revoke on the tenant-minting helper) to
-    // restore the hardened state before any later test observes it.
+    // database with every other test file, so re-apply 0009 (SEC-3 hardening),
+    // 0010 (the tenant/permission work) and 0011 (the deny-by-default
+    // function surface — 0002's blanket EXECUTE grants must not survive it)
+    // to restore the hardened state before any later test observes it.
     await db.exec(
       readFileSync(
         join(ROOT, "supabase", "migrations", "0009_audit_integrity.sql"),
@@ -104,6 +106,12 @@ describe("migrations apply to a clean database", () => {
     await db.exec(
       readFileSync(
         join(ROOT, "supabase", "migrations", "0010_organizations_scopes_permissions.sql"),
+        "utf8",
+      ),
+    );
+    await db.exec(
+      readFileSync(
+        join(ROOT, "supabase", "migrations", "0011_function_execute_surface.sql"),
         "utf8",
       ),
     );
@@ -452,6 +460,16 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
         where schemaname = 'public' and tablename = 'audit_log'`,
     );
     expect(Number(pol.rows[0]?.n)).toBe(1);
+    // Re-running 0009 DROPS and recreates triage_community_report — a fresh
+    // function materializes the platform-default PUBLIC grant, undoing
+    // 0011's surface for that signature. Re-apply 0011 so the pinned GAP-0
+    // block (and every later suite) observes the hardened surface.
+    await db.exec(
+      readFileSync(
+        join(ROOT, "supabase", "migrations", "0011_function_execute_surface.sql"),
+        "utf8",
+      ),
+    );
     // 0008's admin DELETE policy stays dropped — archive is the lifecycle.
     const tpl = await db.query<{ n: string }>(
       `select count(*)::text as n from pg_policies
@@ -660,5 +678,195 @@ describe("0010 organizations, scopes & permissions (SEC-5/SITE-1)", () => {
       ["permissions", 1],
       ["site_assignments", 3],
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GAP-0 — migration 0011 (deny-by-default function execute surface).
+// docs/04 Gap 0: privileged surfaces must be guarantees, not intent. Before
+// 0011 the intent (0009/0010's per-function revokes) was defeated by the
+// built-in PUBLIC grant — anon executed triage_community_report and
+// mg_resolve_organization despite explicit revokes. These tests pin the
+// surface so the guarantee survives every future migration.
+// ---------------------------------------------------------------------------
+describe("GAP-0: function execute surface (0011)", () => {
+  /** Our own functions — extension members (pgcrypto/pg_trgm planner
+   *  support) are a platform surface, not ours, and are excluded. */
+  const OUR_FNS = `
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and not exists (
+            select 1 from pg_depend d
+             where d.classid = 'pg_proc'::regclass and d.objid = p.oid
+               and d.deptype = 'e')`;
+  const SIG = `p.proname || '(' || pg_catalog.oidvectortypes(p.proargtypes) || ')'`;
+
+  /** The complete, documented anon surface: the two public flows. This set
+   *  includes any PUBLIC-fallback grant (has_function_privilege accounts
+   *  for it), so a recreated function with the platform-default =X fails
+   *  here too. */
+  const ANON_SURFACE = [
+    "refresh_public_stats()",
+    "submit_community_report(text, text, text, text, text, text, double precision, double precision, text)",
+  ];
+
+  /** The complete authenticated surface: the client RPC surface + the
+   *  authorization helpers policies/invoker guards evaluate as the caller. */
+  const AUTH_SURFACE = [
+    "complete_staff_profile(text, text, text, text, text)",
+    "evidence_for_parent(text, uuid)",
+    "evidence_url(uuid, integer)",
+    "mg_any_profile_role()",
+    "mg_can_access_site(uuid)",
+    "mg_can_access_site_row(uuid, text, text, text, uuid)",
+    "mg_has_permission(text)",
+    "mg_is_admin()",
+    "mg_is_reviewer()",
+    "mg_is_staff()",
+    "mg_operator_name()",
+    "mg_profile()",
+    "mg_role()",
+    "provision_user_by_email(text, text, text, text, text)",
+    "refresh_public_stats()",
+    "submit_community_report(text, text, text, text, text, text, double precision, double precision, text)",
+    "triage_community_report(uuid, text, text)",
+  ];
+
+  /** Executed first in this block: it re-applies 0011 (cleaning any surface
+   *  drift earlier re-runs introduced) before the pins observe it. */
+  test("0011 is idempotent — re-runs leave the surface unchanged", async () => {
+    const db = await getDb();
+    const sql = readFileSync(
+      join(ROOT, "supabase", "migrations", "0011_function_execute_surface.sql"),
+      "utf8",
+    );
+    const snap = async () =>
+      (
+        await db.query<{ f: string; pub: boolean; anon: boolean; auth: boolean }>(
+          `select ${SIG} as f,
+                  case when p.proacl is null then true
+                       else exists (select 1 from aclexplode(p.proacl) a
+                                     where a.grantee = 0 and a.privilege_type = 'EXECUTE')
+                  end as pub,
+                  has_function_privilege('anon', p.oid, 'EXECUTE') as anon,
+                  has_function_privilege('authenticated', p.oid, 'EXECUTE') as auth
+             ${OUR_FNS}
+             order by 1`,
+        )
+      ).rows;
+    await db.exec(sql);
+    const first = await snap();
+    await db.exec(sql);
+    expect(await snap()).toEqual(first);
+  });
+
+  test("anon executes exactly the two public flows", async () => {
+    const db = await getDb();
+    const rows = (
+      await db.query<{ f: string }>(
+        `select ${SIG} as f
+           ${OUR_FNS}
+             and has_function_privilege('anon', p.oid, 'EXECUTE')
+           order by 1`,
+      )
+    ).rows.map((r) => r.f);
+    expect(rows).toEqual(ANON_SURFACE);
+    // Machinery is unreachable for anon in particular: 0010's intent is now
+    // a guarantee.
+    expect(rows.join()).not.toContain("mg_resolve_organization");
+    expect(rows.join()).not.toContain("triage_community_report");
+  });
+
+  test("no function retains a PUBLIC execute grant (the =X fallback)", async () => {
+    const db = await getDb();
+    const rows = (
+      await db.query<{ f: string }>(
+        `select ${SIG} as f
+           ${OUR_FNS}
+             and (p.proacl is null
+                  or exists (select 1 from aclexplode(p.proacl) a
+                              where a.grantee = 0 and a.privilege_type = 'EXECUTE'))
+           order by 1`,
+      )
+    ).rows.map((r) => r.f);
+    // A freshly created function materializes the built-in PUBLIC grant on
+    // this PostgreSQL (default privileges cannot express its removal), so
+    // this pin is what forces every future migration to revoke it explicitly.
+    expect(rows).toEqual([]);
+  });
+
+  test("authenticated executes exactly the pinned allowlist", async () => {
+    const db = await getDb();
+    const rows = (
+      await db.query<{ f: string }>(
+        `select ${SIG} as f
+           ${OUR_FNS}
+             and has_function_privilege('authenticated', p.oid, 'EXECUTE')
+           order by 1`,
+      )
+    ).rows.map((r) => r.f);
+    expect(rows).toEqual(AUTH_SURFACE);
+  });
+
+  test("future functions start closed for client roles (default privileges)", async () => {
+    const db = await getDb();
+    const defs = await db.query<{ acl: string }>(
+      `select defaclacl::text as acl
+         from pg_default_acl
+        where defaclnamespace = 'public'::regnamespace
+          and defaclobjtype = 'f'`,
+    );
+    // 0002 granted execute on every future function to anon+authenticated;
+    // 0011 reverses it. An absent row means "no default grants" (the PUBLIC
+    // builtin is separate and covered by the pin above).
+    for (const r of defs.rows) {
+      expect(r.acl).not.toContain("anon=");
+      expect(r.acl).not.toContain("authenticated=");
+    }
+  });
+
+  test("every client-reachable definer function self-authorizes (Gap 0's core)", async () => {
+    const db = await getDb();
+    const rows = (
+      await db.query<{ name: string; args: string; def: string }>(
+        `select p.proname as name,
+                pg_get_function_identity_arguments(p.oid) as args,
+                pg_get_functiondef(p.oid) as def
+           ${OUR_FNS}
+             and p.prosecdef
+             and pg_get_function_result(p.oid) <> 'trigger'
+             and (has_function_privilege('anon', p.oid, 'EXECUTE')
+                  or has_function_privilege('authenticated', p.oid, 'EXECUTE'))
+           order by 1`,
+      )
+    ).rows;
+    // The reachable set must actually be non-trivial, or this assertion is
+    // vacuous.
+    expect(rows.length).toBeGreaterThanOrEqual(15);
+    const PUBLIC_FLOWS = new Set(["submit_community_report", "refresh_public_stats"]);
+    const HELPERS = new Set([
+      "mg_any_profile_role",
+      "mg_can_access_site",
+      "mg_can_access_site_row",
+      "mg_has_permission",
+      "mg_is_admin",
+      "mg_is_reviewer",
+      "mg_is_staff",
+      "mg_operator_name",
+      "mg_profile",
+      "mg_role",
+    ]);
+    const AUTH_PATTERN =
+      /mg_is_admin\(|mg_is_staff\(|mg_is_reviewer\(|mg_has_permission\(|mg_profile\(\)|mg_any_profile_role\(|auth\.uid\(|mg_can_access_site\(/;
+    for (const r of rows) {
+      const ok =
+        PUBLIC_FLOWS.has(r.name) || HELPERS.has(r.name) || AUTH_PATTERN.test(r.def);
+      expect(
+        ok,
+        `client-reachable definer ${r.name}(${r.args}) must carry an internal ` +
+          `authorization check or be a reviewed helper/public flow`,
+      ).toBe(true);
+    }
   });
 });

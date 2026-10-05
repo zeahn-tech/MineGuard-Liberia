@@ -1,5 +1,97 @@
 # 11 — Implementation Status
 
+**Session:** Security roadmap Session 3 — deny-by-default function execute
+surface (docs/04 Gap 0)
+**Date:** 2026-10-05
+**Verification:** `bun tsc -b --noEmit` ✓ · `bun test` **288 pass / 4 skip
+(opt-in live) / 0 fail** (292 tests, 19 files) ✓
+
+## This session [2026-10-05 — Gap 0: function execute surface]
+
+**Directive item:** derive Session 3 from the repository's documented gaps.
+The highest-value repo-side item is docs/04 "Known gaps" item 0 — privileged
+surfaces were INTENT, not guarantee: every RPC must keep its internal
+authorization check because the EXECUTE privilege layer cannot be trusted
+everywhere. Auditing the harness showed the privilege layer was weaker than
+the docs assumed (probe-verified against the test database):
+
+1. 0002's `grant execute on all functions … to anon, authenticated` gave
+   BOTH client roles the entire surface — 37 non-extension functions, against
+   a documented client surface of seven RPCs.
+2. Functions created after 0002's `revoke … from public` materialize the
+   built-in PUBLIC grant (`=X`) on creation — and on this PostgreSQL that
+   grant CANNOT be removed by `ALTER DEFAULT PRIVILEGES` (probe: the default
+   ACL never records it). Consequence: 0009's and 0010's per-function
+   `revoke … from anon` were VAIN — `has_function_privilege('anon',
+   triage_community_report…)` stayed true through the PUBLIC fallback, and
+   anon could execute `mg_resolve_organization` (the tenant-minting helper
+   0010 explicitly closed) the same way.
+3. 0002's default privileges still re-grant every FUTURE function to both
+   client roles (0009's rewrite covered tables and sequences only).
+
+**Migration `supabase/migrations/0011_function_execute_surface.sql`**
+(single transaction, idempotent):
+
+- **A — default privileges reversed for client roles**; the PUBLIC revoke is
+  re-asserted for lineages where it bites (hosted Supabase revokes the PUBLIC
+  default platform-wide — 0002's parity note). On this harness PUBLIC
+  survives for new objects regardless, so THE GUARANTEE IS THE PINNED TESTS,
+  not the default ACL: any future migration that creates a function without
+  an explicit revoke fails the suite.
+- **B — full reset:** `revoke execute on all functions in schema public` from
+  public, anon and authenticated (the owner keeps its privileges — definer
+  bodies and the migration itself are unaffected).
+- **C — extension members restored exactly** to both client roles (pgcrypto/
+  pg_trgm planner support such as `gin_extract_query_trgm` must stay callable
+  or index/ILIKE scans fail for every role; on hosted Supabase these live in
+  `extensions`, outside this surface).
+- **D — anon allowlist = the two public flows** (`submit_community_report`,
+  `refresh_public_stats`). The public mirrors' policies are `using (true)`
+  and call no functions, so anon needs no authorization helpers at all.
+- **E — authenticated allowlist = the seven documented RPCs + the
+  authorization-helper class** (`mg_profile`, `mg_role`, `mg_operator_name`,
+  `mg_is_admin/staff/reviewer`, `mg_has_permission`, `mg_any_profile_role`,
+  `mg_can_access_site(_row)`) — pure reads over claims/matrix that policies
+  and SECURITY INVOKER guards evaluate IN THE CALLING ROLE's context, hence
+  the caller needs EXECUTE. Machinery (`mg_resolve_organization`,
+  `mg_client_ip`) and trigger functions get no client grant: triggers fire
+  without an EXECUTE check, and definer bodies run as their owner.
+**Tests — suite 286 → 292, all green:**
+- NEW GAP-0 block in `tests/migration-apply.test.ts` (six tests): 0011
+  idempotent (re-runs leave the matrix byte-identical); anon executes
+  EXACTLY the two public flows — `has_function_privilege` accounts for the
+  PUBLIC fallback, so a recreated `=X` function fails this pin; zero PUBLIC
+  grants across every non-extension function (the enforcement that forces
+  future migrations to revoke explicitly); the authenticated surface equals
+  the pinned 17; default privileges grant future functions to neither client
+  role; and every client-reachable SECURITY DEFINER function carries an
+  internal authorization pattern (`mg_is_admin`/`mg_is_staff`/`mg_is_reviewer`/
+  `mg_has_permission`/`mg_profile`/`auth.uid`/`mg_can_access_site`) or is a
+  reviewed helper/public flow — Gap 0's core requirement, now mechanical,
+  with a non-vacuity floor on the reachable set.
+- 0002's and 0009's idempotency re-runs now re-apply 0011 afterwards (both
+  blanket-re-grant or drop/recreate functions; the hardened surface must
+  survive them for every later suite).
+- `tests/rate-limit.test.ts`: the four `mg_client_ip` parsing tests moved
+  from the anon role to postgres — 0011 gives that server-side derivation
+  machinery no client callable surface (it runs inside
+  `submit_community_report`'s definer body as the owner), while the anon path
+  through it stays proven by the submit/rate-limit tests.
+
+**Honest follow-ups:** the live project still runs migrations 0001–0008 —
+**the owner must `supabase db push` for 0009–0011**; until then the live
+lineage keeps the blanket function grants, and docs/04 Gap 0's original
+wording (internal checks as the only backstop) remains accurate THERE.
+Post-0011 the repo closes the "intent" half of Gap 0: a future function
+without an explicit revoke fails the suite. Residuals: (a) extension
+functions in the harness's `public` schema keep client execute — platform
+difference, hosted Supabase places them in `extensions`; (b) an event trigger
+that auto-revoked PUBLIC on every `CREATE FUNCTION` was rejected (requires
+superuser — unavailable on hosted Supabase); the pinned-surface test is the
+enforcement instead.
+
+---
+
 **Session:** Security roadmap Session 2 — tenancy on organization UUIDs +
 the role → permission matrix (SEC-5 / SITE-1, §6)
 **Date:** 2026-10-05

@@ -79,8 +79,13 @@ function bucketFor(ip: string): string {
 }
 
 describe("mg_client_ip (source derivation, server-side only)", () => {
+  // 0011 (Gap 0): mg_client_ip is server-side derivation machinery — it is
+  // invoked only inside submit_community_report's SECURITY DEFINER body (as
+  // the function owner), so it has NO client callable surface. The parsing
+  // contract itself is asserted here in the migration's own context; the
+  // anon path through it is proven by the submit/rate-limit tests below.
   test("derives the source from the PostgREST-injected headers GUC", async () => {
-    await withRole("anon", null, async (run) => {
+    await withRole("postgres", null, async (run) => {
       await run(xff(IP_A));
       const rows = await run(`select public.mg_client_ip() as ip`);
       expect(rows[0]?.ip).toBe(IP_A);
@@ -88,7 +93,7 @@ describe("mg_client_ip (source derivation, server-side only)", () => {
   });
 
   test("falls back to x-real-ip when no x-forwarded-for chain exists", async () => {
-    await withRole("anon", null, async (run) => {
+    await withRole("postgres", null, async (run) => {
       await run(`set local request.headers = '{"x-real-ip":"198.51.100.7"}'`);
       const rows = await run(`select public.mg_client_ip() as ip`);
       expect(rows[0]?.ip).toBe("198.51.100.7");
@@ -96,7 +101,7 @@ describe("mg_client_ip (source derivation, server-side only)", () => {
   });
 
   test("uses the FIRST x-forwarded-for hop (the connecting client)", async () => {
-    await withRole("anon", null, async (run) => {
+    await withRole("postgres", null, async (run) => {
       await run(
         `set local request.headers = '{"x-forwarded-for":"${IP_A}, 10.0.0.9, 10.0.0.8"}'`,
       );
@@ -106,7 +111,7 @@ describe("mg_client_ip (source derivation, server-side only)", () => {
   });
 
   test("returns empty (→ global bucket) when no headers are present", async () => {
-    await withRole("anon", null, async (run) => {
+    await withRole("postgres", null, async (run) => {
       await run(`set local request.headers = ''`);
       const rows = await run(`select public.mg_client_ip() as ip`);
       expect(rows[0]?.ip === null || rows[0]?.ip === "").toBe(true);
