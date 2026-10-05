@@ -90,6 +90,16 @@ that auto-revoked PUBLIC on every `CREATE FUNCTION` was rejected (requires
 superuser — unavailable on hosted Supabase); the pinned-surface test is the
 enforcement instead.
 
+**Live application [2026-10-05]:** the owner applied 0009–0011 through the
+Supabase SQL Editor. 0011's first run aborted with SQLSTATE 42883 —
+`function public.evidence_for_parent(text, uuid) does not exist` — because
+the live project runs a pre-repository lineage that does not carry that
+signature. Grants were rewritten to issue per function NAME over whichever
+overloads the applying lineage has, skipping absent names with a NOTICE
+(migration header bullet F); on the repository lineage the outcome is
+byte-identical and all GAP-0 pins stay green (suite 288/4/0 re-verified
+after the change).
+
 ---
 
 **Session:** Security roadmap Session 2 — tenancy on organization UUIDs +

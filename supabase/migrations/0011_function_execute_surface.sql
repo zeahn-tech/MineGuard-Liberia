@@ -59,6 +59,15 @@
 --      Machinery (mg_resolve_organization, mg_client_ip) and trigger
 --      functions get NO client grant: triggers are fired by the executor
 --      without an EXECUTE check, and definer bodies run as their owner.
+--   F  Grants are issued per function NAME over the overloads that exist in
+--      the APPLYING lineage — never as hard-coded signatures. The live
+--      project runs a pre-repository lineage where
+--      `evidence_for_parent(text, uuid)` does not exist; the first live run
+--      of this file aborted with SQLSTATE 42883. Names absent from a lineage
+--      are skipped with a NOTICE instead of failing the migration. On the
+--      repository lineage every name exists and the GAP-0 pins assert the
+--      resulting surface exactly, so a skip can never weaken the guarantee
+--      this migration makes in the repo.
 --
 -- Acceptance (tests/migration-apply.test.ts, describe "GAP-0"):
 --   * anon executes EXACTLY the two public flows (PUBLIC fallback included)
@@ -120,34 +129,77 @@ end
 $mg$;
 
 -- ---------------------------------------------------------------------------
--- D. anon — the public flows only. Signed-out callers can submit a community
---    report and read the public mirrors; nothing else is invokable.
+-- D/E. Client allowlists — granted per function NAME (see header bullet F).
+--      D. anon = the two public flows (their mirrors' policies are
+--          `using (true)` and call no functions, so anon needs no
+--          authorization helpers).
+--      E. authenticated = the seven documented RPCs + the authorization
+--          helpers (pure reads over claims/matrix that policies and
+--          SECURITY INVOKER guards evaluate IN THE CALLING ROLE's context,
+--          hence the caller needs EXECUTE).
 -- ---------------------------------------------------------------------------
-grant execute on function public.submit_community_report(text, text, text, text, text, text, double precision, double precision, text)
-  to anon, authenticated;
-grant execute on function public.refresh_public_stats() to anon, authenticated;
+do $mg$
+declare
+  fn      record;
+begin
+  -- D. anon (+ authenticated) — the public flows.
+  for fn in
+    select p.proname, pg_catalog.oidvectortypes(p.proargtypes) as arg_types
+      from pg_catalog.pg_proc p
+      join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.prokind = 'f'
+       and p.proname in ('submit_community_report', 'refresh_public_stats')
+  loop
+    execute format(
+      'grant execute on function public.%I(%s) to anon, authenticated',
+      fn.proname, fn.arg_types);
+  end loop;
 
--- ---------------------------------------------------------------------------
--- E. authenticated — the documented client RPC surface + authorization
---    helpers. Helpers are pure reads (claims or the permission/visibility
---    matrix) with no side effects; policies and invoker guards call them in
---    the calling role's context, so the calling role needs EXECUTE.
--- ---------------------------------------------------------------------------
-grant execute on function public.complete_staff_profile(text, text, text, text, text) to authenticated;
-grant execute on function public.provision_user_by_email(text, text, text, text, text) to authenticated;
-grant execute on function public.evidence_for_parent(text, uuid) to authenticated;
-grant execute on function public.evidence_url(uuid, integer) to authenticated;
-grant execute on function public.triage_community_report(uuid, text, text) to authenticated;
+  -- E. authenticated — documented RPC surface + authorization helpers.
+  for fn in
+    select p.proname, pg_catalog.oidvectortypes(p.proargtypes) as arg_types
+      from pg_catalog.pg_proc p
+      join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.prokind = 'f'
+       and p.proname in (
+             'complete_staff_profile', 'provision_user_by_email',
+             'evidence_for_parent', 'evidence_url',
+             'triage_community_report', 'submit_community_report',
+             'refresh_public_stats', 'mg_profile', 'mg_role',
+             'mg_operator_name', 'mg_is_admin', 'mg_is_staff',
+             'mg_is_reviewer', 'mg_has_permission', 'mg_any_profile_role',
+             'mg_can_access_site', 'mg_can_access_site_row')
+  loop
+    execute format(
+      'grant execute on function public.%I(%s) to authenticated',
+      fn.proname, fn.arg_types);
+  end loop;
 
-grant execute on function public.mg_profile() to authenticated;
-grant execute on function public.mg_role() to authenticated;
-grant execute on function public.mg_operator_name() to authenticated;
-grant execute on function public.mg_is_admin() to authenticated;
-grant execute on function public.mg_is_staff() to authenticated;
-grant execute on function public.mg_is_reviewer() to authenticated;
-grant execute on function public.mg_has_permission(text) to authenticated;
-grant execute on function public.mg_any_profile_role() to authenticated;
-grant execute on function public.mg_can_access_site(uuid) to authenticated;
-grant execute on function public.mg_can_access_site_row(uuid, text, text, text, uuid) to authenticated;
+  -- Lineage report: names this lineage does not carry (informational — the
+  -- repository lineage produces no notices here).
+  for fn in
+    select u.proname
+      from unnest(array[
+             'submit_community_report', 'refresh_public_stats',
+             'complete_staff_profile', 'provision_user_by_email',
+             'evidence_for_parent', 'evidence_url',
+             'triage_community_report', 'mg_profile', 'mg_role',
+             'mg_operator_name', 'mg_is_admin', 'mg_is_staff',
+             'mg_is_reviewer', 'mg_has_permission', 'mg_any_profile_role',
+             'mg_can_access_site', 'mg_can_access_site_row'
+           ]) as u(proname)
+     where not exists (
+             select 1
+               from pg_catalog.pg_proc p
+               join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+              where n.nspname = 'public' and p.proname = u.proname)
+  loop
+    raise notice '0011: % is not present in this lineage — grant skipped',
+      fn.proname;
+  end loop;
+end
+$mg$;
 
 commit;
