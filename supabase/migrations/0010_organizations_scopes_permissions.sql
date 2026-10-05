@@ -114,16 +114,19 @@ begin;
 --    so it is dropped here and recreated verbatim immediately after the
 --    repoint. Policy count and behaviour are unchanged.
 -- ---------------------------------------------------------------------------
-drop policy if exists "inspections read" on public.inspections;
-
-do $do$
+drop policy if exists "inspections read" on public.inspections;do $do$
 begin
+  -- to_regtype() instead of '::regtype': on a lineage whose schema predates
+  -- the enum (live profiles.scope was TEXT), the cast itself would raise
+  -- 42704 and abort the migration. NULL never equals an enumtypid, so the
+  -- guard degrades to "type missing → nothing to rename" and the create-if-
+  -- missing block below provisions the canonical type instead.
   if exists (select 1 from pg_enum e
-              where e.enumtypid = 'public.user_scope'::regtype
+              where e.enumtypid = to_regtype('public.user_scope')
                 and e.enumlabel = 'site')
      and not exists (select 1 from pg_enum e
-                      where e.enumtypid = 'public.user_scope'::regtype
-                        and e.enumlabel = 'operator') then
+                      where e.enumtypid = to_regtype('public.user_scope')
+                and e.enumlabel = 'operator') then
     execute 'alter type public.user_scope rename to user_scope_v1';
   end if;
 end $do$;
@@ -136,6 +139,13 @@ begin
     execute 'create type public.user_scope as enum (''national'',''regional'',''county'',''district'',''site'',''operator'')';
   end if;
 end $do$;
+
+-- The live pre-repository lineage defined profiles.scope as TEXT guarded by
+-- a check constraint ('national','county','site'); the repository lineage
+-- has the enum with no check. Drop the text-era check first (no-op where it
+-- never existed): its expression cannot survive the column's type change,
+-- and section B must be able to write scope='operator' afterwards.
+alter table public.profiles drop constraint if exists profiles_scope_check;
 
 alter table public.profiles
   alter column scope type public.user_scope
@@ -153,6 +163,92 @@ begin
     execute 'drop type public.user_scope_v1';
   end if;
 end $do$;
+
+-- Lineage parity for the two profile-writing RPCs. A lineage built from the
+-- pre-repository schema still carries (a) complete_staff_profile with a
+-- text-era body — `scope = p_scope` cannot assign text to the freshly
+-- repointed enum and would fail at call time, breaking profile completion
+-- and first-admin bootstrap — and (b) provision_user_by_email whose SECOND
+-- ARGUMENT is enum-typed (p_role public.user_role). Recreate both in the
+-- repository form; the enum-typed provision overload is dropped first,
+-- because leaving it beside the text-typed one would make PostgREST refuse
+-- the call with PGRST203 (more than one function matches).
+drop function if exists public.provision_user_by_email(text, public.user_role, text, text, text);
+
+create or replace function public.complete_staff_profile(
+  p_job_title    text,
+  p_organization text,
+  p_scope        text default 'national',
+  p_county       text default null,
+  p_operator_name text default null
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $mg$
+declare
+  v_first_admin boolean;
+begin
+  select not exists (select 1 from public.profiles where role = 'admin')
+    into v_first_admin;
+
+  update public.profiles
+    set job_title = p_job_title,
+        organization = p_organization,
+        scope = p_scope::user_scope,
+        county = p_county,
+        operator_name = p_operator_name,
+        profile_complete = true,
+        role = case when v_first_admin then 'admin'::user_role else role end
+    where id = auth.uid();
+
+  if not found then
+    raise exception 'UNREGISTERED_USER';
+  end if;
+end;
+$mg$;
+
+create or replace function public.provision_user_by_email(
+  p_email         text,
+  p_role          text,
+  p_scope         text,
+  p_county        text default null,
+  p_operator_name text default null
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $mg$
+declare
+  v_uid uuid;
+begin
+  if not public.mg_is_admin() then
+    raise exception 'FORBIDDEN: admin required';
+  end if;
+
+  select id into v_uid from public.profiles
+    where lower(email) = lower(p_email) limit 1;
+
+  if v_uid is null then
+    raise exception 'USER_NOT_FOUND: no profile exists for that email yet (the person must sign up first)';
+  end if;
+
+  update public.profiles
+    set role = p_role::user_role,
+        scope = p_scope::user_scope,
+        county = p_county,
+        operator_name = p_operator_name,
+        profile_complete = true
+    where id = v_uid;
+end;
+$mg$;
+
+-- 0002's explicit execute surface for the recreated signatures (the dropped
+-- overload carried its own grants away where it existed).
+grant execute on function public.complete_staff_profile(text, text, text, text, text) to authenticated;
+grant execute on function public.provision_user_by_email(text, text, text, text, text) to authenticated;
+revoke execute on function public.complete_staff_profile(text, text, text, text, text) from anon;
+revoke execute on function public.provision_user_by_email(text, text, text, text, text) from anon;
 
 -- Recreated verbatim (0001): same name, same qualification, same logic —
 -- re-bound to the repointed column.

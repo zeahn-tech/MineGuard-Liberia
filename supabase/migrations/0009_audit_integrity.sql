@@ -346,7 +346,32 @@ drop policy if exists "templates delete" on public.inspection_templates;
 -- exactly one row with the session actor and the full status diff — the
 -- manual row was a second, weaker copy (and the only writer that could be
 -- skipped if a future branch forgot it). Function signature unchanged.
+--
+-- Signature-divergence guard: a lineage built from the pre-repository
+-- schema carries an ENUM-typed overload (p_decision report_status) instead
+-- of the text one. CREATE OR REPLACE cannot change argument types — it
+-- would silently leave TWO overloads beside each other and PostgREST would
+-- refuse every call with PGRST203 (the exact defect the live lineage's own
+-- 0009 hotfix repaired). Drop every existing overload first; the recreate
+-- below is the single, authoritative signature.
 -- ---------------------------------------------------------------------------
+do $do$
+declare
+  old_fn record;
+begin
+  for old_fn in
+    select p.oid,
+           pg_catalog.oidvectortypes(p.proargtypes) as arg_types
+      from pg_catalog.pg_proc p
+      join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.proname = 'triage_community_report'
+       and p.prokind = 'f'
+  loop
+    execute format('drop function public.triage_community_report(%s)', old_fn.arg_types);
+  end loop;
+end $do$;
+
 create or replace function public.triage_community_report(
   p_report_id uuid,
   p_decision  text,
@@ -358,6 +383,7 @@ security definer set search_path = public
 as $$
 declare
   v_report public.community_reports%rowtype;
+  v_status_type text;
 begin
   if not public.mg_is_reviewer() then
     raise exception 'FORBIDDEN: reviewer role required';
@@ -365,12 +391,23 @@ begin
   select * into v_report from public.community_reports where id = p_report_id;
   if not found then raise exception 'NOT_FOUND'; end if;
 
-  update public.community_reports
-    set status = p_decision::report_state,
-        triage_note = p_note,
-        reviewed_by_id = auth.uid(),
-        reviewed_at = now()
-    where id = p_report_id;
+  -- The status column's enum type is lineage-specific (report_state in the
+  -- repository schema, report_status in the live pre-repository schema), so
+  -- the cast target is resolved from the column itself at call time instead
+  -- of being baked into the body — a static ::report_state would compile
+  -- fine on creation and then fail at first use on the other lineage.
+  select atttypid::regtype::text into v_status_type
+    from pg_attribute
+   where attrelid = 'public.community_reports'::regclass
+     and attname = 'status' and not attisdropped;
+
+  execute 'update public.community_reports
+              set status = $1::' || v_status_type || ',
+                  triage_note = $2,
+                  reviewed_by_id = $3,
+                  reviewed_at = now()
+            where id = $4'
+    using p_decision, p_note, auth.uid(), p_report_id;
 
   update public.report_tracking
     set status = p_decision
@@ -379,6 +416,11 @@ begin
   -- actor = auth.uid(), details carry submitted -> triaged status diff).
 end;
 $$;
+
+-- Re-assert 0002's execute surface for the recreated signature: dropping
+-- the old overload took its grants with it on lineages that had them.
+grant execute on function public.triage_community_report(uuid, text, text) to authenticated;
+revoke execute on function public.triage_community_report(uuid, text, text) from anon;
 
 -- ---------------------------------------------------------------------------
 -- SEC-1e: nobody but the server writes audit_log.
