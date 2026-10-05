@@ -63,6 +63,15 @@ tenant isolation.
 **Rationale:** Matches the operating model (National → County → Site; operator
 org) without a permission matrix that no one can audit. Extensible: adding a
 scope or role is a schema + authz change.
+**Amended 2026-10-05 (migration 0010, doc 11 SEC-5/SITE-1):** isolation now
+keys on the `organization_id` UUID — `operator_name` survives only as a
+display/compatibility mirror, with name equality kept solely as the legacy
+fallback for profiles not yet bound to an organization (rename- and
+duplicate-name-safe, which string equality was not). Capabilities moved into
+an *auditable* `permissions(role, permission)` matrix consumed by
+`mg_has_permission()` — rows change by migration only, never by client write.
+The four roles + geographic scope model itself is unchanged (the original
+decision point stands); only the two mechanisms above were replaced.
 
 ## ADR-04 — Offline queue in localStorage, idempotent server dedupe
 **Decision:** Field writes persist locally first; submissions carry a `clientRef`;

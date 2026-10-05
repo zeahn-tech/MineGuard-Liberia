@@ -1007,10 +1007,10 @@ describe("SEC-5/SITE-1: tenancy on organization UUIDs (0010)", () => {
     );
   });
 
-  test("the permission matrix drives the site guard — deleting an admin's row revokes the capability", async () => {
+  test("the permission matrix drives the site guard — deleting an admin's rows revokes the capability", async () => {
     const f = await getFixture();
     await withRole("postgres", null, async (run) => {
-      // Baseline: the admin holds sites.update and the write lands.
+      // Baseline: the admin holds both site-registry grants and the write lands.
       await run("set local role authenticated");
       await run(claims(f.admin));
       const before = await run(
@@ -1025,8 +1025,9 @@ describe("SEC-5/SITE-1: tenancy on organization UUIDs (0010)", () => {
         ),
       ).toBe(1);
 
-      // Revoke the single matrix row (the matrix is migration-managed,
-      // so only direct database maintenance can delete it)…
+      // Revoke the single matrix row that gates updates (the matrix is
+      // migration-managed, so only direct database maintenance can delete
+      // it)…
       await run("set local role postgres");
       const deleted = await run(
         `delete from public.permissions
@@ -1034,9 +1035,9 @@ describe("SEC-5/SITE-1: tenancy on organization UUIDs (0010)", () => {
       );
       expect(deleted.length).toBe(1);
 
-      // …and the SAME admin session instantly loses the capability: the
-      // helper returns false, the policy filters the row away, and new
-      // writes are refused at WITH CHECK — all without editing policy SQL.
+      // …and the SAME admin session instantly loses THAT capability: the
+      // helper returns false and the policy filters the row away — all
+      // without editing policy SQL.
       await run("set local role authenticated");
       await run(claims(f.admin));
       const after = await run(
@@ -1050,17 +1051,43 @@ describe("SEC-5/SITE-1: tenancy on organization UUIDs (0010)", () => {
             where id = '${f.siteA}' returning 1`,
         ),
       ).toBe(0);
+
+      // The two gates are independent: the sibling sites.insert row is
+      // untouched, so a NEW registry row still lands…
+      expect(
+        await affectedRows(
+          run,
+          `insert into public.sites (code, name, operator_name, county, created_by)
+             values ('LB-PERM-PROBE','Perm probe','AgriLib Mining','Bomi','${f.admin}')
+             returning 1`,
+        ),
+      ).toBe(1);
+
+      // …until ITS row goes too: the site guard (which answers an
+      // authenticated INSERT before the WITH CHECK expression does —
+      // probe-verified on this harness) refuses the write outright.
+      await run("set local role postgres");
+      const deletedInsert = await run(
+        `delete from public.permissions
+          where role = 'admin' and permission = 'sites.insert' returning 1`,
+      );
+      expect(deletedInsert.length).toBe(1);
+      await run("set local role authenticated");
+      await run(claims(f.admin));
+      expect(
+        (await run(`select public.mg_has_permission('sites.insert') as v`))[0].v,
+      ).toBe(false);
       let message = "";
       try {
         await run(
           `insert into public.sites (code, name, operator_name, county, created_by)
-             values ('LB-PERM-PROBE','Perm probe','AgriLib Mining','Bomi','${f.admin}')
+             values ('LB-PERM-PROBE-2','Perm probe 2','AgriLib Mining','Bomi','${f.admin}')
              returning 1`,
         );
       } catch (e) {
         message = e instanceof Error ? e.message : String(e);
       }
-      expect(message).toContain("row-level security");
+      expect(message).toContain("FORBIDDEN");
       await run("set local role postgres");
     });
   });

@@ -23,12 +23,14 @@ with required reviewers).
 - Supabase project (Postgres + Auth + Storage under the Supabase project;
   migrations in `supabase/migrations/` are the schema source of truth):
   - **Postgres** — all domain data (tables per doc 03), RLS-enforced.
-    **Migration state [2026-10-02]:** repo carries 0001–0009; the live
+    **Migration state [2026-10-05]:** repo carries 0001–0010; the live
     project has 0001–0008 applied — **0009 (audit & integrity foundation,
-    doc 11 SEC-1/2/3) still needs `supabase db push` by the owner.** Until
-    it lands, the live database keeps the old client-appendable
-    `audit_log` surface and client DELETE grants; do not assume the repo
-    posture is live.
+    doc 11 SEC-1/2/3) and 0010 (organizations/scopes/permissions tenancy,
+    doc 11 SEC-5/SITE-1) still need `supabase db push` by the owner.** Until
+    they land, the live database keeps the old client-appendable
+    `audit_log` surface, client DELETE grants, display-string tenancy with
+    no permission matrix, and the unimplemented `site` scope; do not assume
+    the repo posture is live.
   - **Auth (GoTrue)** — email/password; TOTP MFA supported (doc 04, Gap #4).
   - **Storage** — evidence media under the uid-first-folder contract.
 - No standalone API servers; no containers to manage.

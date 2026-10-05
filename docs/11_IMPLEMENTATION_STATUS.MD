@@ -1,5 +1,123 @@
 # 11 — Implementation Status
 
+**Session:** Security roadmap Session 2 — tenancy on organization UUIDs +
+the role → permission matrix (SEC-5 / SITE-1, §6)
+**Date:** 2026-10-05
+**Verification:** `bun tsc -b --noEmit` ✓ · `bun test` **282 pass / 4 skip
+(opt-in live) / 0 fail** (286 tests, 19 files) ✓
+
+## This session [2026-10-05 — SEC-5/SITE-1 organizations, scopes & permissions]
+
+**Directive item:** Session 2 of the security roadmap: tenancy keyed on a
+stable organization UUID instead of a mutable display string; implement the
+previously unimplemented `site` scope; move the role → capability mapping out
+of inline policy text into an inspectable, migration-managed permission matrix.
+Acceptance: renamed operator → isolation unchanged (display follows);
+same-name operators → distinct tenants; site-scoped staff → exactly the
+assigned sites; cross-county/cross-tenant writes denied; no behaviour
+regression for any pre-0010 persona.
+
+**Migration `supabase/migrations/0010_organizations_scopes_permissions.sql`**
+(single transaction, idempotent — re-run now pinned by a dedicated block in
+`tests/migration-apply.test.ts`):
+
+- **A/B — `user_scope` grows to six values** (`national, regional, county,
+  district, site, operator`). `ALTER TYPE ADD VALUE` cannot be *used* in the
+  same transaction on an existing column (probe-verified on this harness), so
+  the enum is renamed aside, recreated canonically, repointed, and the
+  predecessor dropped once nothing depends on it (the "inspections read"
+  policy expression pins `profiles.scope` in pg_depend, so that policy is
+  dropped and recreated verbatim — same count, same behaviour). Operator
+  accounts provisioned with the old, unimplemented `site` scope move to
+  `operator`; `site` now means staff bound through `site_assignments`.
+- **C — `permissions(role, permission)`** seeds the matrix for all four roles
+  (18 rows) and `mg_has_permission()` (SECURITY DEFINER, stable) becomes the
+  single gate: sites insert/update, organizations, admin_areas,
+  site_assignments and the audit-read policy consume it instead of inline
+  role tests. Clients hold SELECT only — there is deliberately no write
+  policy: the matrix changes by migration, never by client write.
+- **D — `admin_areas`**: configurable national → region → county → district →
+  community hierarchy (self-referencing `parent_id`, `level` as a checked text
+  column so the level set stays configurable), backfilled from the geography
+  already in the data; regional and district scopes resolve through it.
+- **E/F — `organizations` + `site_assignments`**: the operator registry,
+  keyed by UUID with `name` deliberately NOT unique, and explicit staff↔site
+  grants (the implemented `site` scope). Both tables join 0009's audit trail
+  and carry the integrity stamps.
+- **G/H — `organization_id` becomes the tenant key** on sites and profiles;
+  `operator_name` survives as a compatibility/display mirror maintained by
+  sync triggers. A name-only insert (the existing `api.sites.create`
+  contract) resolves or creates the organization by name; once bound,
+  `operator_name` is re-derived from the organization on every write; an
+  organization rename cascades the display name onto sites and profiles under
+  a transaction-local flag so a same-named sibling can never be re-resolved
+  by mistake.
+- **I — `mg_can_access_site_row(id, county, district, operator, org)`**: the
+  scope matrix computed over the row's OWN columns (keeps 0007's
+  INSERT…RETURNING fix): admin/national → all; county → own county;
+  regional/district → through admin_areas; any staff scope + an explicit
+  assignment → that site; operator → organization UUID, with name equality
+  only as the legacy fallback for profiles not yet bound. The uuid form, the
+  sites policies, and the guards are rebuilt on it; the obsolete two-argument
+  row form is dropped so no caller can silently use the pre-0010 matrix.
+  `mg_guard_site_write` moves to SECURITY INVOKER + `current_user` (the
+  0004-proven discrimination) so this migration's backfill and ops scripts
+  pass while client sessions stay permission-gated (the DELETE refusal is
+  unchanged — belt behind SEC-3's revoke). "audit staff read" reads the
+  permission set too (same roles the old `mg_is_staff()` granted).
+- **J — profile guard parity**: `organization_id` and `scope_area_id` join the
+  admin-only column list — a self-service profile edit can never move its own
+  tenant key.
+- **K/L — backfill and privileges**: geography → one organization per
+  distinct operator name → sites/profiles bound (every statement
+  `where not exists`, so re-runs are no-ops); EXECUTE on the policy helpers
+  for client roles, and REVOKE EXECUTE on `mg_resolve_organization` plus the
+  sync/guard triggers from anon and authenticated — no callable surface to
+  mint organizations or bypass the guards.
+**Client (`src/lib/types.ts`, `src/lib/backend.ts`):** `Scope` grows to the
+six values; `organizationId` on `UserProfile`/`Site` documented as the tenant
+key (display string is a mirror); `canAccessSite` keys operator tenancy on the
+UUID (name compare only as legacy fallback) and lets regional/district/site
+scopes pass client-side — RLS already filtered every row that reaches the
+client; profile/site mappers expose `organization_id`.
+
+**Tests — suite 277 → 286, all green:**
+- `tests/rls.test.ts` new SEC-5/SITE-1 block: org rename cascades to sites
+  and profiles (siblings untouched) with the server-written audit diff;
+  same-name organizations remain distinct tenants; `scope='site'` sees
+  nothing until assigned, then exactly the granted sites (the unique index
+  refuses duplicate pairs); cross-county and cross-tenant writes stay denied
+  under the UUID matrix; the seeded matrix is what the policies consume; every
+  pre-0010 persona keeps its access.
+- The adversarial permission-revocation case as drafted could not pass and
+  was corrected this session: it revoked only `sites.update` yet also demanded
+  the subsequent INSERT be refused (the two grants are independent gates),
+  and it expected `row-level security` in the error while — probe-verified on
+  this harness — the site guard raises `FORBIDDEN` *before* the WITH CHECK
+  expression is evaluated on INSERT. It now revokes each grant in turn and
+  pins both gates: helper → false, USING filters the update to 0 rows, the
+  sibling insert still lands, then the `sites.insert` row goes and inserts are
+  refused outright. No migration change was needed.
+- `tests/migration-apply.test.ts`: 0010 auto-discovered and counted (19
+  tables, all RLS-enabled); its re-run restores the hardened grant surface
+  after 0002's re-run; NEW 0010 block — idempotent re-runs mint no duplicate
+  organizations/admin_areas/matrix rows, the matrix stays at 18 rows, the
+  scope enum stays at six values, and the policy surface is recreated not
+  duplicated (3 organizations / 3 site_assignments / 3 admin_areas / 1
+  permissions).
+
+**Honest follow-ups:** the live project still runs migrations 0001–0008 —
+**the owner must `supabase db push` for BOTH 0009 and 0010** before the
+deployed database matches this posture; until then live tenancy is still the
+display-string model, `site` scope remains unimplemented, and no permission
+matrix exists there. The matrix has no admin UI by design (granting a
+capability is a migration). The client-side list constraint
+(`scopeConstraintForUser`) still keys operators on `operatorName` — server
+RLS is authoritative for row visibility, so an organization-UUID list
+constraint is an optional efficiency follow-up. ADR-03 amended accordingly.
+
+---
+
 **Session:** Security roadmap Session 1 — audit & integrity foundation
 (SEC-1 / SEC-2 / SEC-3)
 **Date:** 2026-10-02

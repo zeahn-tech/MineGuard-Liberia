@@ -595,3 +595,70 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// SEC-5 / SITE-1 — migration 0010 (organizations, geography, permission
+// matrix). Its header promises idempotency "verified by
+// tests/migration-apply.test.ts"; this block is that verification.
+// ---------------------------------------------------------------------------
+describe("0010 organizations, scopes & permissions (SEC-5/SITE-1)", () => {
+  async function snapshot(): Promise<{ orgs: string; areas: string; perms: string }> {
+    const db = await getDb();
+    const r = await db.query<{ orgs: string; areas: string; perms: string }>(
+      `select (select count(*)::text from public.organizations) as orgs,
+              (select count(*)::text from public.admin_areas) as areas,
+              (select count(*)::text from public.permissions) as perms`,
+    );
+    return r.rows[0];
+  }
+
+  test("0010 is idempotent — re-runs mint nothing new", async () => {
+    const db = await getDb();
+    const sql = readFileSync(
+      join(ROOT, "supabase", "migrations", "0010_organizations_scopes_permissions.sql"),
+      "utf8",
+    );
+    // An earlier re-run inside this file (the 0002 idempotency test) may
+    // still be the one that bound rows a committed suite left behind — the
+    // backfill is data-driven. From here on every re-run must be a no-op:
+    // no duplicate organizations, admin areas, or matrix rows.
+    await db.exec(sql);
+    const first = await snapshot();
+    await db.exec(sql);
+    expect(await snapshot()).toEqual(first);
+    // The matrix seeds exactly once (10 admin + 4 supervisor + 3 inspector
+    // + 1 operator) — the unique constraint is the backstop, the count is
+    // the drift alarm.
+    expect(Number(first.perms)).toBe(18);
+    // The scope enum stands at its six values: the rename-and-repoint
+    // sequence skips straight through on re-run (no seven-value creep, no
+    // resurrection of the three-value predecessor).
+    const enumVals = await db.query<{ n: string }>(
+      `select count(*)::text as n
+         from pg_enum e
+         join pg_type t on t.oid = e.enumtypid
+        where t.typname = 'user_scope'`,
+    );
+    expect(Number(enumVals.rows[0]?.n)).toBe(6);
+  });
+
+  test("the 0010 policy surface is recreated, not duplicated", async () => {
+    const db = await getDb();
+    const pol = await db.query<{ t: string; n: string }>(
+      `select tablename::text as t, count(*)::text as n
+         from pg_policies
+        where schemaname = 'public'
+          and tablename in ('admin_areas','organizations','permissions','site_assignments')
+        group by tablename
+        order by tablename`,
+    );
+    // drop-if-exists + create: exactly one policy per operation —
+    // read/insert/update on the three guarded tables, read-only matrix.
+    expect(pol.rows.map((r) => [r.t, Number(r.n)])).toEqual([
+      ["admin_areas", 3],
+      ["organizations", 3],
+      ["permissions", 1],
+      ["site_assignments", 3],
+    ]);
+  });
+});
