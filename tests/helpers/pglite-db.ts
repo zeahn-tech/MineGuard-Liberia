@@ -322,10 +322,12 @@ set local request.jwt.claims = '';
 -- 3. The admin provisions everyone else (admin-writes-other-profiles path).
 set local role authenticated;
 set local request.jwt.claims = '${adminClaims}';
-update public.profiles set role = 'operator', scope = 'site',
+-- scope='operator' (migration 0010): operator tenancy is organization-
+-- based; 'site' now means staff with explicit site_assignments.
+update public.profiles set role = 'operator', scope = 'operator',
        operator_name = 'AgriLib Mining', county = 'Bomi', profile_complete = true
  where id = '${IDS.opA}';
-update public.profiles set role = 'operator', scope = 'site',
+update public.profiles set role = 'operator', scope = 'operator',
        operator_name = 'OreCo Liberia', county = 'Grand Cape Mount',
        profile_complete = true
  where id = '${IDS.opB}';

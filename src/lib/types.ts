@@ -16,7 +16,13 @@ export const ROLES = {
 
 export type Role = (typeof ROLES)[keyof typeof ROLES];
 
-export type Scope = "national" | "county" | "site";
+export type Scope =
+  | "national"
+  | "regional"
+  | "county"
+  | "district"
+  | "site"
+  | "operator";
 
 export interface UserProfile {
   uid: string;
@@ -28,6 +34,9 @@ export interface UserProfile {
   scope?: Scope;
   county?: string;
   operatorName?: string;
+  /** Tenant key (migration 0010): organization UUID. operatorName is the
+   *  display/compatibility mirror of organizations.name. */
+  organizationId?: string;
   profileComplete?: boolean;
   createdAt: number;
 }
@@ -37,6 +46,9 @@ export interface Site {
   code: string;
   name: string;
   operatorName: string;
+  /** Tenant key (migration 0010): isolation keys on this UUID, never on the
+   *  display string. */
+  organizationId?: string;
   mineralType?: string;
   county: string;
   district?: string;
@@ -318,15 +330,25 @@ export function siteScopeStamp(site: {
 }
 
 export function canAccessSite(
-  user: Pick<UserProfile, "role" | "scope" | "county" | "operatorName">,
-  site: Pick<Site, "county" | "operatorName">,
+  user: Pick<UserProfile, "role" | "scope" | "county" | "operatorName" | "organizationId">,
+  site: Pick<Site, "county" | "operatorName" | "organizationId">,
 ): boolean {
   if (user.role === ROLES.ADMIN) return true;
   if (user.role === ROLES.OPERATOR) {
+    // Tenancy keys on organization UUIDs (migration 0010); the name compare
+    // is the legacy fallback for rows not yet bound to an organization.
+    if (user.organizationId && site.organizationId)
+      return user.organizationId === site.organizationId;
     return !!user.operatorName && site.operatorName === user.operatorName;
   }
   if (user.scope === "national") return true;
   if (user.scope === "county") return user.county === site.county;
+  // regional / district / site scopes are resolved server-side (region
+  // hierarchy, site_assignments) — the client mirror cannot evaluate them,
+  // and every row reaching the client was already filtered by the RLS
+  // policy that can. Fail open here rather than hiding authorized rows.
+  if (user.scope === "regional" || user.scope === "district" || user.scope === "site")
+    return true;
   return false;
 }
 

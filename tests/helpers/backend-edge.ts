@@ -94,10 +94,10 @@ update public.profiles
    set role = 'admin', scope = 'national', profile_complete = true,
        job_title = 'Director', organization = 'MineGuard Liberia'
  where id = '${EDGE_IDS.admin}';
-update public.profiles set role = 'operator', scope = 'site',
+update public.profiles set role = 'operator', scope = 'operator',
        operator_name = 'AgriLib Mining', county = 'Bomi', profile_complete = true
  where id = '${EDGE_IDS.opA}';
-update public.profiles set role = 'operator', scope = 'site',
+update public.profiles set role = 'operator', scope = 'operator',
        operator_name = 'OreCo Liberia', county = 'Grand Cape Mount',
        profile_complete = true
  where id = '${EDGE_IDS.opB}';

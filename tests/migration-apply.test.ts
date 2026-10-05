@@ -47,6 +47,7 @@ describe("migrations apply to a clean database", () => {
     expect(MIGRATIONS).toContain("0003_profiles_read_hardening.sql");
     expect(MIGRATIONS).toContain("0005_per_source_report_rate_limit.sql");
     expect(MIGRATIONS).toContain("0009_audit_integrity.sql");
+    expect(MIGRATIONS).toContain("0010_organizations_scopes_permissions.sql");
   });
 
   test("0001 core objects exist (tables, RLS, triggers, RPCs)", async () => {
@@ -56,15 +57,16 @@ describe("migrations apply to a clean database", () => {
         `select count(*) from information_schema.tables
           where table_schema = 'public' and table_type = 'BASE TABLE'`,
       );
-      // 14 domain tables + evidence_url_audit (0006).
-      expect(Number(scalar(tables))).toBe(15);
+      // 14 domain tables + evidence_url_audit (0006) + 0010's four
+      // (organizations, admin_areas, site_assignments, permissions).
+      expect(Number(scalar(tables))).toBe(19);
 
       const rls = await one(
         run,
         `select count(*) from pg_tables
           where schemaname = 'public' and rowsecurity = true`,
       );
-      expect(Number(scalar(rls))).toBe(15);
+      expect(Number(scalar(rls))).toBe(19);
 
       const guards = await one(
         run,
@@ -88,12 +90,20 @@ describe("migrations apply to a clean database", () => {
     await db.exec(sql);
     // 0002 is the historical GRANTS file: re-running it re-opens the client
     // surface (SELECT/INSERT/UPDATE/DELETE to anon + authenticated, and the
-    // permissive default privileges). This suite shares ONE database with
-    // every other test file, so re-apply 0009 (idempotent by design) to
-    // restore the SEC-3 hardened state before any later test observes it.
+    // permissive default privileges — including EXECUTE on every function,
+    // which revives mg_resolve_organization for anon). This suite shares ONE
+    // database with every other test file, so re-apply 0009 (SEC-3 hardening)
+    // and 0010 (the anon execute revoke on the tenant-minting helper) to
+    // restore the hardened state before any later test observes it.
     await db.exec(
       readFileSync(
         join(ROOT, "supabase", "migrations", "0009_audit_integrity.sql"),
+        "utf8",
+      ),
+    );
+    await db.exec(
+      readFileSync(
+        join(ROOT, "supabase", "migrations", "0010_organizations_scopes_permissions.sql"),
         "utf8",
       ),
     );
@@ -431,8 +441,11 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
          (select count(*)::text from pg_trigger
            where tgname like '%\_audit' and not tgisinternal) as audit`,
     );
-    expect(Number(trig.rows[0]?.touch)).toBe(10); // one per domain table
-    expect(Number(trig.rows[0]?.audit)).toBe(10); // exactly one ⇒ "one row per mutation"
+    // 10 domain tables + organizations (0010's integrity stamps).
+    expect(Number(trig.rows[0]?.touch)).toBe(11);
+    // …and organizations + site_assignments join the audit trail: exactly one
+    // row per mutation, one trigger per table.
+    expect(Number(trig.rows[0]?.audit)).toBe(12);
     // "audit append" (0001) stays gone; only the staff-read policy remains.
     const pol = await db.query<{ n: string }>(
       `select count(*)::text as n from pg_policies

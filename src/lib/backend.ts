@@ -102,6 +102,7 @@ function mapProfile(r: AnyRow): UserProfile {
     scope: (r.scope as Scope) ?? undefined,
     county: (r.county as string) ?? undefined,
     operatorName: (r.operator_name as string) ?? undefined,
+    organizationId: (r.organization_id as string) ?? undefined,
     profileComplete: r.profile_complete === true,
     createdAt: toMs(r.created_at),
   };
@@ -113,6 +114,7 @@ function mapSite(r: AnyRow): Site {
     code: r.code,
     name: r.name,
     operatorName: r.operator_name,
+    organizationId: r.organization_id ?? undefined,
     mineralType: r.mineral_type ?? undefined,
     county: r.county,
     district: r.district ?? undefined,
