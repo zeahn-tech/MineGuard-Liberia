@@ -35,7 +35,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 function read(p: string): string {
@@ -188,5 +188,45 @@ describe("labels and screen-reader announcements (defects A5, A6 fixed)", () => 
   test("evidence thumbnails keep alt text (no bare images in audited flows)", () => {
     const src = read("src/components/EvidenceSection.tsx");
     expect(src).toMatch(/<img[^>]*alt=/s);
+  });
+});
+
+// --------------------------------------- 5. HashRouter-safe in-page anchors
+
+describe("in-page anchors never mutate the router hash (404 regression)", () => {
+  // Reported defect (2026-10-05): clicking "Principles" on the landing page
+  // rendered "Page not found (404)". The app serves behind HashRouter, so a
+  // raw `href="#principles"` click REWRITES location.hash and the router
+  // parses the fragment as a ROUTE — matching the `*` catch-all. The fix is
+  // sectionJump (src/lib/utils.ts): preventDefault keeps the hash intact.
+  // This test pins it for every anchor in the app, present and future.
+  test('every href="#…" anchor routes its click through sectionJump', () => {
+    const tsx: string[] = [];
+    const walk = (dir: string) => {
+      for (const ent of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, ent.name);
+        if (ent.isDirectory()) walk(p);
+        else if (ent.name.endsWith(".tsx")) tsx.push(p);
+      }
+    };
+    walk(join("src"));
+
+    let checked = 0;
+    for (const f of tsx) {
+      const src = readFileSync(f, "utf8");
+      for (const m of src.matchAll(/<a\b[^>]*href="#[^"]+"[^>]*>/g)) {
+        checked += 1;
+        expect(m[0], `${f} → ${m[0]}`).toContain("sectionJump(");
+      }
+    }
+    // The four known anchors (landing Capabilities/Principles + both shells'
+    // skip links) — a lower bound so the scan can never pass vacuously.
+    expect(checked).toBeGreaterThanOrEqual(4);
+  });
+
+  test("sectionJump exists and cancels the default hash navigation", () => {
+    const utils = read("src/lib/utils.ts");
+    expect(utils).toContain("export function sectionJump");
+    expect(utils).toContain("e.preventDefault()");
   });
 });

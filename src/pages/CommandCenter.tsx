@@ -14,7 +14,16 @@ import { ArrowRight, ShieldAlert, TriangleAlert } from "lucide-react";
 export default function CommandCenter() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const stats = useQuery(api.stats.commandCenter);
+  // BOUNDED LOADING (the reported "loads forever" failure): if the stats
+  // fetch keeps failing, show an honest retry instead of an endless
+  // "Loading…". Bumping the key opens a fresh subscription for the same
+  // (args-less) query; the query layer retries with backoff underneath.
+  const [loadKey, setLoadKey] = useState(0);
+  const [timedOut, setTimedOut] = useState(false);
+  const stats = useQuery(
+    api.stats.commandCenter,
+    loadKey === 0 ? undefined : { retry: loadKey },
+  );
   const risk = useQuery(api.sites.riskScores);
   const sites = useQuery(api.sites.list);
   const communityReports = useQuery(api.records.listCommunityReports);
@@ -29,8 +38,42 @@ export default function CommandCenter() {
     return () => clearInterval(i);
   }, []);
 
+  // 8s without data → surface the failure instead of loading forever.
+  useEffect(() => {
+    if (stats) {
+      setTimedOut(false);
+      return;
+    }
+    const t = setTimeout(() => setTimedOut(true), 8_000);
+    return () => clearTimeout(t);
+  }, [stats, loadKey]);
+
   if (!stats) {
-    return <div className="py-20 text-center text-sm text-muted-foreground">Loading…</div>;
+    if (!timedOut) {
+      return (
+        <div className="py-20 text-center text-sm text-muted-foreground">
+          Loading…
+        </div>
+      );
+    }
+    return (
+      <div className="py-20 text-center">
+        <p className="display text-lg">The dashboard could not load</p>
+        <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+          The request failed — check your connection and try again. The exact
+          error is logged in the browser console.
+        </p>
+        <Button
+          className="mt-4"
+          onClick={() => {
+            setTimedOut(false);
+            setLoadKey((k) => k + 1);
+          }}
+        >
+          Try again
+        </Button>
+      </div>
+    );
   }
 
   const riskEntries = Object.entries(risk ?? {})

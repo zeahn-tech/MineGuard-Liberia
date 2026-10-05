@@ -18,6 +18,7 @@ import NotificationBell from "@/components/NotificationBell";
 import { RequireOperator } from "@/components/RequireAuth";
 import { useAuth } from "@/hooks/use-auth";
 import { readQueue, syncQueue, type QueueItem } from "@/lib/offline-queue";
+import { sectionJump } from "@/lib/utils";
 import { api } from "@/lib/backend";
 import { useMutation } from "@/lib/backend-react";
 import {
@@ -131,6 +132,7 @@ export default function OperatorLayout() {
         {/* Accessibility: keyboard users skip the sidebar straight to content */}
         <a
           href="#main-content"
+          onClick={sectionJump("main-content")}
           className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-sm focus:border focus:border-border focus:bg-card focus:px-3 focus:py-1.5 focus:text-sm"
         >
           Skip to main content
@@ -239,7 +241,7 @@ export default function OperatorLayout() {
               </Button>
             </div>
 
-            <main id="main-content" className="min-w-0 flex-1">
+            <main id="main-content" tabIndex={-1} className="min-w-0 flex-1">
               <Outlet />
             </main>
 

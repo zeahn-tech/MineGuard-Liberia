@@ -3,6 +3,7 @@ import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
+import { sectionJump } from "@/lib/utils";
 import {
   ArrowRight,
   FileCheck2,
@@ -42,8 +43,8 @@ export default function Landing() {
             <span className="display text-lg">MineGuard Liberia</span>
           </div>
           <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
-            <a href="#capabilities" className="hover:text-foreground">Capabilities</a>
-            <a href="#principles" className="hover:text-foreground">Principles</a>
+            <a href="#capabilities" onClick={sectionJump("capabilities")} className="hover:text-foreground">Capabilities</a>
+            <a href="#principles" onClick={sectionJump("principles")} className="hover:text-foreground">Principles</a>
             <Link to="/report" className="hover:text-foreground">Report a concern</Link>
           </nav>
           <div className="flex items-center gap-2">

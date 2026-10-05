@@ -1,8 +1,44 @@
 import { useAuth } from "@/hooks/use-auth";
 import { isStaffRole, ROLES } from "@/lib/types";
+import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Navigate, useLocation } from "react-router";
+
+/** Full-screen gate while auth resolves. BOUNDED: if the profile query
+ *  cannot load (network/backend failure), the gate used to spin forever —
+ *  the reported "loads forever" failure mode. After 12s it switches to an
+ *  honest message with a retry; the query layer keeps retrying underneath,
+ *  so a recovered backend lands the user straight in the portal. */
+function AuthLoading() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSlow(true), 12_000);
+    return () => clearTimeout(t);
+  }, []);
+
+  if (!slow) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </main>
+    );
+  }
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-background p-6">
+      <div className="max-w-md text-center">
+        <p className="display text-lg">Still loading your account</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          This is taking longer than usual. Check your connection and try
+          again — the exact error is logged in the browser console.
+        </p>
+        <Button className="mt-4" onClick={() => window.location.reload()}>
+          Try again
+        </Button>
+      </div>
+    </main>
+  );
+}
 
 /** Signed-in + at least one platform role (staff or operator). */
 export function RequireAuth({ children }: { children: ReactNode }) {
@@ -10,11 +46,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   const location = useLocation();
 
   if (isLoading) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
-      </main>
-    );
+    return <AuthLoading />;
   }
 
   if (!isAuthenticated) {
@@ -57,11 +89,7 @@ export function RequireStaff({ children }: { children: ReactNode }) {
   const location = useLocation();
 
   if (isLoading) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
-      </main>
-    );
+    return <AuthLoading />;
   }
 
   if (!isAuthenticated) {
@@ -104,11 +132,7 @@ export function RequireOperator({ children }: { children: ReactNode }) {
   const location = useLocation();
 
   if (isLoading) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
-      </main>
-    );
+    return <AuthLoading />;
   }
 
   if (!isAuthenticated) {

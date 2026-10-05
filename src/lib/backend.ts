@@ -454,6 +454,8 @@ function live<T>(
       let inFlight = false;
       let dirty = false;
       let timer: ReturnType<typeof setTimeout> | null = null;
+      let retryTimer: ReturnType<typeof setTimeout> | null = null;
+      let attempts = 0;
       const unsubs: (() => void)[] = [];
       let watchersReady = false;
 
@@ -498,10 +500,26 @@ function live<T>(
         inFlight = true;
         try {
           const value = await fetcher();
-          if (!cancelled) cb(value);
+          if (!cancelled) {
+            attempts = 0;
+            cb(value);
+          }
         } catch (err) {
           console.error("[backend] query failed:", err);
-          if (!cancelled) cb(undefined);
+          if (!cancelled) {
+            cb(undefined); // no value yet — consumers stay in "loading"
+            // SELF-HEAL: without this retry the FIRST failure bricked the
+            // screen forever — the shared cache reads the error's
+            // `undefined` as "still loading" and nothing ever re-ran the
+            // fetcher (the "loads forever" failure mode). Capped backoff:
+            // 1s, 2s, 4s, 8s, 16s, then every 30s.
+            attempts += 1;
+            const delay = Math.min(30_000, 1_000 * 2 ** Math.min(attempts, 5));
+            retryTimer = setTimeout(() => {
+              retryTimer = null;
+              void run();
+            }, delay);
+          }
         } finally {
           inFlight = false;
           if (!cancelled) setupWatchers();
@@ -518,6 +536,7 @@ function live<T>(
       return () => {
         cancelled = true;
         if (timer) clearTimeout(timer);
+        if (retryTimer) clearTimeout(retryTimer);
         for (const u of unsubs) u();
       };
     },
@@ -547,6 +566,8 @@ function liveDoc<T>(
       let timer: ReturnType<typeof setTimeout> | null = null;
       let inFlight = false;
       let dirty = false;
+      let retryTimer: ReturnType<typeof setTimeout> | null = null;
+      let attempts = 0;
 
       const onWatchEvent = () => {
         if (cancelled) return;
@@ -571,10 +592,24 @@ function liveDoc<T>(
             .maybeSingle();
           if (error) throw backendError(error);
           const v = data ? mapRow(data) : null;
-          if (!cancelled) cb(v);
+          if (!cancelled) {
+            attempts = 0;
+            cb(v);
+          }
         } catch (err) {
           console.error("[backend] doc query failed:", err);
-          if (!cancelled) cb(null);
+          if (!cancelled) {
+            // An ERROR is not "no row": emitting null here pushed signed-in
+            // users into the wrong empty state ("no portal role assigned")
+            // on a transient failure. Stay silent — the document keeps
+            // loading — and retry with the same capped backoff.
+            attempts += 1;
+            const delay = Math.min(30_000, 1_000 * 2 ** Math.min(attempts, 5));
+            retryTimer = setTimeout(() => {
+              retryTimer = null;
+              void run();
+            }, delay);
+          }
         } finally {
           inFlight = false;
           if (!cancelled && unsubs.length === 0) {
@@ -610,6 +645,7 @@ function liveDoc<T>(
       return () => {
         cancelled = true;
         if (timer) clearTimeout(timer);
+        if (retryTimer) clearTimeout(retryTimer);
         for (const u of unsubs) u();
       };
     },

@@ -1,5 +1,55 @@
 # 11 — Implementation Status
 
+**Session:** UI defect fix — HashRouter anchors (404) + bounded query
+loading (eternal spinner)
+**Date:** 2026-10-05
+**Verification:** `bun tsc -b --noEmit` ✓ · `bun test` **290 pass / 4 skip
+(opt-in live) / 0 fail** (294 tests, 19 files) ✓
+
+## This session [2026-10-05 — landing "Principles" 404 + Command Center
+loads forever]
+
+**Reported:** (1) the landing-page "Principles" nav item rendered "Page not
+found (404)"; (2) the Command Center screen loaded forever.
+
+**(1) 404 — raw `#anchor` links under HashRouter.** The app routes on
+`location.hash`, so clicking `href="#principles"` REWROTE the hash and the
+router parsed the fragment as a ROUTE — path `principles` matched the `*`
+catch-all and rendered NotFound (identically for `#capabilities` and both
+shells' `#main-content` skip links). Fix: `sectionJump()` in
+`src/lib/utils.ts` — `preventDefault` keeps the router's hash intact, then
+scrolls (and focuses: `tabIndex={-1}` added to both `<main id="main-content">`
+targets so skip-link focus actually lands). All four anchors wired through
+it, and a new source-scan test pins it: EVERY `href="#…"` anchor in
+`src/**/*.tsx` must carry `sectionJump(` (plus a non-vacuity floor of 4).
+
+**(2) loads forever — one failed fetch bricked the screen.** `live()` /
+`liveDoc()` fetch once on subscribe; on error the shared cache reads the
+emitted `undefined` as "still loading" and NOTHING re-ran the fetcher — a
+single failed request left Command Center on "Loading…" permanently.
+`liveDoc`'s error path was worse: it emitted `null`, mislabeling a transient
+failure as "signed in but no profile" (the "No portal role assigned" screen).
+Fix in `src/lib/backend.ts`: both helpers retry with capped exponential
+backoff (1s → 30s, reset on success, cleared on unsubscribe — the suites'
+`first()` helpers resolve on first emission, so no test semantics changed);
+`liveDoc` never emits `null` on error (`null` now means only "verified no
+row"). Bounded, honest UI instead of endless spinners: RequireAuth's gate
+goes from spinner to "Still loading your account" + retry after 12s (all
+three gates), and Command Center shows an error panel with a working Try
+again (fresh subscription via a query-key bump) after 8s.
+
+**Diagnostics ruling the database out:** live probes with the public anon
+key showed 0009–0011 fully applied and grants intact on project
+`ewukneoblhogtreeekqc` (`mg_has_permission` → 42501 as designed,
+`refresh_public_stats` → 204 proving 0011's allowlist, `organizations` /
+`audit_log` exist but anon-closed), and the opt-in live suite passes 4/4 —
+the defects were client-side only.
+
+**Tests — suite 292 → 294, all green:** two source-scan regressions added to
+`tests/accessibility-audit.test.ts` (anchor/sectionJump pair).
+
+---
+
 **Session:** Security roadmap Session 3 — deny-by-default function execute
 surface (docs/04 Gap 0)
 **Date:** 2026-10-05

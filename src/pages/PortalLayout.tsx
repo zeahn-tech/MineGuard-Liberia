@@ -4,6 +4,7 @@ import { useQuery, useMutation } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
+import { sectionJump } from "@/lib/utils";
 import NotificationBell from "@/components/NotificationBell";
 import {
   Dialog,
@@ -204,6 +205,7 @@ export default function PortalLayout() {
       {/* Accessibility: keyboard users skip the sidebar straight to content */}
       <a
         href="#main-content"
+        onClick={sectionJump("main-content")}
         className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-sm focus:border focus:border-border focus:bg-card focus:px-3 focus:py-1.5 focus:text-sm"
       >
         Skip to main content
@@ -315,9 +317,7 @@ export default function PortalLayout() {
                 )}
               </div>
             </div>
-          </header>
-
-          <main id="main-content" className="flex-1 px-4 py-6 md:px-8 md:py-8">
+          </header>            <main id="main-content" tabIndex={-1} className="flex-1 px-4 py-6 md:px-8 md:py-8">
             <Outlet />
           </main>
 
