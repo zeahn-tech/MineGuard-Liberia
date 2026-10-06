@@ -43,6 +43,16 @@ with required reviewers).
     retries without the digest when the column is missing (one console
     warning), so inspection/incident/observation evidence keeps working on
     the pre-0013 schema. Push 0012 then 0013 together.
+    **2026-10-06 — first live 0013 attempt aborted with 42704
+    (`type "public.evidence_parent" does not exist`):** the live lineage
+    has no such enum and the original label-only guard failed open. 0013
+    is now lineage-adaptive — labels resolve from the
+    `evidence.parent_type` column itself (enum anywhere → schema-qualified
+    ADD VALUE; text → NOTICE), `evidence_for_parent` matches parent types
+    as text, and evidence policies converge to the canonical two names
+    before recreate. The failed run was transactional (SQL Editor applies
+    each file in one transaction — nothing landed); re-run the fixed 0013
+    file whole, then verify: labels/policies/functions below.
   - **Auth (GoTrue)** — email/password; TOTP MFA supported (doc 04, Gap #4).
   - **Storage** — evidence media under the uid-first-folder contract.
 - No standalone API servers; no containers to manage.

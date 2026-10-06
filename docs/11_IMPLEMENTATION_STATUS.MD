@@ -329,6 +329,26 @@ the RPC with no 403s. If the sweep lists other domain tables, run
 `grant select on all tables in schema public to authenticated;` (repo-0002
 posture; RLS unchanged).
 
+**Amendment [2026-10-06 — the owner's first live 0013 run failed with
+42704].** The live lineage has NO `public.evidence_parent` (its base
+schema predates the repo's 0001), and 0013's original label guard only
+checked for the LABEL, never the TYPE — it failed open, ran `alter type
+public.evidence_parent add value …`, and the SQL Editor's
+single-transaction run rolled the ENTIRE file back (live unchanged).
+0013 is now lineage-adaptive: the guard resolves the type from the
+`evidence.parent_type` COLUMN (enum → schema-qualified ADD VALUE wherever
+that enum lives; plain text → NOTICE, no ALTER needed), a CHECK constraint
+that would veto the labels is surfaced by NOTICE instead of at the first
+upload, the recreated `evidence_for_parent` matches parent types as
+`::text` (identical semantics for the enum column; correct where
+parent_type is plain text — a `::evidence_parent` cast would throw at
+every call on live), and any non-canonical SELECT/INSERT evidence policy
+is dropped before recreate so a divergent lineage cannot silently OR an
+old policy with ours (no-op on the repo lineage — the canonical two names
+are the whole surface). A `pg_policies.polname` typo was caught by the
+harness on first re-apply (correct column: `policyname`). Repo suite
+re-verified 331/4/0; the owner re-runs the fixed file whole.
+
 ---
 
 **Session:** UI defect fix — HashRouter anchors (404) + bounded query

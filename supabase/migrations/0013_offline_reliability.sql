@@ -38,25 +38,67 @@
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
--- 1. Enum: two new evidence parents. Guarded so re-runs are no-ops, and
---    deliberately the ONLY reference to these labels in this file (see the
---    transaction note above — nothing here may use a value added here).
+-- 1. Parent labels. The guard resolves the type FROM THE COLUMN
+--    (evidence.parent_type), so it is safe on every lineage: if the column
+--    is an enum — wherever it lives — the two labels are added THERE; if
+--    the column is plain text (the live pre-repository lineage has no
+--    public.evidence_parent at all: a label-only guard used to run the ALTER
+--    anyway and abort this whole file with 42704), no ALTER is needed and a
+--    NOTICE says so. Deliberately still the ONLY reference to these labels
+--    in this file (see the transaction note above — nothing here may use a
+--    value added here), and a CHECK constraint that would veto the new
+--    labels is surfaced by NOTICE instead of failing later at the first
+--    upload.
 -- ---------------------------------------------------------------------------
 do $do$
+declare
+  v_typ    oid;
+  v_schema text;
+  v_name   text;
+  v_kind   "char";
+  v_checks text;
 begin
-  if not exists (
-    select 1 from pg_enum e
-    join pg_type t on t.oid = e.enumtypid
-    where t.typname = 'evidence_parent' and e.enumlabel = 'community_report'
-  ) then
-    execute 'alter type public.evidence_parent add value ''community_report''';
+  select t.oid, n.nspname, t.typname, t.typtype
+    into v_typ, v_schema, v_name, v_kind
+    from pg_attribute a
+    join pg_type t      on t.oid = a.atttypid
+    join pg_namespace n on n.oid = t.typnamespace
+   where a.attrelid = 'public.evidence'::regclass
+     and a.attname = 'parent_type'
+     and not a.attisdropped;
+
+  if v_typ is null then
+    raise exception 'MG0013: public.evidence.parent_type column not found — inspect this lineage before re-running';
   end if;
-  if not exists (
-    select 1 from pg_enum e
-    join pg_type t on t.oid = e.enumtypid
-    where t.typname = 'evidence_parent' and e.enumlabel = 'corrective_action'
-  ) then
-    execute 'alter type public.evidence_parent add value ''corrective_action''';
+
+  if v_kind = 'e' then
+    if not exists (
+      select 1 from pg_enum e
+       where e.enumtypid = v_typ and e.enumlabel = 'community_report'
+    ) then
+      execute format('alter type %I.%I add value ''community_report''', v_schema, v_name);
+    end if;
+    if not exists (
+      select 1 from pg_enum e
+       where e.enumtypid = v_typ and e.enumlabel = 'corrective_action'
+    ) then
+      execute format('alter type %I.%I add value ''corrective_action''', v_schema, v_name);
+    end if;
+  else
+    raise notice 'MG0013: evidence.parent_type is %.% here (not an enum) — new labels need no ALTER TYPE',
+      v_schema, v_name;
+  end if;
+
+  -- Belt: a CHECK constraint can veto labels the type itself allows (either
+  -- shape of column) — surface it now rather than at the first upload.
+  select string_agg(pg_get_constraintdef(c.oid), ' | ')
+    into v_checks
+    from pg_constraint c
+   where c.conrelid = 'public.evidence'::regclass
+     and c.contype = 'c'
+     and pg_get_constraintdef(c.oid) like '%parent_type%';
+  if v_checks is not null then
+    raise notice 'MG0013: CHECK constraint(s) on evidence.parent_type: %', v_checks;
   end if;
 end $do$;
 
@@ -115,6 +157,27 @@ $$;
 --    widened by exactly one branch each. Permissive policies OR, so the
 --    site-visible branch behaves byte-for-byte as before.
 -- ---------------------------------------------------------------------------
+-- Lineage convergence: a pre-existing SELECT/INSERT policy under another
+-- name would silently OR with ours on this permissive table. On the
+-- repository lineage this finds nothing (the two names below are the whole
+-- surface); it exists for the divergent live lineage.
+do $do$
+declare
+  v_sql text;
+begin
+  select string_agg(format('drop policy %I on public.evidence', p.policyname), '; ')
+    into v_sql
+    from pg_policies p
+   where p.schemaname = 'public'
+     and p.tablename = 'evidence'
+     and p.cmd in ('select', 'insert')
+     and p.policyname not in ('evidence read', 'evidence insert');
+  if v_sql is not null then
+    execute v_sql;
+    raise notice 'MG0013: dropped non-canonical evidence policies: %', v_sql;
+  end if;
+end $do$;
+
 drop policy if exists "evidence read" on public.evidence;
 create policy "evidence read" on public.evidence
   for select using (
@@ -154,6 +217,10 @@ create policy "evidence read scoped"
 -- ---------------------------------------------------------------------------
 -- 5. evidence_for_parent — same signature (text, uuid) as the 0002 grant and
 --    the 0011 allowlist pin; only the scope predicate gains the staff branch.
+--    The parent match compares as TEXT: identical for the enum column (label
+--    text) and correct on lineages where parent_type is plain text — a
+--    ::evidence_parent cast would throw at every call wherever that type is
+--    absent (the live lineage).
 -- ---------------------------------------------------------------------------
 create or replace function public.evidence_for_parent(
   p_parent_type text,
@@ -167,7 +234,7 @@ as $$
 begin
   return query
     select e.* from public.evidence e
-    where e.parent_type = p_parent_type::evidence_parent
+    where e.parent_type::text = p_parent_type
       and e.parent_id = p_parent_id
       and (
         public.mg_can_access_site(e.site_id)
