@@ -720,6 +720,7 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_any_profile_role()",
     "mg_can_access_site(uuid)",
     "mg_can_access_site_row(uuid, text, text, text, uuid)",
+    "mg_command_center_stats()",
     "mg_has_permission(text)",
     "mg_is_admin()",
     "mg_is_reviewer()",

@@ -395,12 +395,20 @@ function pgErrorObject(e: unknown): { message: string; code?: string } {
 // the PostgREST-ish builder (awaitable via then())
 // ---------------------------------------------------------------------------
 
+/** Hosted PostgREST applies db-max-rows (default 1,000) to every response
+ *  with no explicit Range/Limit — the SEC-4 truncation defect, emulated so
+ *  the wire contract the app must survive is REAL in tests: a regression to
+ *  a bare select("*") on a >1,000-row table fails here instead of passing
+ *  by accident against an uncapped bridge. */
+const POSTGREST_MAX_ROWS = 1000;
+
 class WireQuery {
   private table = "";
   private cols = "*";
   private wheres: string[] = [];
   private orderSql = "";
   private limitSql = "";
+  private rangeSql = "";
   private values: Record<string, unknown> | null = null;
   private isUpdate = false;
   private onConflictCols: string[] | null = null;
@@ -428,12 +436,28 @@ class WireQuery {
   }
 
   order(col: string, opts?: { ascending?: boolean }) {
-    this.orderSql = ` order by ${col} ${opts?.ascending === false ? "desc" : "asc"}`;
+    const dir = opts?.ascending === false ? "desc" : "asc";
+    // supabase-js ACCUMULATES successive .order() calls into one ORDER BY —
+    // mirror that (paged reads append a primary-key tiebreak for stable
+    // Range windows across pages).
+    this.orderSql = this.orderSql
+      ? `${this.orderSql}, ${col} ${dir}`
+      : ` order by ${col} ${dir}`;
     return this;
   }
 
   limit(n: number) {
     this.limitSql = ` limit ${Math.trunc(Number(n))}`;
+    return this;
+  }
+
+  /** PostgREST Range header: `Range: from-to` (inclusive) → LIMIT/OFFSET.
+   *  SEC-4's paged reads (pagedRows/allRows) depend on this — it is how
+   *  the app fetches past the row cap instead of silently truncating. */
+  range(from: number, to: number) {
+    const f = Math.max(0, Math.trunc(Number(from)));
+    const t = Math.max(0, Math.trunc(Number(to)));
+    this.rangeSql = ` limit ${Math.max(0, t - f + 1)} offset ${f}`;
     return this;
   }
 
@@ -488,8 +512,12 @@ class WireQuery {
     try {
       if (this.values !== null) return await this.execWrite();
       const w = this.wheres.length ? ` where ${this.wheres.join(" and ")}` : "";
+      // Explicit Range or limit wins; otherwise emulate the hosted
+      // db-max-rows cap (SEC-4) — unranged reads are NOT allowed to return
+      // more than POSTGREST_MAX_ROWS rows, exactly like production.
+      const paging = this.rangeSql || this.limitSql || ` limit ${POSTGREST_MAX_ROWS}`;
       const rows = await wireQuery(
-        `select ${this.cols} from public.${this.table}${w}${this.orderSql}${this.limitSql}`,
+        `select ${this.cols} from public.${this.table}${w}${this.orderSql}${paging}`,
       );
       if (this.maybe) return { data: rows[0] ?? null, error: null };
       if (this.wantSingle) {
@@ -617,6 +645,7 @@ const RPC_SPECS: Record<string, RpcSpec> = {
   evidence_for_parent: { fn: "evidence_for_parent", args: ["p_parent_type", "p_parent_id"] },
   evidence_url: { fn: "evidence_url", args: ["p_evidence_id", "p_ttl_seconds"] },
   refresh_public_stats: { fn: "refresh_public_stats", args: [] },
+  mg_command_center_stats: { fn: "mg_command_center_stats", args: [] },
 };
 
 async function execRpc(

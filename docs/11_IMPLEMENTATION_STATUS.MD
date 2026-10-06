@@ -1,5 +1,107 @@
 # 11 — Implementation Status
 
+**Session:** Security roadmap Session 4 — silent truncation / scale (SEC-4,
+HIGH)
+**Date:** 2026-10-05
+**Verification:** `bun tsc -b --noEmit` ✓ · `bun test` **299 pass / 4 skip
+(opt-in live) / 0 fail** (303 tests, 20 files) ✓
+
+## This session [2026-10-05 — SEC-4: correct statistics at ANY table size]
+
+**Defect (SEC-4, HIGH).** `allRows()` did a bare PostgREST `select("*")`
+with no Range/limit on seven tables — sites, inspections, findings,
+corrective actions, incidents, environmental observations, community
+reports — feeding the Command Center, risk scores, the §18 AI explainer,
+list surfaces and CSV exports; every aggregation ran in the browser.
+Hosted PostgREST caps unranged responses at `db-max-rows` (default 1,000
+rows): past that size the data arrived **silently truncated** and every
+statistic was quietly wrong — a 200 with no error, numbers presented as
+fact. The 17× perf baseline (doc 17) measured the DB-side path through an
+UNCAPPED harness, so it could not detect the defect either — both halves
+of that honesty gap are closed below.
+
+**Fix half 1 — pagination (`src/lib/backend.ts`).** New `pagedRows()`
+fetches with an explicit Range (`order("id")` — a total order, so windows
+are stable across pages) until a short page returns; any error on any page
+THROWS rather than returning a partial set. `allRows()` is now paged, so
+every call site (command center, risk scores, explainer, lists, exports,
+notifications, feeds, `listUsers`) inherits it. The two registry code
+scans (`sites.create` / `runSeed`) page too — a truncated scan would
+re-propose an existing site code once a lineage passed the cap — and
+`seedIfEmpty` became an explicit `limit(1)` existence probe.
+
+**Fix half 2 — aggregation in the database (migration 0012).**
+`mg_command_center_stats()` computes the Command Center's 18 figures over
+seven tables **in Postgres** (counts, sums, rounds, group-bys — mirroring
+the former client aggregation statement for statement) and returns ONE
+jsonb row. Deliberately **SECURITY INVOKER**: every SELECT inside runs as
+the calling role under the same RLS policies the paginated reads go
+through — RLS *is* the authorization, no scope re-derivation to get wrong
+(and the GAP-0 definer-self-authorization pin correctly does not apply).
+EXECUTE is revoked from PUBLIC and anon immediately after creation (the
+built-in `=X` materializes on `CREATE FUNCTION`; 0011's default privileges
+cannot express its removal) and granted to `authenticated` only — the anon
+surface stays EXACTLY the two public flows. **0011 amended:** its
+authenticated allowlist (and lineage-report array) now carries
+`mg_command_center_stats`, because 0011 does a full revoke-then-restore on
+every idempotent re-run — the 0002/0009 chains re-apply it, so without
+that entry the grant would silently disappear.
+
+**commandCenter RPC-first with a correct fallback.** The data layer calls
+the RPC; on a lineage that has not applied 0012 (the live project, until
+the owner pushes) it logs one console warning and falls back to the
+original client-side aggregation — which is exact too, because its inputs
+are now paged. Never a truncated number either way.
+
+**Harness fidelity — the cap is now REAL in tests.** The wire bridge
+emulates hosted `db-max-rows`: an unranged read stops at exactly 1,000
+rows while explicit Range windows page past it; `.order()` accumulates
+(supabase-js parity) and the bridge carries the new RPC spec. A regression
+to a bare select now FAILS the suite instead of passing against an
+uncapped harness.
+
+**Tests — suite 294 → 303, all green.**
+- NEW `tests/sec4-pagination.test.ts` (9 tests): the cap bites (exactly
+  1,000 of a >1,250-row table) AND Range pages past it; `listIncidents`
+  returns all 1,200 seeded rows; risk scores see all 1,250 findings (factor
+  label “1250 low finding(s)” — a truncated read would say 1000) with the
+  score ≡ Σ points invariant; Command Center figures equal the database's
+  own totals past the cap (sites/inspections/findings/incidents/reports)
+  with group-by consistency checks; **RPC ≡ client fallback** — identical
+  objects over the same data, with the RPC path proven non-vacuous by a
+  console-warn spy (fallback-vs-fallback would have passed vacuously);
+  anon EXECUTE denied; source contracts (Range paging, RPC call, cap
+  emulation in the bridge).
+- GAP-0 pins extended: the authenticated surface now equals 18 pinned
+  signatures (adds `mg_command_center_stats()`), anon unchanged at 2, zero
+  PUBLIC grants, 0011 idempotent with the new entry.
+- Perf bench gained exactness assertions (every seeded row counted;
+  complete inspections list past the seed) and its stale volume header was
+  corrected (320 inspections / 640 findings / 320 CAs / 80 incidents / 60
+  observations / 4,000 audit rows — doc 17's table was already right).
+
+**Perf + honesty (doc 17 re-measured).** Same fixture, same budgets, all
+surfaces PASS (command center ≈195 ms median, ≈10× headroom; risk scores
+≈154 ms; lists unchanged within noise). Honest reading: in-process PGlite
+has **no network to save**, so the RPC path is not faster *there* — it pays
+SQL planning for ~20 aggregates where the old path paid seven cheap
+in-process fetches; what changed is the WIRE shape: ONE jsonb row instead
+of ≈1,660 rows plus browser-side summation, and exactness at any size.
+RTT/payload savings cannot be measured in-process and are not claimed.
+The harness now caps unranged reads, so a truncated baseline run fails
+instead of printing a number.
+
+**Honest follow-ups:** (a) the owner must push **0012** to the live
+project (doc 14) — until then the fallback serves the dashboard (correct,
+heavier wire); (b) single-parent child reads (`.eq()` lists such as
+findings-per-inspection) remain single-request and bounded by that parent —
+they would need the same paging treatment beyond pilot scale; (c) risk
+scores and the AI explainer still aggregate in the browser — exact now,
+over paged reads — pushing the risk model into SQL is the next scale step
+if the dataset grows ~10×.
+
+---
+
 **Session:** UI defect fix — HashRouter anchors (404) + bounded query
 loading (eternal spinner)
 **Date:** 2026-10-05

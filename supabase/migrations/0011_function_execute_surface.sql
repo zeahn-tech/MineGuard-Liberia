@@ -55,10 +55,14 @@
 --      over claims/matrix that RLS policies and SECURITY INVOKER guards
 --      evaluate AS THE CALLING ROLE: mg_profile, mg_role, mg_operator_name,
 --      mg_is_admin, mg_is_staff, mg_is_reviewer, mg_has_permission,
---      mg_any_profile_role, mg_can_access_site, mg_can_access_site_row).
---      Machinery (mg_resolve_organization, mg_client_ip) and trigger
---      functions get NO client grant: triggers are fired by the executor
---      without an EXECUTE check, and definer bodies run as their owner.
+--      mg_any_profile_role, mg_can_access_site, mg_can_access_site_row) +
+--      mg_command_center_stats (0012, SEC-4): a SECURITY INVOKER stats
+--      aggregator whose every SELECT runs under RLS exactly like the
+--      paginated client reads it replaces — invoker surface, no definer
+--      body, authorization is row visibility itself. Machinery
+--      (mg_resolve_organization, mg_client_ip) and trigger functions get NO
+--      client grant: triggers are fired by the executor without an EXECUTE
+--      check, and definer bodies run as their owner.
 --   F  Grants are issued per function NAME over the overloads that exist in
 --      the APPLYING lineage — never as hard-coded signatures. The live
 --      project runs a pre-repository lineage where
@@ -170,7 +174,8 @@ begin
              'refresh_public_stats', 'mg_profile', 'mg_role',
              'mg_operator_name', 'mg_is_admin', 'mg_is_staff',
              'mg_is_reviewer', 'mg_has_permission', 'mg_any_profile_role',
-             'mg_can_access_site', 'mg_can_access_site_row')
+             'mg_can_access_site', 'mg_can_access_site_row',
+             'mg_command_center_stats')
   loop
     execute format(
       'grant execute on function public.%I(%s) to authenticated',
@@ -188,7 +193,8 @@ begin
              'triage_community_report', 'mg_profile', 'mg_role',
              'mg_operator_name', 'mg_is_admin', 'mg_is_staff',
              'mg_is_reviewer', 'mg_has_permission', 'mg_any_profile_role',
-             'mg_can_access_site', 'mg_can_access_site_row'
+             'mg_can_access_site', 'mg_can_access_site_row',
+             'mg_command_center_stats'
            ]) as u(proname)
      where not exists (
              select 1

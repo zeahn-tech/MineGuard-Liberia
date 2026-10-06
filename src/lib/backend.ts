@@ -388,11 +388,63 @@ async function insertReturningId(
   return data.id as string;
 }
 
-/** Fetch all rows of a table the caller can see (RLS enforces the scope). */
+// ---------------------------------------------------------------------------
+// SEC-4 — paged reads: hosted PostgREST caps an unranged response
+// (db-max-rows, default 1,000 rows). A bare `select("*")` therefore
+// SILENTLY TRUNCATES past that size and every statistic, risk score and
+// export computed from it is quietly wrong — the defect this section closes.
+// ---------------------------------------------------------------------------
+
+/** The hosted PostgREST default row cap — the size of one wire page. */
+const POSTGREST_MAX_ROWS = 1000;
+
+type PagedPage = PromiseLike<{
+  data: unknown;
+  error: { message: string; code?: string } | null;
+}>;
+
+/** Fetch EVERY row a query yields by paging with an explicit ordered Range
+ *  until a short page comes back. Correctness never depends on the server's
+ *  row cap, at any table size. (An error on any page throws — truncation is
+ *  never an acceptable outcome here.) */
+async function pagedRows<T>(
+  page: (from: number, to: number) => PagedPage,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += POSTGREST_MAX_ROWS) {
+    const { data, error } = await page(from, from + POSTGREST_MAX_ROWS - 1);
+    if (error) throw backendError(error);
+    const rows = (data ?? []) as T[];
+    out.push(...rows);
+    if (rows.length < POSTGREST_MAX_ROWS) return out;
+  }
+}
+
+/** Fetch all rows of a table the caller can see (RLS enforces the scope) —
+ *  paged, ordered by primary key so the Range windows are stable across
+ *  requests (SEC-4). */
 async function allRows<T>(table: string): Promise<T[]> {
-  const { data, error } = await supabase.from(table).select("*");
-  if (error) throw backendError(error);
-  return (data ?? []) as T[];
+  return pagedRows<T>((from, to) =>
+    supabase
+      .from(table)
+      .select("*")
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+}
+
+/** Every site code in the registry — paged for the same SEC-4 reason: a
+ *  truncated scan would re-propose an existing code once a lineage passes
+ *  the row cap (the unique constraint would then refuse the insert). */
+async function allSiteCodes(): Promise<string[]> {
+  const rows = await pagedRows<{ code: string }>((from, to) =>
+    supabase
+      .from("sites")
+      .select("code")
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  return rows.map((r) => r.code);
 }
 
 async function refreshPublicStats() {
@@ -427,6 +479,51 @@ export interface CommandCenterStats {
   inspectionCoveragePct: number;
   countyCounts: Record<string, number>;
   incidentTypes: Record<string, number>;
+}
+
+/** SEC-4 — field-by-field coercion for the mg_command_center_stats RPC
+ *  payload (jsonb arrives as plain JSON). Every figure becomes a finite
+ *  number and every group-by a number map, so no downstream UI math can
+ *  ever see undefined/NaN. Key names match the SQL jsonb_build_object
+ *  keys exactly; the scope falls back to the caller's profile only if the
+ *  RPC somehow omitted it. */
+function mapCommandCenterStats(
+  raw: unknown,
+  scope: string | null | undefined,
+): CommandCenterStats {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const n = (v: unknown): number => {
+    const x = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(x) ? x : 0;
+  };
+  const m = (v: unknown): Record<string, number> => {
+    const out: Record<string, number> = {};
+    if (v && typeof v === "object") {
+      for (const [k, val] of Object.entries(v as Record<string, unknown>))
+        out[k] = n(val);
+    }
+    return out;
+  };
+  return {
+    scope: typeof r.scope === "string" && r.scope ? r.scope : scope ?? "national",
+    sites: n(r.sites),
+    activeSites: n(r.activeSites),
+    inspectionsTotal: n(r.inspectionsTotal),
+    inspectionsUnderReview: n(r.inspectionsUnderReview),
+    findingsTotal: n(r.findingsTotal),
+    findingsCriticalOpen: n(r.findingsCriticalOpen),
+    correctiveActionsOpen: n(r.correctiveActionsOpen),
+    correctiveActionsOverdue: n(r.correctiveActionsOverdue),
+    incidentsTotal: n(r.incidentsTotal),
+    fatalities: n(r.fatalities),
+    envAlerts: n(r.envAlerts),
+    envByCategory: m(r.envByCategory),
+    communityReports: n(r.communityReports),
+    communityReportsPending: n(r.communityReportsPending),
+    inspectionCoveragePct: n(r.inspectionCoveragePct),
+    countyCounts: m(r.countyCounts),
+    incidentTypes: m(r.incidentTypes),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -845,12 +942,8 @@ export const api = {
       notes?: string;
     }) => {
       const user = await requireAdminUser();
-      const existing = await supabase.from("sites").select("code");
-      if (existing.error) throw backendError(existing.error);
-      const code = nextSiteCodeFrom(
-        args.county,
-        (existing.data ?? []).map((r) => r.code as string),
-      );
+      const existingCodes = await allSiteCodes();
+      const code = nextSiteCodeFrom(args.county, existingCodes);
       const id = await insertReturningId("sites", {
         name: args.name,
         operator_name: args.operatorName,
@@ -2124,7 +2217,6 @@ export const api = {
     commandCenter: () =>
       live<CommandCenterStats>(async () => {
         const user = await requireAuthed(true);
-        const staff = isStaffRole(user.role);
         // Unassigned accounts: zeroed figures, no denied queries.
         if (!user.role) {
           return {
@@ -2139,6 +2231,26 @@ export const api = {
             inspectionCoveragePct: 0, countyCounts: {}, incidentTypes: {},
           };
         }
+        // SEC-4 — AGGREGATE IN THE DATABASE. Hosted PostgREST caps unranged
+        // responses at db-max-rows (default 1,000 rows): the old path shipped
+        // every row of seven tables to the browser and summed them there, so
+        // past the cap every figure on this screen was silently wrong. The RPC
+        // is SECURITY INVOKER — it aggregates exactly the RLS-visible rows this
+        // caller would page through — and returns ONE row: correct at any
+        // table size, O(1) rows on the wire.
+        const { data, error } = await supabase.rpc("mg_command_center_stats");
+        if (!error && data && typeof data === "object") {
+          return mapCommandCenterStats(data, user.scope);
+        }
+        // Fallback (lineage without migration 0012 yet): the original
+        // client-side aggregation below — every input is paged to completion
+        // (allRows → pagedRows), so its figures are exact at any size too;
+        // only the wire cost differs. Loud about why, never truncated.
+        console.warn(
+          "[backend] mg_command_center_stats unavailable — client-side aggregation fallback:",
+          error ? error.message ?? String(error) : "empty payload",
+        );
+        const staff = isStaffRole(user.role);
         const [sitesRaw, inspRaw, findingsRaw, casRaw, incRaw, envRaw, reportsRaw] =
           await Promise.all([
             allRows<AnyRow>("sites"),
@@ -2502,7 +2614,8 @@ export const api = {
      *  RLS, so the data layer checks admin to fail fast. */
     seedIfEmpty: async () => {
       await requireAdminUser();
-      const { data, error } = await supabase.from("sites").select("id");
+      // Existence probe only — limit(1) keeps this a bounded read (SEC-4).
+      const { data, error } = await supabase.from("sites").select("id").limit(1);
       if (error) throw backendError(error);
       if ((data ?? []).length > 0) {
         return { seeded: false, reason: "not_empty" as const };
@@ -2535,9 +2648,7 @@ async function runSeed() {
   ];
 
   const siteIds: Record<string, { id: string; code: string }> = {};
-  const existing = await supabase.from("sites").select("code");
-  if (existing.error) throw backendError(existing.error);
-  const existingCodes = (existing.data ?? []).map((r) => r.code as string);
+  const existingCodes = await allSiteCodes();
   for (const def of siteDefs) {
     const code = nextSiteCodeFrom(def.county, existingCodes);
     existingCodes.push(code);

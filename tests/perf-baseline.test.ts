@@ -4,9 +4,9 @@
 // Realistic pilot scale, derived from the program's own planning numbers
 // (docs/02 "national registry scale for a pilot"; Liberia's pilot counties):
 //
-//   40 sites (2 operators × 20 sites, 4 counties) · 25 staff · 3,200
-//   inspections · 4,800 findings · 2,400 corrective actions · 1,600
-//   incidents · 1,200 environmental observations · 12,800 audit rows
+//   40 sites (2 operators × 20 sites, 4 counties) · 25 staff · 320
+//   inspections · 640 findings · 320 corrective actions · 80
+//   incidents · 60 environmental observations · 4,000 audit rows
 //   (4 per mutation-bearing record) · 200 community reports.
 //
 // Method: the REAL data layer (src/lib/backend.ts) over the RLS-enforced
@@ -25,8 +25,8 @@
 // time via `bun test tests/perf-baseline.test.ts`.
 // ---------------------------------------------------------------------------
 
-import { afterAll, beforeAll, describe, test } from "bun:test";
-import { api } from "../src/lib/backend";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { api, type CommandCenterStats } from "../src/lib/backend";
 import { __testSetSupabaseClient, __testSetAuthUserId } from "../src/lib/supabase";
 import {
   adminExec,
@@ -303,7 +303,25 @@ describe("performance baseline at pilot scale", () => {
 
   test("F3 staff: command center aggregates", async () => {
     setIdentity(f.admin);
-    await timed("commandCenter (admin, national)", 5, () => first(api.stats.commandCenter()));
+    let stats: CommandCenterStats | undefined;
+    await timed("commandCenter (admin, national)", 5, async () => {
+      stats = await first(api.stats.commandCenter());
+    });
+    // SEC-4: every seeded row must be counted. The bridge caps unranged
+    // reads at 1,000 (hosted db-max-rows), so a regression to bare selects
+    // or browser-side summation would silently under-count these — and the
+    // figures arrive from mg_command_center_stats as ONE row, not seven
+    // tables.
+    expect(stats!.sites).toBeGreaterThanOrEqual(totals.sites);
+    expect(stats!.inspectionsTotal).toBeGreaterThanOrEqual(
+      totals.sites * SCALE.inspectionsPerSite,
+    );
+    expect(stats!.findingsTotal).toBeGreaterThanOrEqual(
+      totals.sites * SCALE.inspectionsPerSite * SCALE.findingsPerInspection,
+    );
+    expect(stats!.incidentsTotal).toBeGreaterThanOrEqual(
+      totals.sites * SCALE.incidentsPerSite,
+    );
   });
 
   test("F3 staff: risk scores (every site, explainable factors)", async () => {
@@ -323,7 +341,13 @@ describe("performance baseline at pilot scale", () => {
 
   test("F3 staff: inspections list (site join + scope filter)", async () => {
     setIdentity(f.admin);
-    await timed("inspections.list (all rows)", 5, () => first(api.inspections.list()));
+    let rows = 0;
+    await timed("inspections.list (all rows)", 5, async () => {
+      rows = (await first(api.inspections.list()))!.length;
+    });
+    // SEC-4: the row-level surface pages — no row of the seeded set is
+    // lost to the wire cap.
+    expect(rows).toBeGreaterThanOrEqual(totals.inspections);
   });
 
   test("F3 staff: incidents + observations lists", async () => {
