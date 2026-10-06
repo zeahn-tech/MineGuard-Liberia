@@ -27,6 +27,7 @@ import {
 } from "./supabase";
 import { validateTemplateSections } from "./template-schema";
 import { computeRiskFactors, type RiskFactor } from "./risk-model";
+import { sha256Hex } from "./sha256";
 
 /** doc 08: AI output is labeled as assistance — this label ships with every
  *  AI payload so no surface can present it as fact without the marker. */
@@ -188,6 +189,7 @@ function mapCA(r: AnyRow): CorrectiveAction {
     verifiedById: r.verified_by_id ?? undefined,
     closedAt: toMsOrNull(r.closed_at),
     createdAt: toMs(r.created_at),
+    rowVersion: r.row_version == null ? undefined : Number(r.row_version),
   };
 }
 
@@ -263,7 +265,7 @@ function mapEvidence(r: AnyRow): Evidence {
     storagePath: r.storage_path,
     parentType: r.parent_type,
     parentId: r.parent_id,
-    siteId: r.site_id,
+    siteId: r.site_id ?? undefined,
     kind: r.kind,
     fileName: r.file_name,
     mimeType: r.mime_type,
@@ -272,6 +274,7 @@ function mapEvidence(r: AnyRow): Evidence {
     capturedAt: toMsOrNull(r.captured_at),
     uploadedById: r.uploaded_by_id,
     createdAt: toMs(r.created_at),
+    sha256: r.sha256 ?? undefined,
   };
 }
 
@@ -1725,6 +1728,11 @@ export const api = {
     respondCorrectiveAction: async (args: {
       caId: string;
       operatorNote: string;
+      /** row_version the operator was looking at (OFF-4). When present the
+       *  update is conditional on it — a row someone else changed first
+       *  answers CONFLICT (HTTP 409) with a snapshot for the resolution
+       *  screen instead of silently overwriting their work. */
+      expectedRowVersion?: number;
     }) => {
       const user = await requireAuthed();
       const { data, error: e1 } = await supabase
@@ -1739,11 +1747,46 @@ export const api = {
       if (!site) throw new Error("NOT_FOUND");
       if (user.role !== ROLES.OPERATOR || user.operatorName !== site.operatorName)
         throw new Error("FORBIDDEN");
-      const { error } = await supabase
+      // Idempotent replay (OFF: mid-sync crash): the server applied this
+      // response but the local queue removal was interrupted. Same note on
+      // an already-submitted action IS the desired end state — report
+      // success so the queue drains instead of dead-ending on the guard.
+      if (ca.status === "submitted" && (ca.operatorNote ?? "") === args.operatorNote) {
+        return;
+      }
+      let query = supabase
         .from("corrective_actions")
         .update({ operator_note: args.operatorNote, status: "submitted" })
         .eq("id", args.caId);
+      if (args.expectedRowVersion != null) {
+        query = query.eq("row_version", args.expectedRowVersion);
+      }
+      const { data: updated, error } = await query.select("id");
       if (error) throw backendError(error);
+      if (args.expectedRowVersion != null && (!updated || updated.length === 0)) {
+        // Zero rows matched: someone bumped row_version first. Fetch the
+        // current row so the human resolution screen can show both sides.
+        const { data: cur } = await supabase
+          .from("corrective_actions")
+          .select("*")
+          .eq("id", args.caId)
+          .maybeSingle();
+        if (!cur) throw new Error("NOT_FOUND");
+        const curCa = mapCA(cur);
+        const conflict = new Error(
+          `CONFLICT:${JSON.stringify({
+            server: {
+              status: curCa.status,
+              operatorNote: curCa.operatorNote ?? null,
+              rowVersion: curCa.rowVersion ?? null,
+              closedAt: curCa.closedAt ?? null,
+              verifiedById: curCa.verifiedById ?? null,
+            },
+          })}`,
+        ) as Error & { code?: string };
+        conflict.code = "409";
+        throw conflict;
+      }
       await logAudit({
         actorId: user.uid,
         actorLabel: await actorLabel(user),
@@ -2467,9 +2510,13 @@ export const api = {
       mimeType: string;
       parentType: Evidence["parentType"];
       parentId: string;
-      siteId: string;
+      /** Mandatory except for community_report attachments (migration 0013:
+       *  a public report is not bound to any site). */
+      siteId?: string;
       caption?: string;
       capturedAt?: number;
+      /** Client-computed digest; re-hashed here and refused on mismatch. */
+      sha256?: string;
       /** Optional byte-progress callback (§10). When provided AND the
        *  environment has XMLHttpRequest (browser), bytes go up through the
        *  progress-emitting wire path; otherwise the supabase-js path is
@@ -2477,11 +2524,28 @@ export const api = {
       onProgress?: (p: { loaded: number; total: number }) => void;
     }) => {
       const user = await requireAuthed();
-      if (!args.siteId) throw new Error("EVIDENCE_REQUIRES_SITE");
+      if (!user.role) throw new Error("FORBIDDEN");
+      if (args.parentType !== "community_report") {
+        // Every site-bound parent requires a visible site (EVD-1 kept the
+        // site-less path exclusive to community triage).
+        if (!args.siteId) throw new Error("EVIDENCE_REQUIRES_SITE");
+      } else if (!isStaffRole(user.role)) {
+        // Site-less community-report attachments are staff-only — mirrors
+        // the 0013 RLS / storage / RPC branches.
+        throw new Error("FORBIDDEN");
+      }
       if (args.file.size > 25 * 1024 * 1024)
         throw new Error("FILE_TOO_LARGE");
-      const site = await getSite(args.siteId);
-      if (!site || !canAccessSite(user, site)) throw new Error("FORBIDDEN");
+      const site = args.siteId ? await getSite(args.siteId) : null;
+      if (args.siteId && (!site || !canAccessSite(user, site)))
+        throw new Error("FORBIDDEN");
+      // EVD-1: hash the bytes independently; a client-declared digest that
+      // does not match the bytes about to be stored is refused — the row's
+      // sha256 always describes the bytes actually uploaded.
+      const computed = await sha256Hex(args.file);
+      if (args.sha256 && computed && args.sha256 !== computed)
+        throw new Error("EVIDENCE_HASH_MISMATCH");
+      const storedSha = computed ?? args.sha256 ?? null;
       const kind = evidenceKindByMime(args.mimeType);
       // 1. Generate the row id FIRST (no write yet) so the object name can
       //    embed it — {rowId}__{fileName} is the join key the read policy
@@ -2519,7 +2583,7 @@ export const api = {
         storage_path: storagePath,
         parent_type: args.parentType,
         parent_id: args.parentId,
-        site_id: args.siteId,
+        site_id: args.siteId || null,
         kind,
         file_name: args.fileName,
         mime_type: args.mimeType,
@@ -2527,6 +2591,7 @@ export const api = {
         caption: args.caption ?? null,
         captured_at: args.capturedAt == null ? null : iso(args.capturedAt),
         uploaded_by_id: user.uid,
+        sha256: storedSha,
       });
       if (dbErr) throw backendError(dbErr);
       await logAudit({
@@ -2535,7 +2600,7 @@ export const api = {
         action: "evidence.upload",
         entityType: "evidence",
         entityId: rowId,
-        summary: `${kind} evidence attached to ${args.parentType} at site ${site.code}`,
+        summary: `${kind} evidence attached to ${args.parentType} at ${site ? `site ${site.code}` : "no site (community triage)"}`,
       });
       return rowId;
     },

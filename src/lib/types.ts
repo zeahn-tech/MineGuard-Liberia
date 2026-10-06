@@ -143,6 +143,10 @@ export interface CorrectiveAction {
   verifiedById?: string;
   closedAt?: number;
   createdAt: number;
+  /** Optimistic-concurrency token (migration 0009, server-maintained).
+   *  Writes that pass it get 409 CONFLICT detection when another user
+   *  changed the row first (OFF-4). */
+  rowVersion?: number;
 }
 
 export type IncidentType =
@@ -259,10 +263,20 @@ export interface AuditEntry {
 
 export type EvidenceKind = "photo" | "video" | "audio" | "document";
 
+/** Records evidence may attach to. community_report / corrective_action were
+ *  added by migration 0013 (EVD-1): staff triage attachments for public
+ *  reports (site-less) and operator documents on a CA response. */
+export type EvidenceParentType =
+  | "inspection"
+  | "incident"
+  | "observation"
+  | "community_report"
+  | "corrective_action";
+
 export interface Evidence {
   _id: string;
   storagePath: string;
-  parentType: "inspection" | "incident" | "observation";
+  parentType: EvidenceParentType;
   parentId: string;
   siteId?: string;
   kind: EvidenceKind;
@@ -273,6 +287,8 @@ export interface Evidence {
   capturedAt?: number;
   uploadedById: string;
   createdAt: number;
+  /** Lowercase-hex SHA-256 of the bytes (EVD-1), null for legacy rows. */
+  sha256?: string;
 }
 
 // ---------------------------------------------------------------------------
