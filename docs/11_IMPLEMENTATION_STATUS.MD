@@ -100,6 +100,49 @@ scores and the AI explainer still aggregate in the browser — exact now,
 over paged reads — pushing the risk model into SQL is the next scale step
 if the dataset grows ~10×.
 
+**Live incident [2026-10-05, after deploy]: Command Center 403s on the
+admin screen.** Console showed `POST /rest/v1/rpc/mg_command_center_stats`
+403 plus `GET /rest/v1/community_reports?…offset=0&limit=1000` 403
+(repeated). Diagnosis via publishable-key probes + `RUN_LIVE_TESTS=1`
+live suite (4/4 still green — that suite only probes ANON and
+intentionally tolerates 401/42501 on domain tables, so it cannot see this):
+- the function **exists** on live (anon gets
+  `permission denied for function mg_command_center_stats`, not 404
+  PGRST202), and anon stays correctly closed (0012 by design);
+- the other six command-center tables read fine as the authenticated admin
+  — only `community_reports` is privilege-denied (42501 → 403). Since
+  `mg_command_center_stats` is SECURITY INVOKER, its `community_reports`
+  sub-select fails the same way, so the RPC 403 and the fallback's table
+  403 share ONE root cause: **on the live (divergent) lineage,
+  `authenticated` never received (or lost) SELECT on `community_reports`** —
+  repo 0002 issues grants `on all tables` but live was provisioned before
+  that sweep covered this table. This is very likely the true root cause of
+  the ORIGINAL “Command Center loads forever” report — client-side fixes in
+  the previous session only bounded the symptom.
+- Why the suite missed it: PGlite runs the repo migrations (grants present),
+  and the live suite is anon-only by design (no credentials in CI).
+
+**Repair (owner, SQL Editor — idempotent, repo-0002/0012 intent):**
+
+```sql
+grant select on public.community_reports to authenticated;
+grant execute on function public.mg_command_center_stats() to authenticated;
+-- verify: both true
+select has_table_privilege('authenticated','public.community_reports','select') as reports_select,
+       has_function_privilege('authenticated','public.mg_command_center_stats()','execute') as rpc_exec;
+-- sweep: any domain table listed = same-class gap elsewhere
+select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace
+ where n.nspname='public' and c.relkind='r'
+   and not has_table_privilege('authenticated', c.oid, 'select');
+```
+
+RLS remains the boundary (`reports staff read` = `mg_is_staff()`), so the
+SELECT grant exposes nothing to non-staff; anon stays revoked (0009
+posture). Verification: admin reloads Command Center — figures render from
+the RPC with no 403s. If the sweep lists other domain tables, run
+`grant select on all tables in schema public to authenticated;` (repo-0002
+posture; RLS unchanged).
+
 ---
 
 **Session:** UI defect fix — HashRouter anchors (404) + bounded query
