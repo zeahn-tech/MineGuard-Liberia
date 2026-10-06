@@ -1,6 +1,7 @@
 # 13 — Test Strategy
 
-**Status:** 14 suites / 200 tests green as of 2026-09-27: the SQL layer runs
+**Status:** 21 suites / 328 tests green as of 2026-10-06 (324 pass, 4 skip —
+the live-anon probes require RUN_LIVE_TESTS): the SQL layer runs
 against real Postgres (PGlite) applying every migration in
 `supabase/migrations/` — `tests/migration-apply.test.ts` (clean-apply,
 idempotency, signature parity), `tests/rls.test.ts` (role matrix),
@@ -13,7 +14,12 @@ MFA over the GoTrue API, Gap #4), `tests/operator-portal.test.ts` and
 structural isolation proof: route gates asserted, every staff surface fails
 closed for the operator identity, every operator feed strictly own-tenant —
 Priority B §20), `tests/offline-queue.test.ts`,
-`tests/offline-evidence.test.ts`, `tests/template-editor.test.ts` (the §11
+`tests/offline-evidence.test.ts`, `tests/offline-reliability.test.ts`
+(Session 4, doc 05: quota-exhaustion durability, mid-sync crash recovery,
+duplicate-replay idempotency, 409 row_version conflict park → resolve →
+replay, parent-created-offline evidence, backoff/classification units, and
+source contracts for the scheduler/queue manager/0013),
+`tests/template-editor.test.ts` (the §11
 shape contract + admin template CRUD workflow, which found the missing
 templates DELETE policy — migration 0008), `tests/evidence-capture.test.ts`
 (§10 camera capture + batch byte progress + the never-silently-drop queue
@@ -65,13 +71,28 @@ it is not a substitute for the live-anon probes.
 `bun test` (bun:test) — 18 passing, run in CI between typecheck and build:
 
 - `tests/offline-queue.test.ts` — site-code generation, tracking-code format,
-  the client authorization mirror (`canAccessSite`), queue persistence +
-  `clientRef` dedupe, failure-retry semantics (nothing silently dropped),
-  missing-handler handling, and inspection sync ordering.
+  the client authorization mirror (`canAccessSite`), durable queue
+  persistence + `clientRef` dedupe, failure-retry semantics (nothing
+  silently dropped), exponential backoff with jitter vs `force`, permanent
+  failures parked as `dead`, 409 conflict parking + both resolution paths,
+  queue export, missing-handler handling, and inspection sync ordering.
 - `tests/offline-evidence.test.ts` — offline evidence byte queue: persistence,
   per-parent scoping, sync-removes-on-success, sync-keeps-on-failure, removal.
   It runs against the queue's in-memory fallback (Bun has no IndexedDB); the
   browser path uses the same API over IndexedDB.
+- `tests/offline-reliability.test.ts` — Session 4 acceptance suite: quota
+  exhaustion surfaces NOT_SAVED and blocks the saved UI (queue, evidence,
+  and source-contract scans), mid-sync crash recovers `syncing` → retryable
+  failed and replays exactly once, `clientRef` dedupe prevents duplicate
+  replays, a stale `row_version` produces CONFLICT → parked → resolution →
+  replay, evidence for a parent created offline waits for the parent's
+  server id then uploads with a verified sha256, sha256 mismatch/corruption
+  park the file, community_report and corrective_action evidence parents
+  respect staff-vs-operator RLS, and backoff/classification/max-attempts
+  units are pinned. PGlite gotchas: `audit_log.entity_id` is text (cast
+  `id::text`), uuid comparison needs `= id`, and 0013's idempotency check
+  normalizes before re-applying (0002's re-run chain recreates pre-0013
+  policy text).
 
 Authorization rules tests (Firebase Emulator Suite) and the UI smoke layer
 remain [PLANNED].
