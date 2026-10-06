@@ -17,7 +17,19 @@ import { Button } from "@/components/ui/button";
 import NotificationBell from "@/components/NotificationBell";
 import { RequireOperator } from "@/components/RequireAuth";
 import { useAuth } from "@/hooks/use-auth";
-import { readQueue, syncQueue, type QueueItem } from "@/lib/offline-queue";
+import {
+  ensureOfflineReady,
+  readQueue,
+  subscribeQueue,
+  type QueueItem,
+  type SyncApi,
+} from "@/lib/offline-queue";
+import {
+  startSyncScheduler,
+  type SchedulerResult,
+  type SyncScheduler,
+} from "@/lib/offline-sync";
+import { QueueManagerButton } from "@/components/QueueManager";
 import { sectionJump } from "@/lib/utils";
 import { api } from "@/lib/backend";
 import { useMutation } from "@/lib/backend-react";
@@ -32,7 +44,7 @@ import {
   ShieldCheck,
   ShieldEllipsis,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { toast } from "sonner";
 
@@ -84,45 +96,84 @@ export default function OperatorLayout() {
   const [syncing, setSyncing] = useState(false);
 
   const syncReportIncident = useMutation(api.records.reportIncident);
+  const syncRespondCa = useMutation(api.inspections.respondCorrectiveAction);
+  const syncUploadEvidence = useMutation(api.evidence.upload);
   const syncApi = useMemo(
-    () => ({ reportIncident: syncReportIncident }),
-    [syncReportIncident],
+    () => ({
+      reportIncident: syncReportIncident,
+      respondCorrectiveAction: syncRespondCa,
+    }),
+    [syncReportIncident, syncRespondCa],
   );
+
+  // OFF-3 scheduler: startup / visibility / online triggers with exponential
+  // backoff + jitter; the effect only mirrors the durable queue into the
+  // header badge (parity with the staff portal, OFF-5).
+  const schedulerRef = useRef<SyncScheduler | null>(null);
+  const apiRef = useRef(syncApi);
+  apiRef.current = syncApi;
+  const uploadRef = useRef(syncUploadEvidence);
+  uploadRef.current = syncUploadEvidence;
+
+  const announce = useCallback((r: SchedulerResult) => {
+    const synced = (r.queue?.synced ?? 0) + (r.evidence?.synced ?? 0);
+    const conflicts = r.queue?.conflicts ?? 0;
+    const dead = (r.queue?.dead ?? 0) + (r.evidence?.dead ?? 0);
+    const failed = (r.queue?.failed ?? 0) + (r.evidence?.failed ?? 0);
+    if (synced > 0) toast.success(`Synced ${synced} queued item(s)`);
+    if (conflicts > 0)
+      toast.error(
+        `${conflicts} item(s) hit a server conflict — open the queue to resolve them.`,
+      );
+    if (dead > 0)
+      toast.error(`${dead} item(s) rejected or parked — open the queue to review.`);
+    else if (failed > 0 && r.forced)
+      toast.error(`${failed} submission(s) failed — will retry with backoff.`);
+  }, []);
 
   useEffect(() => {
     const refresh = () => setQueue(readQueue());
-    refresh();
-    const interval = setInterval(refresh, 1500);
-    const onOnline = () => {
-      setSyncing(true);
-      syncQueue(syncApi)
-        .then((r) => {
-          if (r.synced > 0) toast.success(`Synced ${r.synced} submission(s)`);
-          if (r.failed > 0) toast.error(`${r.failed} submission(s) failed — will retry`);
-        })
-        .finally(() => {
-          setSyncing(false);
-          refresh();
-        });
+    void ensureOfflineReady().then(refresh);
+    const off = subscribeQueue(refresh);
+    const api: SyncApi = {
+      reportIncident: (a) => apiRef.current.reportIncident(a),
+      respondCorrectiveAction: (a) => apiRef.current.respondCorrectiveAction(a),
     };
-    window.addEventListener("online", onOnline);
+    const scheduler = startSyncScheduler({
+      api,
+      upload: (a) => uploadRef.current(a),
+      onResult: (r) => {
+        announce(r);
+        refresh();
+      },
+      onError: (e) =>
+        toast.error(e instanceof Error ? e.message : "Background sync failed"),
+    });
+    schedulerRef.current = scheduler;
     return () => {
-      clearInterval(interval);
-      window.removeEventListener("online", onOnline);
+      off();
+      scheduler.dispose();
+      schedulerRef.current = null;
     };
-  }, [syncApi]);
+  }, [announce]);
 
   const pendingCount = queue.filter((q) => q.status !== "done").length;
 
   const handleSyncNow = async () => {
+    const scheduler = schedulerRef.current;
+    if (!scheduler) return;
     setSyncing(true);
     try {
-      const r = await syncQueue(syncApi);
-      if (r.synced > 0) toast.success(`Synced ${r.synced} submission(s)`);
-      if (r.synced === 0 && r.failed === 0) toast.info("Queue is empty");
+      const r = await scheduler.syncNow();
+      const synced = (r.queue?.synced ?? 0) + (r.evidence?.synced ?? 0);
+      const failed = (r.queue?.failed ?? 0) + (r.evidence?.failed ?? 0);
+      if (synced === 0 && failed === 0) {
+        if (pendingCount === 0) toast.info("Queue is empty");
+        else toast.info("Nothing ready to send right now — items stay queued");
+      }
+      setQueue(readQueue());
     } finally {
       setSyncing(false);
-      setQueue(readQueue());
     }
   };
 
@@ -188,16 +239,19 @@ export default function OperatorLayout() {
               </Link>
               <div className="ml-auto flex items-center gap-1">
                 <NotificationBell />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-muted-foreground"
-                  onClick={() => void handleSyncNow()}
-                  disabled={syncing}
-                >
-                  <RefreshCw className={`size-3.5 ${syncing ? "animate-spin" : ""}`} />
-                  {pendingCount > 0 ? `${pendingCount} queued` : "Sync"}
-                </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground"
+                onClick={() => void handleSyncNow()}
+                disabled={syncing}
+              >
+                <RefreshCw className={`size-3.5 ${syncing ? "animate-spin" : ""}`} />
+                {pendingCount > 0 ? `${pendingCount} queued` : "Sync"}
+              </Button>
+              <QueueManagerButton
+                label={`Queue${pendingCount > 0 ? ` · ${pendingCount}` : ""}`}
+              />
               </div>
             </header>
 
@@ -239,6 +293,9 @@ export default function OperatorLayout() {
                 <RefreshCw className={`mr-1.5 size-3.5 ${syncing ? "animate-spin" : ""}`} />
                 Sync now
               </Button>
+              <QueueManagerButton
+                label={`Queue${pendingCount > 0 ? ` · ${pendingCount}` : ""}`}
+              />
             </div>
 
             <main id="main-content" tabIndex={-1} className="min-w-0 flex-1">

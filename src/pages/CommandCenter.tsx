@@ -3,7 +3,11 @@ import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
-import { readQueue } from "@/lib/offline-queue";
+import {
+  ensureOfflineReady,
+  readQueue,
+  subscribeQueue,
+} from "@/lib/offline-queue";
 import { useEffect, useState } from "react";
 import { ArrowRight, ShieldAlert, TriangleAlert } from "lucide-react";
 
@@ -30,12 +34,18 @@ export default function CommandCenter() {
   const [queueCount, setQueueCount] = useState(0);
 
   useEffect(() => {
-    setQueueCount(readQueue().filter((q) => q.status !== "done").length);
-    const i = setInterval(
-      () => setQueueCount(readQueue().filter((q) => q.status !== "done").length),
-      2000,
-    );
-    return () => clearInterval(i);
+    const refresh = () =>
+      setQueueCount(readQueue().filter((q) => q.status !== "done").length);
+    // The banner mirrors the durable (IndexedDB) queue: load it, follow
+    // mutations, keep the slow interval as a cross-tab backstop.
+    void ensureOfflineReady().then(refresh);
+    const off = subscribeQueue(refresh);
+    refresh();
+    const i = setInterval(refresh, 2000);
+    return () => {
+      off();
+      clearInterval(i);
+    };
   }, []);
 
   // 8s without data → surface the failure instead of loading forever.

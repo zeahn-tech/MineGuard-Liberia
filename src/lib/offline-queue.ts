@@ -197,37 +197,50 @@ export function newClientRef(): string {
 
 // ---------------------------------------------------------------------------
 // DURABLE MUTATIONS — persist first, mirror second, surface failures (OFF-2).
+//
+// Every mutation is a read-modify-write against the FRESHEST stored value
+// (not the in-memory mirror), so a second tab (or a scheduler run) that
+// wrote in between cannot have its changes clobbered by a stale mirror.
+// The mirror updates only after the durable write verifies.
 // ---------------------------------------------------------------------------
 
-async function persistQueue(next: QueueItem[]): Promise<void> {
+async function transactQueue(fn: (cur: QueueItem[]) => QueueItem[]): Promise<void> {
+  await ensureOfflineReady();
+  const fresh = (await storeGet<QueueItem[]>(QUEUE_KEY)) ?? [];
+  const next = fn(fresh);
   await storeSet(QUEUE_KEY, next); // throws NotSavedError — nothing swallowed
   queueCache = next;
   emitQueue();
 }
 
-async function persistDrafts(next: LocalDraft[]): Promise<void> {
+async function transactDrafts(fn: (cur: LocalDraft[]) => LocalDraft[]): Promise<void> {
+  await ensureOfflineReady();
+  const fresh = (await storeGet<LocalDraft[]>(DRAFTS_KEY)) ?? [];
+  const next = fn(fresh);
   await storeSet(DRAFTS_KEY, next);
   draftsCache = next;
   emitQueue();
 }
 
 export async function upsertDraft(draft: LocalDraft): Promise<void> {
-  await ensureOfflineReady();
-  const drafts = readDrafts().filter((d) => d.clientRef !== draft.clientRef);
-  drafts.push({ ...draft, updatedAt: Date.now() });
-  await persistDrafts(drafts);
+  await transactDrafts((cur) => [
+    ...cur.filter((d) => d.clientRef !== draft.clientRef),
+    { ...draft, updatedAt: Date.now() },
+  ]);
 }
 
 export async function deleteDraft(clientRef: string): Promise<void> {
-  await ensureOfflineReady();
-  const drafts = readDrafts().filter((d) => d.clientRef !== clientRef);
-  await persistDrafts(drafts);
+  await transactDrafts((cur) => cur.filter((d) => d.clientRef !== clientRef));
 }
 
 async function enqueue(entry: Omit<QueueItem, "id" | "createdAt" | "attempts" | "status">): Promise<QueueItem> {
   await ensureOfflineReady();
-  const existing = readQueue().find((q) => q.clientRef === entry.clientRef);
-  if (existing) return existing;
+  const fresh = (await storeGet<QueueItem[]>(QUEUE_KEY)) ?? [];
+  const existing = fresh.find((q) => q.clientRef === entry.clientRef);
+  if (existing) {
+    queueCache = fresh;
+    return existing;
+  }
   const full: QueueItem = {
     ...entry,
     id: newClientRef(),
@@ -235,7 +248,7 @@ async function enqueue(entry: Omit<QueueItem, "id" | "createdAt" | "attempts" | 
     attempts: 0,
     createdAt: Date.now(),
   };
-  await persistQueue([...readQueue(), full]);
+  await transactQueue((cur) => [...cur, full]);
   return full;
 }
 
@@ -325,19 +338,30 @@ export function enqueueCaResponse(item: {
 }
 
 export async function updateQueueItem(id: string, patch: Partial<QueueItem>): Promise<void> {
-  await ensureOfflineReady();
-  await persistQueue(
-    readQueue().map((q) => (q.id === id ? { ...q, ...patch } : q)),
+  await transactQueue((cur) =>
+    cur.map((q) => (q.id === id ? { ...q, ...patch } : q)),
   );
 }
 
 export async function removeQueueItem(id: string): Promise<void> {
-  await ensureOfflineReady();
-  await persistQueue(readQueue().filter((q) => q.id !== id));
+  await transactQueue((cur) => cur.filter((q) => q.id !== id));
 }
 
 export function pendingCount(): number {
   return readQueue().filter((q) => q.status !== "done").length;
+}
+
+/** Earliest automatic-retry timestamp across parked items — the scheduler
+ *  arms its backoff timer from this (conflict/dead items are excluded:
+ *  they only move through explicit human actions). */
+export function peekNextRetryAt(): number | null {
+  let min: number | null = null;
+  for (const q of queueCache ?? []) {
+    if (q.status === "conflict" || q.status === "dead" || q.status === "done")
+      continue;
+    if (q.nextRetryAt && (min === null || q.nextRetryAt < min)) min = q.nextRetryAt;
+  }
+  return min;
 }
 
 // ---------------------------------------------------------------------------
@@ -434,6 +458,10 @@ type Api = {
     expectedRowVersion?: number;
   }) => Promise<any>;
 };
+
+/** The handler bundle a layout binds into syncQueue (exported for the
+ *  sync scheduler, offline-sync.ts). */
+export type SyncApi = Api;
 
 export interface SyncResult {
   synced: number;

@@ -1,7 +1,13 @@
 // ---------------------------------------------------------------------------
-// MINEGUARD LIBERIA — FIRST AUTOMATED TEST SUITE (doc 13 test strategy)
-// Runner: `bun test` (bun:test). Covers the pure logic and the offline queue
-// sync engine — the highest-risk, fully local, dependency-free units.
+// MINEGUARD LIBERIA — OFFLINE QUEUE SUITE (doc 13 test strategy)
+// Runner: `bun test` (bun:test). Covers the pure logic helpers and the
+// offline queue sync engine — the highest-risk, fully local units.
+//
+// Session 4 (OFF-1…4): the queue is now durable-first (IndexedDB via
+// offline-store, localStorage fallback here — Bun has no IndexedDB), every
+// mutation is async and surfaced, failures carry a classification and a
+// backoff window, and 409 conflicts park for human resolution. The tests
+// below exercise exactly those semantics.
 // ---------------------------------------------------------------------------
 
 import { describe, test, expect, beforeEach } from "bun:test";
@@ -9,6 +15,8 @@ import {
   enqueueInspectionSubmission,
   enqueueIncidentReport,
   enqueueObservationReport,
+  enqueueCaResponse,
+  ensureOfflineReady,
   newClientRef,
   readDrafts,
   readQueue,
@@ -19,7 +27,12 @@ import {
   pendingCount,
   removeQueueItem,
   updateQueueItem,
+  retryQueueItem,
+  resolveConflictKeepMine,
+  buildQueueExport,
+  __resetOfflineQueue,
 } from "../src/lib/offline-queue";
+import { NotSavedError } from "../src/lib/offline-store";
 
 // Minimal localStorage for the bun runtime (browser provides it natively).
 const store = new Map<string, string>();
@@ -30,9 +43,12 @@ const store = new Map<string, string>();
   removeItem: (k: string) => void store.delete(k),
 };
 
-// Flush each test so queue state never leaks between cases.
-beforeEach(() => {
+// Flush each test so queue state never leaks between cases (the durable
+// store caches an in-memory mirror — reset BOTH layers).
+beforeEach(async () => {
   store.clear();
+  await __resetOfflineQueue();
+  await ensureOfflineReady();
 });
 
 describe("site code generator (types.ts)", () => {
@@ -95,16 +111,16 @@ describe("authorization mirror (canAccessSite)", () => {
 });
 
 describe("offline queue: inspection submissions", () => {
-  test("enqueue persists before sync and dedupes by clientRef", () => {
+  test("enqueue persists before sync and dedupes by clientRef", async () => {
     const ref = newClientRef();
-    enqueueInspectionSubmission({
+    await enqueueInspectionSubmission({
       clientRef: ref,
       siteId: "s1",
       siteCode: "MGL-NIMBA-0001",
       templateId: "t1",
       answers: { "0:0": true },
     });
-    enqueueInspectionSubmission({
+    await enqueueInspectionSubmission({
       clientRef: ref,
       siteId: "s1",
       siteCode: "MGL-NIMBA-0001",
@@ -113,10 +129,14 @@ describe("offline queue: inspection submissions", () => {
     });
     expect(readQueue()).toHaveLength(1);
     expect(pendingCount()).toBe(1);
+    // The durable layer holds it, not just the mirror (OFF-1).
+    const raw = store.get("mg.offline.queue.v1");
+    expect(raw).toBeTruthy();
+    expect(JSON.parse(raw as string)).toHaveLength(1);
   });
 
-  test("drafts persist and delete cleanly", () => {
-    upsertDraft({
+  test("drafts persist and delete cleanly", async () => {
+    await upsertDraft({
       clientRef: "d1",
       siteId: "s1",
       siteCode: "MGL-NIMBA-0001",
@@ -125,16 +145,16 @@ describe("offline queue: inspection submissions", () => {
       updatedAt: Date.now(),
     });
     expect(readDraft("d1")?.siteId).toBe("s1");
-    deleteDraft("d1");
+    await deleteDraft("d1");
     expect(readDraft("d1")).toBeUndefined();
     expect(readDrafts()).toHaveLength(0);
   });
 });
 
 describe("offline queue: incident + observation submissions", () => {
-  test("incident report persists payload and dedupes by clientRef", () => {
+  test("incident report persists payload and dedupes by clientRef", async () => {
     const ref = newClientRef();
-    enqueueIncidentReport({
+    const item = {
       clientRef: ref,
       siteId: "s1",
       siteCode: "MGL-NIMBA-0001",
@@ -143,27 +163,18 @@ describe("offline queue: incident + observation submissions", () => {
       description: "Laceration from screen mesh",
       occurredAt: Date.now() - 1000,
       injured: 1,
-    });
-    // Same clientRef again must not duplicate.
-    enqueueIncidentReport({
-      clientRef: ref,
-      siteId: "s1",
-      siteCode: "MGL-NIMBA-0001",
-      type: "injury",
-      severity: "medium",
-      description: "Laceration from screen mesh",
-      occurredAt: Date.now() - 1000,
-      injured: 1,
-    });
+    };
+    await enqueueIncidentReport(item);
+    await enqueueIncidentReport(item); // same clientRef again must not duplicate
     expect(readQueue()).toHaveLength(1);
-    const item = readQueue()[0];
-    expect(item.kind).toBe("incidentReport");
-    expect(item.payload?.type).toBe("injury");
-    expect(item.payload?.injured).toBe(1);
+    const q = readQueue()[0];
+    expect(q.kind).toBe("incidentReport");
+    expect(q.payload?.type).toBe("injury");
+    expect(q.payload?.injured).toBe(1);
   });
 
-  test("observation report persists payload including GPS", () => {
-    enqueueObservationReport({
+  test("observation report persists payload including GPS", async () => {
+    await enqueueObservationReport({
       clientRef: "obs-1",
       siteId: "s2",
       siteCode: "MGL-LOFA-0001",
@@ -184,7 +195,7 @@ describe("offline queue: incident + observation submissions", () => {
 
 describe("sync engine", () => {
   test("successful incident sync removes the item and reports synced", async () => {
-    enqueueIncidentReport({
+    await enqueueIncidentReport({
       clientRef: "inc-1",
       siteId: "s1",
       siteCode: "MGL-NIMBA-0001",
@@ -197,17 +208,21 @@ describe("sync engine", () => {
     const { synced, failed } = await syncQueue({
       reportIncident: async (args) => {
         calls.push(`incident:${(args as { clientRef?: string }).clientRef}`);
-        return "id";
+        return "srv-inc-1";
       },
     });
     expect(synced).toBe(1);
     expect(failed).toBe(0);
     expect(readQueue()).toHaveLength(0);
     expect(calls).toEqual(["incident:inc-1"]);
+    // OFF-6: the clientRef → server id mapping is recorded for local-parent
+    // evidence resolution.
+    const { resolveLocalRef } = await import("../src/lib/offline-store");
+    expect(await resolveLocalRef("inc-1")).toBe("srv-inc-1");
   });
 
   test("failed sync keeps the item queued with retry info (never drops)", async () => {
-    enqueueIncidentReport({
+    await enqueueIncidentReport({
       clientRef: "inc-2",
       siteId: "s1",
       siteCode: "MGL-NIMBA-0001",
@@ -226,12 +241,40 @@ describe("sync engine", () => {
     const item = readQueue()[0];
     expect(item.status).toBe("failed");
     expect(item.lastError).toBe("network down");
+    expect(item.failureKind).toBe("retryable");
+    // OFF-3: a backoff window is armed for the next AUTOMATIC attempt.
+    expect(item.nextRetryAt).toBeGreaterThan(Date.now());
     // The failed item stays — nothing is silently dropped.
     expect(pendingCount()).toBe(1);
   });
 
+  test("automatic sync respects the backoff window; force ignores it", async () => {
+    await enqueueIncidentReport({
+      clientRef: "inc-backoff",
+      siteId: "s1",
+      siteCode: "MGL-NIMBA-0001",
+      type: "fire",
+      severity: "high",
+      description: "Fuel storage fire",
+      occurredAt: Date.now(),
+    });
+    const api = {
+      reportIncident: async () => {
+        throw new Error("boom");
+      },
+    };
+    await syncQueue(api); // attempt 1 → arms nextRetryAt
+    const again = await syncQueue(api); // still inside the window → waiting
+    expect(again.synced).toBe(0);
+    expect(again.failed).toBe(0);
+    expect(again.waiting).toBe(1);
+    const forced = await syncQueue(api, { force: true }); // manual retry
+    expect(forced.failed).toBe(1);
+    expect(readQueue()[0].attempts).toBe(2);
+  });
+
   test("observation sync passes clientRef through for server-side dedupe", async () => {
-    enqueueObservationReport({
+    await enqueueObservationReport({
       clientRef: "obs-2",
       siteId: "s2",
       siteCode: "MGL-LOFA-0001",
@@ -244,7 +287,7 @@ describe("sync engine", () => {
     await syncQueue({
       reportObservation: async (args) => {
         got = args as Record<string, unknown>;
-        return "id";
+        return "obs-id";
       },
     });
     expect(got).not.toBeNull();
@@ -253,7 +296,7 @@ describe("sync engine", () => {
   });
 
   test("missing handler fails the item without throwing (NO_SYNC_HANDLER)", async () => {
-    enqueueIncidentReport({
+    await enqueueIncidentReport({
       clientRef: "inc-3",
       siteId: "s1",
       siteCode: "MGL-NIMBA-0001",
@@ -266,10 +309,48 @@ describe("sync engine", () => {
     expect(synced).toBe(0);
     expect(failed).toBe(1);
     expect(readQueue()[0].lastError).toBe("NO_SYNC_HANDLER");
+    // Still queued: a later render may bind the handler — retryable, not dead.
+    expect(readQueue()[0].status).toBe("failed");
+    expect(readQueue()[0].failureKind).toBe("retryable");
+  });
+
+  test("permanent failures park as dead without burning retries", async () => {
+    await enqueueIncidentReport({
+      clientRef: "inc-403",
+      siteId: "s1",
+      siteCode: "MGL-NIMBA-0001",
+      type: "other",
+      severity: "low",
+      description: "Misc",
+      occurredAt: Date.now(),
+    });
+    const r = await syncQueue({
+      reportIncident: async () => {
+        throw new Error("FORBIDDEN");
+      },
+    });
+    expect(r.dead).toBe(1);
+    const item = readQueue()[0];
+    expect(item.status).toBe("dead");
+    expect(item.failureKind).toBe("permanent");
+    expect(item.attempts).toBe(1);
+    // Parked items are skipped by later automatic runs…
+    const again = await syncQueue({
+      reportIncident: async () => "should-not-run",
+    });
+    expect(again.synced).toBe(0);
+    expect(again.dead).toBe(1);
+    // …until a human retries them explicitly from the queue manager.
+    await retryQueueItem(item.id);
+    const retried = await syncQueue({
+      reportIncident: async () => "srv-ok",
+    });
+    expect(retried.synced).toBe(1);
+    expect(readQueue()).toHaveLength(0);
   });
 
   test("inspection sync runs draft → update → submit in order", async () => {
-    enqueueInspectionSubmission({
+    await enqueueInspectionSubmission({
       clientRef: "insp-1",
       siteId: "s1",
       siteCode: "MGL-NIMBA-0001",
@@ -298,21 +379,107 @@ describe("sync engine", () => {
     expect(readQueue()).toHaveLength(0);
     // Draft is cleaned up after successful sync.
     expect(readDrafts()).toHaveLength(0);
+    // The inspection's server id became the local parent reference.
+    const { resolveLocalRef } = await import("../src/lib/offline-store");
+    expect(await resolveLocalRef("insp-1")).toBe("insp-id");
+  });
+
+  test("409 conflict parks the item with the server snapshot (OFF-4)", async () => {
+    await enqueueCaResponse({
+      clientRef: "ca-1",
+      siteId: "s1",
+      siteCode: "MGL-NIMBA-0001",
+      caId: "ca-row",
+      operatorNote: "Repaired the guard",
+      expectedRowVersion: 3,
+    });
+    const r = await syncQueue({
+      respondCorrectiveAction: async () => {
+        const e = new Error(
+          `CONFLICT:${JSON.stringify({
+            server: {
+              status: "submitted",
+              operatorNote: "earlier response",
+              rowVersion: 5,
+            },
+          })}`,
+        ) as Error & { code?: string };
+        e.code = "409";
+        throw e;
+      },
+    });
+    expect(r.conflicts).toBe(1);
+    const item = readQueue()[0];
+    expect(item.status).toBe("conflict");
+    expect(item.failureKind).toBe("conflict");
+    expect(item.serverSnapshot).toEqual({
+      status: "submitted",
+      operatorNote: "earlier response",
+      rowVersion: 5,
+    });
+    // Automatic runs never touch a parked conflict.
+    const again = await syncQueue({
+      respondCorrectiveAction: async () => "should-not-run",
+    });
+    expect(again.synced).toBe(0);
+    expect(again.conflicts).toBe(1);
+
+    // Human resolution: "apply mine" re-arms row_version to the server's
+    // current version, then the retry succeeds.
+    await resolveConflictKeepMine(item.id);
+    const resolved = readQueue()[0];
+    expect(resolved.status).toBe("pending");
+    expect(resolved.ca?.expectedRowVersion).toBe(5);
+    const seen: number[] = [];
+    const ok = await syncQueue({
+      respondCorrectiveAction: async (args) => {
+        seen.push(args.expectedRowVersion ?? -1);
+        return undefined;
+      },
+    });
+    expect(ok.synced).toBe(1);
+    expect(seen).toEqual([5]);
   });
 });
 
-describe("queue hygiene", () => {
-  test("updateQueueItem patches status; removeQueueItem deletes", () => {
-    const item = enqueueInspectionSubmission({
+describe("queue hygiene + export (OFF-5)", () => {
+  test("updateQueueItem patches status; removeQueueItem deletes", async () => {
+    const item = await enqueueInspectionSubmission({
       clientRef: "h1",
       siteId: "s1",
       siteCode: "MGL-NIMBA-0001",
       templateId: "t1",
       answers: {},
     });
-    updateQueueItem(item.id, { status: "syncing" });
+    await updateQueueItem(item.id, { status: "syncing" });
     expect(readQueue()[0].status).toBe("syncing");
-    removeQueueItem(item.id);
+    await removeQueueItem(item.id);
     expect(readQueue()).toHaveLength(0);
+  });
+
+  test("buildQueueExport snapshots queue, drafts and local refs as JSON", async () => {
+    await enqueueIncidentReport({
+      clientRef: "exp-1",
+      siteId: "s1",
+      siteCode: "MGL-NIMBA-0001",
+      type: "fire",
+      severity: "high",
+      description: "Export me",
+      occurredAt: Date.now(),
+    });
+    await upsertDraft({
+      clientRef: "exp-d",
+      siteId: "s1",
+      siteCode: "MGL-NIMBA-0001",
+      templateId: "t1",
+      answers: { a: 1 },
+      updatedAt: Date.now(),
+    });
+    const dump = await buildQueueExport();
+    expect(dump.queue).toHaveLength(1);
+    expect(dump.drafts).toHaveLength(1);
+    expect(dump.exportedAt).toBeTruthy();
+    // Must be serializable for the download.
+    expect(() => JSON.stringify(dump)).not.toThrow();
   });
 });

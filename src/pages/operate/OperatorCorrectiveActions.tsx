@@ -22,6 +22,11 @@ import { useState } from "react";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { exportComplianceObligations } from "@/lib/export-csv";
+import EvidenceSection from "@/components/EvidenceSection";
+import {
+  enqueueCaResponse,
+  newClientRef,
+} from "@/lib/offline-queue";
 
 const DAY = 86_400_000;
 
@@ -59,21 +64,61 @@ export default function OperatorCorrectiveActions() {
       toast.error("Describe the action taken before submitting.");
       return;
     }
+    const obligation = obligations.find((o) => o._id === caId);
     setBusy(true);
     try {
-      await respond({ caId, operatorNote: note.trim() });
+      // row_version gate (OFF-4): the server refuses with CONFLICT if the
+      // reviewing authority changed this action after we loaded it.
+      await respond({
+        caId,
+        operatorNote: note.trim(),
+        expectedRowVersion: obligation?.rowVersion,
+      });
       toast.success("Response submitted for verification.");
       setRespondingId(null);
       setNote("");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
-      toast.error(
-        msg.includes("NOT_FOUND")
-          ? "That obligation is no longer visible to your account."
-          : msg.includes("FORBIDDEN")
-            ? "Only the site's operator can respond, and only while the action is open."
-            : "Could not submit the response.",
-      );
+      if (msg.startsWith("CONFLICT:")) {
+        toast.error(
+          "This action changed on the server after you opened it — your response was NOT sent. The card refreshed; re-read it and submit again if your response still applies.",
+        );
+        setRespondingId(null);
+        setNote("");
+      } else if (msg.includes("NOT_FOUND")) {
+        toast.error("That obligation is no longer visible to your account.");
+      } else if (msg.includes("FORBIDDEN")) {
+        toast.error(
+          "Only the site's operator can respond, and only while the action is open.",
+        );
+      } else if (!navigator.onLine || msg.includes("Failed to fetch")) {
+        // OFFLINE PATH (operator parity): persist the response to the device
+        // queue; the scheduler submits it on reconnect with the same
+        // row_version, so a concurrent change still lands as a resolvable
+        // conflict instead of a silent overwrite.
+        try {
+          await enqueueCaResponse({
+            clientRef: newClientRef(),
+            siteId: obligation?.siteId ?? "",
+            siteCode: obligation?.siteCode ?? "",
+            caId,
+            operatorNote: note.trim(),
+            expectedRowVersion: obligation?.rowVersion,
+          });
+        } catch (e) {
+          toast.error(
+            `NOT saved on this device — ${e instanceof Error ? e.message : "storage unavailable"}`,
+          );
+          return;
+        }
+        toast.info(
+          "You appear to be offline — the response is saved on this device and will submit automatically.",
+        );
+        setRespondingId(null);
+        setNote("");
+      } else {
+        toast.error("Could not submit the response.");
+      }
     } finally {
       setBusy(false);
     }
@@ -225,6 +270,17 @@ export default function OperatorCorrectiveActions() {
                     </div>
                   </div>
                 )}
+                {/* Operator document upload on the CA response (EVD-1):
+                    supporting files attach to the corrective action itself —
+                    queued bytes survive offline and replay with the same
+                    guarantees as every other evidence capture. */}
+                <div className="mt-3">
+                  <EvidenceSection
+                    parentType="corrective_action"
+                    parentId={o._id}
+                    siteId={o.siteId}
+                  />
+                </div>
               </CardContent>
             </Card>
           );

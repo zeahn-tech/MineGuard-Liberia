@@ -48,6 +48,7 @@ import {
   syncEvidenceQueue,
   type PendingEvidence,
 } from "@/lib/offline-evidence";
+import { sha256Hex } from "@/lib/sha256";
 
 const MAX_BYTES = 25 * 1024 * 1024; // mirrored in rules + data layer
 
@@ -94,7 +95,8 @@ export default function EvidenceSection({
 }: {
   parentType: Evidence["parentType"];
   parentId: string;
-  siteId: string;
+  /** Omitted for site-less community_report attachments (migration 0013). */
+  siteId?: string;
 }) {
   const { user } = useAuth();
   // `refresh` is a nonce: the generic live() watcher cannot watch /evidence
@@ -228,14 +230,18 @@ export default function EvidenceSection({
         capturedAt,
       };
       try {
+        // EVD-1: hash before send — the queue records the digest, the data
+        // layer re-hashes and refuses a mismatch.
+        const digest = await sha256Hex(file);
         if (typeof navigator !== "undefined" && navigator.onLine === false) {
           // The upload mutation takes `file`; the queue stores bytes as `blob`.
-          await enqueuePendingEvidence({ ...meta, blob: file });
+          await enqueuePendingEvidence({ ...meta, blob: file, sha256: digest ?? undefined });
           setStatus(item.key, "queued");
           queued++;
         } else {
           await upload({
             ...meta,
+            sha256: digest ?? undefined,
             file,
             onProgress: (p: { loaded: number; total: number }) =>
               setProgress(item.key, p.loaded, p.total),
@@ -246,9 +252,21 @@ export default function EvidenceSection({
       } catch (e) {
         if (isNetworkError(e)) {
           // Never lose the bytes on a connectivity failure — queue and retry.
-          await enqueuePendingEvidence({ ...meta, blob: file });
-          setStatus(item.key, "queued");
-          queued++;
+          // If the QUEUE itself cannot persist (quota), this rejects too and
+          // the file is marked failed — never reported as saved (OFF-2).
+          try {
+            const digest = await sha256Hex(file);
+            await enqueuePendingEvidence({ ...meta, blob: file, sha256: digest ?? undefined });
+            setStatus(item.key, "queued");
+            queued++;
+          } catch (qErr) {
+            setStatus(
+              item.key,
+              "failed",
+              qErr instanceof Error ? qErr.message : "Not saved on this device",
+            );
+            failed++;
+          }
         } else {
           setStatus(
             item.key,

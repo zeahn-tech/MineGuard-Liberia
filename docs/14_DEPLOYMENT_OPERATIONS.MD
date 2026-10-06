@@ -23,19 +23,26 @@ with required reviewers).
 - Supabase project (Postgres + Auth + Storage under the Supabase project;
   migrations in `supabase/migrations/` are the schema source of truth):
   - **Postgres** — all domain data (tables per doc 03), RLS-enforced.
-    **Migration state [2026-10-05, SEC-4 session]:** repo carries 0001–0012.
-    The live project runs 0001–0011 (the owner applied 0009–0011 through
-    the SQL Editor; probe-verified — doc 11). **0012
-    (`mg_command_center_stats`, doc 11 SEC-4) still needs `supabase db push`
-    — or an SQL-Editor run of
-    `supabase/migrations/0012_command_center_stats.sql` — by the owner.**
-    Until it lands, the live Command Center serves from the client-side
+    **Migration state [2026-10-06, offline-reliability Session 4]:** repo
+    carries 0001–0013. The live project runs 0001–0011 (the owner applied
+    0009–0011 through the SQL Editor; probe-verified — doc 11). **0012
+    (`mg_command_center_stats`, doc 11 SEC-4) and 0013 (offline reliability:
+    evidence parents, sha256, site-less evidence — doc 11 Session 4) both
+    still need `supabase db push` — or SQL-Editor runs of the two files, in
+    filename order — by the owner.**
+    Until 0012 lands, the live Command Center serves from the client-side
     fallback: paged reads aggregated in the browser (exact at any table
     size, heavier on the wire, one console warning saying so). Every other
     SEC-4 guarantee is client code and already live: whole-table reads page
     with an explicit Range past PostgREST's 1,000-row `db-max-rows` cap,
     so no statistic, risk score or export is silently truncated. Do not
     assume the 0012 RPC exists on the live project until it is pushed.
+    Until 0013 lands, the two NEW evidence parents fail server-side (enum
+    values absent) and their UI should stay untested live; the existing
+    three parents degrade gracefully — the data layer's sha256 insert
+    retries without the digest when the column is missing (one console
+    warning), so inspection/incident/observation evidence keeps working on
+    the pre-0013 schema. Push 0012 then 0013 together.
   - **Auth (GoTrue)** — email/password; TOTP MFA supported (doc 04, Gap #4).
   - **Storage** — evidence media under the uid-first-folder contract.
 - No standalone API servers; no containers to manage.

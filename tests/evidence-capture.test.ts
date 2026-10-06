@@ -234,8 +234,11 @@ describe("never silently drop: the offline guarantee across §10 features", () =
     expect(entry).toBeTruthy();
     expect(entry!.attempts).toBeGreaterThanOrEqual(1);
     expect(entry!.lastError).toContain("simulated outage");
-    // Cleanup: a real upload now succeeds and removes it.
-    await syncEvidenceQueue((a) => api.evidence.upload(a as never));
+    // Cleanup: a manual (forced) retry ignores the backoff window the failed
+    // attempt armed — a real upload now succeeds and removes it.
+    await syncEvidenceQueue((a) => api.evidence.upload(a as never), {
+      force: true,
+    });
     const after = await readPendingEvidenceForParent("incident", f.incidentA);
     expect(after.some((p) => p.id === item.id)).toBe(false);
   });

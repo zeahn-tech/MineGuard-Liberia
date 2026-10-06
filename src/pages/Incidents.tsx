@@ -175,7 +175,9 @@ function ReportDialog() {
       // syncs immediately; if offline it stays queued and syncs on reconnect
       // with server-side clientRef dedupe (nothing is lost or duplicated).
       const clientRef = newClientRef();
-      enqueueIncidentReport({
+      // Awaited: if the device cannot store the item (quota, private mode)
+      // the rejection lands in the catch below and NO "saved" toast shows.
+      await enqueueIncidentReport({
         clientRef,
         siteId: form.siteId,
         siteCode: sites?.find((s) => s._id === form.siteId)?.code ?? "site",

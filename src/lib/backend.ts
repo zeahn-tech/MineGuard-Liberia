@@ -2578,7 +2578,7 @@ export const api = {
       }
       // 3. Create the metadata row — reads only work once this exists, so a
       //    failed write leaves no readable reference to the bytes.
-      const { error: dbErr } = await supabase.from("evidence").insert({
+      const row = {
         id: rowId,
         storage_path: storagePath,
         parent_type: args.parentType,
@@ -2592,7 +2592,19 @@ export const api = {
         captured_at: args.capturedAt == null ? null : iso(args.capturedAt),
         uploaded_by_id: user.uid,
         sha256: storedSha,
-      });
+      };
+      let { error: dbErr } = await supabase.from("evidence").insert(row);
+      if (dbErr && String((dbErr as { message?: string }).message ?? "").includes("sha256")) {
+        // Pre-0013 lineage (live until migration 0013 is applied): the
+        // column does not exist yet. Record the row WITHOUT the digest
+        // rather than failing every upload on that lineage; the digest is
+        // recomputed whenever verification needs it.
+        console.warn(
+          "evidence.upload: evidence.sha256 missing (0013 not applied) — storing row without digest",
+        );
+        const { sha256: _omit, ...legacyRow } = row;
+        ({ error: dbErr } = await supabase.from("evidence").insert(legacyRow));
+      }
       if (dbErr) throw backendError(dbErr);
       await logAudit({
         actorId: user.uid,

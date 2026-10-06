@@ -4,14 +4,24 @@
 attach implemented (on-device queue, 2026-09-23); camera capture and batch
 upload remain planned.
 
-## Data model [IMPLEMENTED]
+## Data model [IMPLEMENTED — extended 2026-10-06, EVD-1]
 
-`evidence` collection: `storagePath` (Cloud Storage for Firebase,
-`evidence/{uid}/{evidenceDocId}__{fileName}`), `parentType`
-(inspection/incident/observation), `parentId`, **mandatory** `siteId`,
-`kind` (photo/video/audio/document — derived from MIME), `fileName`,
-`mimeType`, `sizeBytes`, `caption`, `capturedAt`, `uploadedById`,
-`createdAt`.
+`evidence` collection: `storagePath` (Supabase Storage private bucket
+`evidence`, path `{uid}/{evidenceRowId}__{fileName}`), `parentType`
+(**inspection / incident / observation / community_report /
+corrective_action** — the last two added by migration 0013), `parentId`,
+`siteId` (**mandatory except community-report attachments**, which belong
+to no site — migration 0013 made the column nullable for that staff-only
+triage case), `kind` (photo/video/audio/document — derived from MIME),
+`fileName`, `mimeType`, `sizeBytes`, `caption`, `capturedAt`,
+`uploadedById`, **`sha256`** (lowercase-hex digest of the uploaded bytes,
+CHECK-pinned format; null only for pre-0013 rows), `createdAt`.
+
+The digest is computed twice independently — once when capture enters the
+offline queue (recorded on the queued item), once by the data layer at
+upload — and a mismatch is refused (`EVIDENCE_HASH_MISMATCH`) rather than
+stored; queued replays re-hash their bytes first and refuse corruption
+(`EVIDENCE_CORRUPT`, parked, never uploaded).
 
 ## Upload flow [IMPLEMENTED 2026-09-23]
 
@@ -56,17 +66,21 @@ pages — inspection (`/portal/inspections/:id`), incident
   `evidence.getUrl`.
 - Visible to staff and to operators on their own sites' records; upload
   hidden for unassigned accounts (server still re-checks).
-- **Offline attach [IMPLEMENTED 2026-09-23]** — when offline, or on a
-  connectivity failure (never on a policy denial), the file bytes are saved in
-  an on-device IndexedDB queue (`src/lib/offline-evidence.ts`) and rendered as
-  "queued for upload". The queue replays on the `online` event and on mount;
-  successful uploads are removed from the queue and the list refreshes, while
-  a failed replay stays queued with retry info — nothing is silently dropped.
-  Because the evidence list rule is parent-joined and cannot be watched safely
-  by a generic collection listener, the section refreshes via a post-upload
-  nonce rather than a live watcher.
-
-[PLANNED] Camera capture UX, batch upload with per-file progress.
+- **Offline attach [IMPLEMENTED 2026-09-23 — extended 2026-10-06]** —
+  when offline, or on a connectivity failure (never on a policy denial),
+  the file bytes are saved in the on-device IndexedDB queue
+  (`src/lib/offline-evidence.ts`) and rendered as "queued for upload".
+  Session 4: every enqueue computes + records the SHA-256 (verified before
+  each replay), failures are classified with jittered exponential backoff
+  up to a max attempt count (then parked, never dropped), a file whose
+  parent was created offline waits on its `parentRef` and uploads once the
+  parent receives its server id, and a device that cannot persist the bytes
+  raises `NotSavedError` so the file shows FAILED instead of "saved on
+  device". The queue manager (doc 05) lists, retries, exports and discards
+  queued files with confirmation. Because the evidence list rule is
+  parent-joined and cannot be watched safely by a generic collection
+  listener, the section refreshes via a post-upload nonce rather than a
+  live watcher.
 
 ## Serving and ACL [IMPLEMENTED — mint gate, 2026-09-26]
 
@@ -76,7 +90,10 @@ the caller's CURRENT role/tenant (`mg_can_access_site`) at every mint, clamps
 the TTL server-side (client requests 120s; hard bounds 30–300s), logs the
 mint to the definer-only `evidence_url_audit` table, and only then returns
 the storage path for signing. The storage-layer read policy (metadata join +
-`mg_can_access_site`) remains the second, independent layer. A leaked link
+`mg_can_access_site`) remains the second, independent layer. Since migration
+0013 the mint gate, the storage read policy AND the metadata read policy all
+admit **site-less** rows for staff accounts only — one predicate across every
+evidence read path. A leaked link
 expires in ≤120s; a permission change refuses the next mint immediately.
 Full rationale and residuals: doc 04, "File access"; test coverage:
 `tests/evidence-url.test.ts`.

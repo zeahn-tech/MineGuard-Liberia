@@ -15,6 +15,7 @@ import {
   readPendingEvidenceForParent,
   removePendingEvidence,
   syncEvidenceQueue,
+  __resetEvidenceQueueForTests,
 } from "../src/lib/offline-evidence";
 
 async function clearQueue() {
@@ -35,7 +36,10 @@ function sample(overrides: Record<string, unknown> = {}) {
   };
 }
 
-beforeEach(clearQueue);
+beforeEach(async () => {
+  __resetEvidenceQueueForTests();
+  await clearQueue();
+});
 
 describe("offline evidence queue", () => {
   test("enqueue persists bytes and assigns id/attempts", async () => {
@@ -81,7 +85,7 @@ describe("offline evidence queue", () => {
       return "evidence-id";
     });
 
-    expect(result).toEqual({ synced: 1, failed: 0 });
+    expect(result).toEqual({ synced: 1, failed: 0, waiting: 0, dead: 0 });
     expect(uploaded).toEqual(["photo.jpg"]);
     expect(await pendingEvidenceCount()).toBe(0);
   });
@@ -93,11 +97,13 @@ describe("offline evidence queue", () => {
       throw new Error("network request failed");
     });
 
-    expect(result).toEqual({ synced: 0, failed: 1 });
+    expect(result).toEqual({ synced: 0, failed: 1, waiting: 0, dead: 0 });
     const all = await readPendingEvidence();
     expect(all).toHaveLength(1);
     expect(all[0].attempts).toBe(1);
     expect(all[0].lastError).toContain("network request failed");
+    // OFF-3: the retry window is armed for the next automatic pass.
+    expect(all[0].nextRetryAt).toBeGreaterThan(Date.now());
   });
 
   test("removePendingEvidence deletes the item", async () => {

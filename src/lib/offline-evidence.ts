@@ -47,7 +47,8 @@ export type PendingEvidence = {
   parentId: string;
   /** clientRef of an offline-created parent (OFF-6); resolves on sync. */
   parentRef?: string;
-  siteId: string;
+  /** Absent only for site-less community_report attachments (0013). */
+  siteId?: string;
   fileName: string;
   mimeType: string;
   blob: Blob;
@@ -71,7 +72,8 @@ export type EvidenceUploader = (args: {
   mimeType: string;
   parentType: EvidenceParentType;
   parentId: string;
-  siteId: string;
+  /** Absent only for site-less community_report attachments (0013). */
+  siteId?: string;
   caption?: string;
   capturedAt?: number;
   /** Declared digest; the data layer re-hashes the bytes and refuses a
@@ -236,8 +238,13 @@ export interface EvidenceSyncResult {
   dead: number;
 }
 
+let activeEvidenceSync: Promise<EvidenceSyncResult> | null = null;
+
 /**
- * Replay queued evidence uploads. Never drops an item: a failed upload stays
+ * Replay queued evidence uploads (single-flight: overlapping triggers share
+ * one run — two concurrent passes could otherwise double-upload the same
+ * bytes, and evidence rows carry no clientRef dedupe). Never drops an item:
+ * a failed upload stays
  * queued with incremented attempt count and the error message, classified
  * through the shared offline-retry policy (backoff + jitter + max attempts).
  * Order of guarantees per item:
@@ -250,13 +257,27 @@ export interface EvidenceSyncResult {
  *   3. backoff — items inside their retry window are counted as waiting,
  *      not failed, unless `force` (manual retry) is set.
  */
-export async function syncEvidenceQueue(
+export function syncEvidenceQueue(
   upload: EvidenceUploader,
   opts: {
     force?: boolean;
     /** Override parent resolution (defaults to the shared local-ref map). */
     resolveParent?: (parentRef: string) => string | null;
   } = {},
+): Promise<EvidenceSyncResult> {
+  if (activeEvidenceSync) return activeEvidenceSync;
+  activeEvidenceSync = runEvidenceSync(upload, opts).finally(() => {
+    activeEvidenceSync = null;
+  });
+  return activeEvidenceSync;
+}
+
+async function runEvidenceSync(
+  upload: EvidenceUploader,
+  opts: {
+    force?: boolean;
+    resolveParent?: (parentRef: string) => string | null;
+  },
 ): Promise<EvidenceSyncResult> {
   const items = await readPendingEvidence();
   const out: EvidenceSyncResult = { synced: 0, failed: 0, waiting: 0, dead: 0 };

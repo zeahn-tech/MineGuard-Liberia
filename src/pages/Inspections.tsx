@@ -32,10 +32,12 @@ import { exportInspections } from "@/lib/export-csv";
 import {
   deleteDraft,
   enqueueInspectionSubmission,
+  ensureOfflineReady,
   newClientRef,
   readDraft,
   readDrafts,
   readQueue,
+  subscribeQueue,
   upsertDraft,
   type LocalDraft,
 } from "@/lib/offline-queue";
@@ -61,9 +63,14 @@ export default function Inspections() {
 
   useEffect(() => {
     const refresh = () => setLocalDrafts(readDrafts());
-    refresh();
+    // Load the durable (IndexedDB) drafts first, then mirror mutations.
+    void ensureOfflineReady().then(refresh);
+    const off = subscribeQueue(refresh);
     const i = setInterval(refresh, 1500);
-    return () => clearInterval(i);
+    return () => {
+      off();
+      clearInterval(i);
+    };
   }, []);
 
   const siteById = useMemo(
@@ -123,8 +130,17 @@ export default function Inspections() {
                     size="sm"
                     variant="ghost"
                     onClick={() => {
-                      deleteDraft(d.clientRef);
-                      setLocalDrafts(readDrafts());
+                      // A discard that cannot be persisted must say so —
+                      // the draft stays listed instead of vanishing.
+                      deleteDraft(d.clientRef)
+                        .then(() => setLocalDrafts(readDrafts()))
+                        .catch((e) =>
+                          toast.error(
+                            e instanceof Error
+                              ? e.message
+                              : "Could not discard the draft",
+                          ),
+                        );
                     }}
                   >
                     Discard
@@ -213,21 +229,32 @@ function NewInspectionDialog({
   const [siteId, setSiteId] = useState("");
   const [templateId, setTemplateId] = useState<string>(templates[0]?._id ?? "");
 
-  const start = () => {
+  const start = async () => {
     if (!siteId || !templateId) {
       toast.error("Choose a site and a template.");
       return;
     }
     const site = sites.find((s) => s._id === siteId);
     const clientRef = newClientRef();
-    upsertDraft({
-      clientRef,
-      siteId,
-      siteCode: site?.code ?? "site",
-      templateId,
-      answers: {},
-      updatedAt: Date.now(),
-    });
+    try {
+      // Durable-or-throw: navigating to a draft the device could not store
+      // would strand the inspector on an empty form.
+      await upsertDraft({
+        clientRef,
+        siteId,
+        siteCode: site?.code ?? "site",
+        templateId,
+        answers: {},
+        updatedAt: Date.now(),
+      });
+    } catch (e) {
+      toast.error(
+        e instanceof Error
+          ? e.message
+          : "Draft was NOT saved on this device",
+      );
+      return;
+    }
     navigate(`/portal/inspections/local/${clientRef}`);
   };
 
@@ -275,7 +302,7 @@ function NewInspectionDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={start}>
+          <Button onClick={() => void start()}>
             <Plus className="size-4" /> Start draft
           </Button>
         </DialogFooter>
@@ -295,11 +322,25 @@ export function LocalInspectionForm() {
   const syncCreateDraft = useMutation(api.inspections.createDraft);
   const syncUpdateDraft = useMutation(api.inspections.updateDraft);
   const syncSubmit = useMutation(api.inspections.submit);
-  const [draft, setDraft] = useState<LocalDraft | null>(() =>
-    clientRef ? readDraft(clientRef) ?? null : null,
-  );
+  const [draft, setDraft] = useState<LocalDraft | null>(null);
+  const [draftLoading, setDraftLoading] = useState(true);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [gps, setGps] = useState<{ lat: number; lng: number; acc: number } | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // The draft lives in IndexedDB now (OFF-1) — load it after the durable
+  // store is ready instead of synchronously during render.
+  useEffect(() => {
+    let alive = true;
+    void ensureOfflineReady().then(() => {
+      if (!alive) return;
+      setDraft(clientRef ? readDraft(clientRef) ?? null : null);
+      setDraftLoading(false);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [clientRef]);
 
   const template = templates?.find((t) => t._id === draft?.templateId);
   const site = sites?.find((s) => s._id === draft?.siteId);
@@ -308,7 +349,16 @@ export function LocalInspectionForm() {
     if (!draft || !clientRef) return;
     const next = { ...draft, ...patch, updatedAt: Date.now() };
     setDraft(next);
-    upsertDraft(next);
+    // Optimistic in memory, durable or explained: a failed write raises a
+    // persistent banner + toast so the user never believes a change was
+    // saved when it was not (OFF-2).
+    upsertDraft(next)
+      .then(() => setSaveError(null))
+      .catch((e) => {
+        const msg = e instanceof Error ? e.message : "storage unavailable";
+        setSaveError(msg);
+        toast.error(`Not saved on this device — ${msg}`);
+      });
   };
 
   const captureGps = () => {
@@ -336,8 +386,9 @@ export function LocalInspectionForm() {
     if (!draft || !clientRef) return;
     setSaving(true);
     try {
-      // 1. Enqueue FIRST — persisted before any network attempt.
-      enqueueInspectionSubmission({
+      // 1. Enqueue FIRST — persisted before any network attempt. Awaited so
+      //    a device that cannot store the item rejects here.
+      await enqueueInspectionSubmission({
         clientRef,
         siteId: draft.siteId,
         siteCode: draft.siteCode,
@@ -359,14 +410,32 @@ export function LocalInspectionForm() {
         draft.latitude != null ? "Submitted with GPS captured" : "Submitted",
       );
       navigate("/portal/inspections");
-    } catch {
-      // Submission remains queued locally; nothing is lost.
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg.includes("NOT_SAVED")) {
+        // The device could not persist the submission — it is NOT queued
+        // and NOT submitted. Stay on the form so nothing appears lost.
+        setSaveError(msg);
+        toast.error(
+          "Submission was NOT saved on this device — free up storage and try again.",
+        );
+        return;
+      }
+      // Any other failure: submission remains queued locally; nothing lost.
       toast.info("Saved and queued — will sync when online.");
       navigate("/portal/inspections");
     } finally {
       setSaving(false);
     }
   };
+
+  if (draftLoading) {
+    return (
+      <p className="py-16 text-center text-sm text-muted-foreground">
+        Loading draft from this device…
+      </p>
+    );
+  }
 
   if (!draft) {
     return (
@@ -402,6 +471,19 @@ export function LocalInspectionForm() {
           )}
         </div>
       </header>
+
+      {/* OFF-2: a failed on-device write blocks any "saved" impression —
+          the banner stays until the next successful persist. */}
+      {saveError && (
+        <p className="flex items-start gap-2 border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+          <WifiOff className="mt-0.5 size-4 shrink-0" />
+          <span>
+            Some changes were <strong>not saved on this device</strong> — the
+            browser refused the write ({saveError}). Export or copy anything
+            important, then free up storage and re-enter it.
+          </span>
+        </p>
+      )}
 
       {/* Sections */}
       <div className="space-y-8">

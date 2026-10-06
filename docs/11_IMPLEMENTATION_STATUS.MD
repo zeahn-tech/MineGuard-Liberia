@@ -1,12 +1,125 @@
 # 11 — Implementation Status
 
-**Session:** Security roadmap Session 4 — silent truncation / scale (SEC-4,
-HIGH)
-**Date:** 2026-10-05
-**Verification:** `bun tsc -b --noEmit` ✓ · `bun test` **299 pass / 4 skip
-(opt-in live) / 0 fail** (303 tests, 20 files) ✓
+**Session:** Offline reliability Session 4 — OFF-1…7 / EVD-1
+**Date:** 2026-10-06
+**Verification:** `bun tsc -b --noEmit` ✓ · `bun test` **324 pass / 4 skip
+(opt-in live) / 0 fail** (328 tests, 21 files) ✓
 
-## This session [2026-10-05 — SEC-4: correct statistics at ANY table size]
+## This session [2026-10-06 — OFF-1…7/EVD-1: durable offline queues,
+backoff sync, row_version conflicts, evidence integrity]
+
+**Storage (OFF-1/2) — `src/lib/offline-store.ts`.** The field queue and
+inspection drafts moved off localStorage into **IndexedDB**, behind a small
+durable key/value layer: every `storeSet` writes, **reads the value back
+and compares**, and throws `NotSavedError` (code `NOT_SAVED`) on any
+failure — quota aborts, blocked databases, private modes. The synchronous
+mirror that render paths read is updated only AFTER the verified write, so
+a failed write leaves both storage and UI showing the pre-write state, and
+every enqueue/upsert/delete is async + surfaced: pages await it, a
+NOT_SAVED rejection blocks any "saved" toast/branch (the local-inspection
+draft form additionally keeps a red banner until the next good write).
+localStorage remains the fallback backend (Bun/tests); a `memory` backend
+is exposed via `storeBackend()` so the queue manager can warn that nothing
+survives a reload. Legacy `mg.offline.*` localStorage keys migrate into
+IndexedDB copy-verified-first (a crash mid-migration can only leave data
+in both places, never neither). Mutations are read-modify-write against
+the FRESH stored value, so two tabs (or tab + scheduler) cannot clobber
+each other through a stale mirror.
+
+**Sync engine (OFF-3) — `src/lib/offline-retry.ts` + `src/lib/offline-sync.ts`.**
+One shared policy classifies every failure: **conflict** (409 / `CONFLICT:`
+payload), **permanent** (FORBIDDEN, NOT_FOUND, size/integrity/validation
+and raw 4xx except 408/425/429 → item parks as `dead`, no wasted retries),
+**retryable** (network, 5xx, rate limits, NO_SYNC_HANDLER) → exponential
+backoff with half-window jitter (`2^n` seconds, capped at 5 minutes) until
+`MAX_SYNC_ATTEMPTS = 8`, then parked as `dead` — never dropped, always
+manually retryable/exportable. `startSyncScheduler()` owns the triggers:
+**startup** (loads the durable queue, recovering items stranded in
+`syncing` by a crash), **`online`**, **`visibilitychange`**, and a backoff
+timer armed from the earliest `nextRetryAt`; runs are single-flight and
+skipped while the platform reports offline (a run that cannot leave the
+device would only burn retry budget). Both portal shells (staff
+`PortalLayout`, operator `OperatorLayout`) run one scheduler each and
+replace the old ad-hoc `online` listeners + 1.5 s polling with
+`subscribeQueue` mirror refreshes.
+
+**Conflicts (OFF-4) — `row_version` end to end.**
+`respondCorrectiveAction` now takes `expectedRowVersion` (the version the
+operator was looking at) and performs a CONDITIONAL update (`… and
+row_version = …`); zero matched rows means someone changed the action
+first, so it fetches the current row and throws `CONFLICT:{json}` with
+code 409 carrying a server snapshot (status, note, rowVersion, closedAt).
+The queue parks such items as `status: "conflict"` with the snapshot, the
+online call sites surface a human explanation, and the **queue manager's
+conflict-resolution screen** shows the queued response beside the server's
+current row with an explicit choice: *Keep server version* (discard mine)
+or *Apply my version* (re-arms `expectedRowVersion` to the server's
+version, then retries). Replaying a response whose local removal was
+interrupted but whose note already landed is idempotent (early success),
+so crashes cannot dead-end on the once-per-action guard.
+
+**Queue manager UI (OFF-5) — `src/components/QueueManager.tsx`.**
+Inspect field submissions and queued evidence (status chip, attempts,
+last error, next automatic retry), **retry now** (ignores backoff windows;
+conflict/dead items move only through their explicit actions), **export
+JSON** (queue + drafts + local refs + evidence metadata incl. sha256 —
+bytes described, not embedded), and **discard** per item or everything,
+every discard behind an AlertDialog confirmation; write failures during a
+discard surface instead of pretending the item is gone. Reachable from
+both shells via a `Queue` header button (parity).
+
+**Local parent references (OFF-6).** Successful syncs record
+`clientRef → server id` in the store (`recordLocalRef`). Evidence queued
+against an offline-created record carries only the `parentRef`; its sync
+**waits** (a counted `waiting` outcome, not a failure) until the parent
+syncs, then uploads against the real id. The operator incident form now
+uses this: its offline branch queues the report AND its documents instead
+of silently dropping the attachments with the old "report-only" path.
+
+**Evidence integrity + parents (EVD-1).** `enqueuePendingEvidence`
+computes a **SHA-256** at enqueue; every replay re-hashes the stored bytes
+first and refuses a mismatch (`EVIDENCE_CORRUPT`, parked, bytes kept,
+never uploaded). The data layer independently re-hashes on upload and
+refuses a client-declared digest that differs (`EVIDENCE_HASH_MISMATCH`);
+the digest is stored in the new `evidence.sha256` column (format pinned
+by CHECK). **Migration 0013** adds the `community_report` and
+`corrective_action` evidence parents, makes `evidence.site_id` nullable
+(site-less community-report attachments), guards `mg_stamp_site_scope`
+for null-site rows, and widens the evidence read/insert RLS policies, the
+storage read policy, `evidence_for_parent` and the `evidence_url` mint
+gate with the matching staff-only branch (names and function signatures
+unchanged — GAP-0/0011 pins unaffected; `create or replace` preserves the
+pinned grants). UI: staff attach evidence to community reports from the
+triage list; operators attach **response documents to a corrective action**
+(`EvidenceSection parentType="corrective_action"`), completing operator
+portal parity (offline CA response queueing + scheduler + queue manager).
+
+**Tests — `tests/offline-reliability.test.ts` (19) + updated suites.** The
+five acceptance scenarios run through the real layers: quota exhaustion
+(injecting `QuotaExceededError` → `NotSavedError`, queue unchanged,
+source-contract scans proving every page awaits its enqueue), mid-sync
+crash (strand `syncing` → restart recovery → replay, server sees ONE
+record), duplicate replay (lost response after commit → clientRef dedupe →
+one record), 409 conflict end to end through the bridge (stale
+`row_version` → `CONFLICT` + snapshot → queue parks → resolution → row
+lands at version 2 → idempotent replay), and parent-created-offline
+evidence (waiting → parent sync → resolve → upload against the server id),
+plus sha256 record/mismatch/corruption, both new evidence parents,
+backoff/classification units, max-attempts parking, and scheduler/queue
+manager source contracts. `tests/migration-apply.test.ts` gained a 0013
+describe (idempotency with a normalize-first re-apply — the file's 0002
+re-run chain recreates the storage policy from pre-0013 text, a test-order
+artifact — plus pins: exactly five enum labels, nullable site_id, sha256
+constraint, policy-name surface, staff branch in every qual/with_check,
+authenticated-only grants, and a staff-vs-operator site-less RLS/RPC
+scenario). Existing suites updated for the async API and backoff windows.
+
+**Live state.** Migration 0012 (SEC-4) and now **0013** both await the
+owner's push (order matters: 0012 first); the live `community_reports`
+SELECT-grant repair SQL from the SEC-4 session is still pending — until it
+runs, the live Command Center stays broken regardless of 0012/0013.
+
+## [2026-10-05 — SEC-4: correct statistics at ANY table size]
 
 **Defect (SEC-4, HIGH).** `allRows()` did a bare PostgREST `select("*")`
 with no Range/limit on seven tables — sites, inspections, findings,

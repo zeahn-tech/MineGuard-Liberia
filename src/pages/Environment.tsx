@@ -163,7 +163,9 @@ function ObservationDialog() {
       // Offline-first: enqueue BEFORE any network attempt; syncs immediately
       // when online, or on reconnect with server-side clientRef dedupe.
       const clientRef = newClientRef();
-      enqueueObservationReport({
+      // Awaited: a failed on-device write rejects here, so the catch below
+      // surfaces "not saved" instead of claiming a queued submission.
+      await enqueueObservationReport({
         clientRef,
         siteId: form.siteId,
         siteCode: sites?.find((s) => s._id === form.siteId)?.code ?? "site",

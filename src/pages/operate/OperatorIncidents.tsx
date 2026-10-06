@@ -33,6 +33,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useMutation, useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { newClientRef, enqueueIncidentReport } from "@/lib/offline-queue";
+import { enqueuePendingEvidence } from "@/lib/offline-evidence";
 import type { Incident } from "@/lib/types";
 import { Loader2, Paperclip, Send, X } from "lucide-react";
 import { useRef, useState } from "react";
@@ -149,19 +150,43 @@ function OperatorIncidentForm({ onDone }: { onDone: () => void }) {
       // clientRef, so the server creates exactly one record.
       const msg = err instanceof Error ? err.message : String(err);
       if (!navigator.onLine || msg.includes("Failed to fetch")) {
-        enqueueIncidentReport({
-          clientRef,
-          siteId,
-          siteCode: selectedSite?.code ?? "",
-          type,
-          severity,
-          description: description.trim(),
-          occurredAt: args.occurredAt,
-          fatalities: args.fatalities,
-          injured: args.injured,
-        });
+        try {
+          // Awaited: a device that cannot persist rejects here and NOTHING
+          // below claims the report was saved (OFF-2).
+          await enqueueIncidentReport({
+            clientRef,
+            siteId,
+            siteCode: selectedSite?.code ?? "",
+            type,
+            severity,
+            description: description.trim(),
+            occurredAt: args.occurredAt,
+            fatalities: args.fatalities,
+            injured: args.injured,
+          });
+          // OFF-6: the documents are queued against the LOCAL incident
+          // (parentRef) — they upload once the parent syncs and receives its
+          // server id, instead of being dropped with the offline branch.
+          for (const d of docs) {
+            await enqueuePendingEvidence({
+              parentType: "incident",
+              parentId: "",
+              parentRef: clientRef,
+              siteId: d.siteId,
+              fileName: d.file.name,
+              mimeType: d.file.type || "application/octet-stream",
+              blob: d.file,
+              caption: "Submitted with incident report",
+              capturedAt: Date.now(),
+            });
+          }
+        } catch (e) {
+          const m = e instanceof Error ? e.message : String(e);
+          toast.error(`NOT saved on this device — ${m}`);
+          return; // stay in the form: the data exists only here right now
+        }
         toast.info(
-          "You appear to be offline — the report is saved on this device and will sync automatically.",
+          `You appear to be offline — the report${docs.length > 0 ? ` and ${docs.length} document(s)` : ""} saved on this device will sync automatically.`,
         );
         onDone();
         return;

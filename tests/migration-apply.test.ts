@@ -871,3 +871,202 @@ describe("GAP-0: function execute surface (0011)", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// SESSION 4 — migration 0013 (offline reliability): two new evidence parents,
+// the sha256 integrity column, site-less (community-report) evidence, and the
+// widened evidence read/insert/storage policies + RPC scope branches.
+// ---------------------------------------------------------------------------
+describe("0013 evidence parents & integrity (Session 4)", () => {
+  const SQL_0013 = join(
+    ROOT,
+    "supabase",
+    "migrations",
+    "0013_offline_reliability.sql",
+  );
+  const CR = "99999999-0000-4000-8000-000000000010"; // seeded community report
+
+  async function snapshot() {
+    const db = await getDb();
+    const enumLabels = (
+      await db.query<{ l: string }>(
+        `select e.enumlabel l from pg_enum e
+           join pg_type t on t.oid = e.enumtypid
+          where t.typname = 'evidence_parent'
+          order by e.enumsortorder`,
+      )
+    ).rows.map((r) => r.l);
+    const cols = (
+      await db.query<{ c: string; n: string }>(
+        `select column_name c, is_nullable n from information_schema.columns
+          where table_schema = 'public' and table_name = 'evidence'
+          order by column_name`,
+      )
+    ).rows;
+    const constraint = (
+      await db.query<{ d: string }>(
+        `select pg_get_constraintdef(oid) d from pg_constraint
+          where conname = 'evidence_sha256_fmt'`,
+      )
+    ).rows[0]?.d;
+    const evidencePolicies = (
+      await db.query<{ n: string; q: string; w: string }>(
+        `select policyname n, coalesce(qual, '') q, coalesce(with_check, '') w
+           from pg_policies
+          where schemaname = 'public' and tablename = 'evidence'
+          order by policyname`,
+      )
+    ).rows;
+    const storagePolicies = (
+      await db.query<{ n: string; q: string; w: string }>(
+        `select policyname n, coalesce(qual, '') q, coalesce(with_check, '') w
+           from pg_policies
+          where schemaname = 'storage' and tablename = 'objects'
+            and policyname like 'evidence%'
+          order by policyname`,
+      )
+    ).rows;
+    const fns = (
+      await db.query<{ n: string; d: string }>(
+        `select proname n, pg_get_functiondef(oid) d from pg_proc
+          where proname in ('evidence_for_parent', 'evidence_url')
+          order by proname`,
+      )
+    ).rows;
+    const privs = (
+      await db.query<{ n: string; a: boolean; an: boolean }>(
+        `select p.proname n,
+                has_function_privilege('authenticated', p.oid, 'EXECUTE') as a,
+                has_function_privilege('anon', p.oid, 'EXECUTE') as an
+           from pg_proc p
+          where p.proname in ('evidence_for_parent', 'evidence_url')
+          order by p.proname`,
+      )
+    ).rows;
+    return { enumLabels, cols, constraint, evidencePolicies, storagePolicies, fns, privs };
+  }
+
+  test("0013 is idempotent — re-runs change nothing", async () => {
+    const db = await getDb();
+    const sql = readFileSync(SQL_0013, "utf8");
+    // Normalize first: this file's earlier idempotency chains re-apply 0002,
+    // which recreates the storage read policy from 0002's (pre-0013) text —
+    // a test-order artifact of the re-run chains (the live lineage applies
+    // each migration exactly once, in order). One 0013 apply restores the
+    // branch; from here on every re-run must be a no-op.
+    await db.exec(sql);
+    const first = await snapshot();
+    await db.exec(sql);
+    expect(await snapshot()).toEqual(first);
+
+    const before = first;
+    // Exactly the five parents, in definition order (0001's three, then the
+    // two appended by 0013 — no label creep, no reordering).
+    expect(before.enumLabels).toEqual([
+      "inspection",
+      "incident",
+      "observation",
+      "community_report",
+      "corrective_action",
+    ]);
+    // Site-less evidence: site_id nullable, sha256 present + format-pinned.
+    expect(before.cols.find((c) => c.c === "site_id")?.n).toBe("YES");
+    expect(before.cols.find((c) => c.c === "sha256")?.c).toBe("sha256");
+    expect(before.constraint).toContain("~");
+    // Policy NAMES pinned elsewhere in this file stay exactly as they were;
+    // the 0013 branch lives inside the existing quals (mg_is_staff).
+    expect(before.evidencePolicies.map((p) => p.n)).toEqual([
+      "evidence insert",
+      "evidence read",
+    ]);
+    // The staff branch lives in qual (SELECT) or with_check (INSERT).
+    expect(
+      before.evidencePolicies.every((p) =>
+        (p.q + p.w).includes("mg_is_staff"),
+      ),
+    ).toBe(true);
+    expect(before.storagePolicies.map((p) => p.n)).toEqual([
+      "evidence owner update",
+      "evidence read scoped",
+      "evidence upload own folder",
+    ]);
+    expect(
+      before.storagePolicies.find((p) => p.n === "evidence read scoped")?.q,
+    ).toContain("mg_is_staff");
+    // Both recreated functions carry the staff branch AND keep 0011's grant
+    // shape: authenticated only — never anon, never PUBLIC.
+    expect(before.fns.map((f) => f.d).join("\n")).toContain("mg_is_staff");
+    expect(before.privs).toEqual([
+      { n: "evidence_for_parent", a: true, an: false },
+      { n: "evidence_url", a: true, an: false },
+    ]);
+  });
+
+  test("site-less evidence: staff-only across RLS, the list RPC, and the stamp guard", async () => {
+    const f = await getFixture();
+    const EV = "99999999-0000-4000-8000-0000000000fe";
+    try {
+      // Staff (admin) may insert a site-less community-report attachment;
+      // the null-site stamp guard leaves the 'Unknown' defaults intact.
+      await withRole(
+        "authenticated",
+        { sub: f.admin, role: "authenticated" },
+        async (run) => {
+          const rows = await run(
+            `insert into public.evidence
+               (id, storage_path, parent_type, parent_id, site_id, kind,
+                file_name, mime_type, size_bytes, uploaded_by_id)
+             values ('${EV}', 'triage/${EV}__note.jpg', 'community_report',
+                     '${CR}', null, 'photo', 'note.jpg', 'image/jpeg', 10,
+                     '${f.admin}')
+             returning id`,
+          );
+          expect(rows).toHaveLength(1);
+          const stamp = await run(
+            `select county, operator_name from public.evidence where id = '${EV}'`,
+          );
+          expect(stamp[0].county).toBe("Unknown");
+          expect(stamp[0].operator_name).toBe("Unknown");
+          // The scoped list RPC returns it for staff.
+          const list = await run(
+            `select id from public.evidence_for_parent('community_report', '${CR}')`,
+          );
+          expect(list).toHaveLength(1);
+        },
+      );
+
+      // An operator (not staff) can neither insert nor see site-less rows.
+      await withRole(
+        "authenticated",
+        { sub: f.opA, role: "authenticated" },
+        async (run) => {
+          await expect(
+            run(
+              `insert into public.evidence
+                 (id, storage_path, parent_type, parent_id, site_id, kind,
+                  file_name, mime_type, size_bytes, uploaded_by_id)
+               values ('99999999-0000-4000-8000-0000000000fd',
+                       'x/99999999-0000-4000-8000-0000000000fd__no.jpg',
+                       'community_report', '${CR}', null, 'photo', 'no.jpg',
+                       'image/jpeg', 10, '${f.opA}')
+               returning id`,
+            ),
+          ).rejects.toThrow(/row-level security/);
+          const list = await run(
+            `select id from public.evidence_for_parent('community_report', '${CR}')`,
+          );
+          expect(list).toHaveLength(0);
+          const direct = await run(
+            `select id from public.evidence where id = '${EV}'`,
+          );
+          expect(direct).toHaveLength(0); // RLS hides it from direct reads too
+        },
+      );
+    } finally {
+      await withRole("postgres", null, async (run) => {
+        await run(`delete from public.audit_log where entity_id like '${EV}%'`);
+        await run(`delete from public.evidence where id = '${EV}'`);
+      });
+    }
+  });
+});

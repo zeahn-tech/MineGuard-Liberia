@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { useQuery, useMutation } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
@@ -51,10 +51,18 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
+  ensureOfflineReady,
   readQueue,
-  syncQueue,
+  subscribeQueue,
   type QueueItem,
+  type SyncApi,
 } from "@/lib/offline-queue";
+import {
+  startSyncScheduler,
+  type SchedulerResult,
+  type SyncScheduler,
+} from "@/lib/offline-sync";
+import { QueueManagerButton } from "@/components/QueueManager";
 import { toast } from "sonner";
 import { ROLES } from "@/lib/types";
 
@@ -99,6 +107,8 @@ export default function PortalLayout() {
   const syncSubmit = useMutation(api.inspections.submit);
   const syncReportIncident = useMutation(api.records.reportIncident);
   const syncReportObservation = useMutation(api.records.reportObservation);
+  const syncRespondCa = useMutation(api.inspections.respondCorrectiveAction);
+  const syncUploadEvidence = useMutation(api.evidence.upload);
   const syncApi = useMemo(
     () => ({
       createDraft: syncCreateDraft,
@@ -106,8 +116,9 @@ export default function PortalLayout() {
       submit: syncSubmit,
       reportIncident: syncReportIncident,
       reportObservation: syncReportObservation,
+      respondCorrectiveAction: syncRespondCa,
     }),
-    [syncCreateDraft, syncUpdateDraft, syncSubmit, syncReportIncident, syncReportObservation],
+    [syncCreateDraft, syncUpdateDraft, syncSubmit, syncReportIncident, syncReportObservation, syncRespondCa],
   );
 
   // Profile completion gate: EVERY signed-in user must complete a profile
@@ -123,42 +134,83 @@ export default function PortalLayout() {
   // all — RequireStaff bounces them to /operate before this layout renders.
   // The old conditional-nav and root-redirect logic is gone.
 
-  // Offline queue state + auto-sync on reconnect
-  useEffect(() => {
-    const refresh = () => setQueue(readQueue());
-    refresh();
-    const interval = setInterval(refresh, 1500);
-    const onOnline = () => {
-      setSyncing(true);
-      syncQueue(syncApi)
-        .then((r) => {
-          if (r.synced > 0)
-            toast.success(`Synced ${r.synced} field submission(s)`);
-          if (r.failed > 0)
-            toast.error(`${r.failed} submission(s) failed — will retry`);
-        })
-        .finally(() => {
-          setSyncing(false);
-          refresh();
-        });
-    };
-    window.addEventListener("online", onOnline);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener("online", onOnline);
-    };
+  // Offline queue state (OFF-1/3): the scheduler owns startup / visibility /
+  // online triggers, backoff timing and single-flight; this effect only
+  // mirrors the durable queue into the header badge.
+  const schedulerRef = useRef<SyncScheduler | null>(null);
+  const apiRef = useRef(syncApi);
+  apiRef.current = syncApi;
+  const uploadRef = useRef(syncUploadEvidence);
+  uploadRef.current = syncUploadEvidence;
+
+  const announce = useCallback((r: SchedulerResult) => {
+    const synced = (r.queue?.synced ?? 0) + (r.evidence?.synced ?? 0);
+    const conflicts = r.queue?.conflicts ?? 0;
+    const dead = (r.queue?.dead ?? 0) + (r.evidence?.dead ?? 0);
+    const failed = (r.queue?.failed ?? 0) + (r.evidence?.failed ?? 0);
+    if (synced > 0)
+      toast.success(`Synced ${synced} queued item(s)`);
+    if (conflicts > 0)
+      toast.error(
+        `${conflicts} item(s) hit a server conflict — open the queue to resolve them.`,
+      );
+    if (dead > 0)
+      toast.error(`${dead} item(s) rejected or parked — open the queue to review.`);
+    else if (failed > 0 && r.forced)
+      toast.error(`${failed} submission(s) failed — will retry with backoff.`);
   }, []);
 
+  useEffect(() => {
+    const refresh = () => setQueue(readQueue());
+    void ensureOfflineReady().then(refresh);
+    const off = subscribeQueue(refresh);
+    // Proxy through the ref so a fresh useMutation identity never restarts
+    // the scheduler (the scheduler must outlive renders).
+    const api: SyncApi = {
+      createDraft: (a) => apiRef.current.createDraft(a),
+      updateDraft: (a) => apiRef.current.updateDraft(a),
+      submit: (a) => apiRef.current.submit(a),
+      reportIncident: (a) => apiRef.current.reportIncident(a),
+      reportObservation: (a) => apiRef.current.reportObservation(a),
+      respondCorrectiveAction: (a) => apiRef.current.respondCorrectiveAction(a),
+    };
+    const scheduler = startSyncScheduler({
+      api,
+      upload: (a) => uploadRef.current(a),
+      onResult: (r) => {
+        announce(r);
+        refresh();
+      },
+      onError: (e) =>
+        toast.error(e instanceof Error ? e.message : "Background sync failed"),
+    });
+    schedulerRef.current = scheduler;
+    return () => {
+      off();
+      scheduler.dispose();
+      schedulerRef.current = null;
+    };
+  }, [announce]);
+
   const handleSyncNow = async () => {
+    const scheduler = schedulerRef.current;
+    if (!scheduler) return;
     setSyncing(true);
     try {
-      const r = await syncQueue(syncApi);
-      if (r.synced > 0) toast.success(`Synced ${r.synced} field submission(s)`);
-      if (r.failed > 0) toast.error(`${r.failed} submission(s) failed — will retry`);
-      if (r.synced === 0 && r.failed === 0) toast.info("Queue is empty");
+      const r = await scheduler.syncNow();
+      // Success/failure toasts come from announce() via onResult; this
+      // branch only narrates the "nothing left to send" case.
+      const synced = (r.queue?.synced ?? 0) + (r.evidence?.synced ?? 0);
+      const failed = (r.queue?.failed ?? 0) + (r.evidence?.failed ?? 0);
+      if (synced === 0 && failed === 0) {
+        if (readQueue().filter((q) => q.status !== "done").length === 0)
+          toast.info("Queue is empty");
+        else
+          toast.info("Nothing ready to send right now — items stay queued");
+      }
+      setQueue(readQueue());
     } finally {
       setSyncing(false);
-      setQueue(readQueue());
     }
   };
 
@@ -288,6 +340,9 @@ export default function PortalLayout() {
                 <div className="md:hidden">
                   <NotificationBell />
                 </div>
+                <QueueManagerButton
+                  label={`Queue${pendingItems.length > 0 ? ` · ${pendingItems.length}` : ""}`}
+                />
                 {pendingItems.length > 0 ? (
                   <button
                     onClick={handleSyncNow}

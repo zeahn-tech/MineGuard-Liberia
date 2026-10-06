@@ -77,19 +77,33 @@ export default function OperatorPortal() {
     }
     setBusy(true);
     try {
-      await respond({ caId, operatorNote: note.trim() });
+      // row_version gate (OFF-4) — same conflict detection as the dedicated
+      // corrective-actions page.
+      await respond({
+        caId,
+        operatorNote: note.trim(),
+        expectedRowVersion: obligations.find((o) => o._id === caId)?.rowVersion,
+      });
       toast.success("Response submitted for verification.");
       setRespondingId(null);
       setNote("");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
-      toast.error(
-        msg.includes("NOT_FOUND")
-          ? "That obligation is no longer visible to your account."
-          : msg.includes("FORBIDDEN")
-            ? "Only the site's operator can respond, and only while the action is open."
-            : "Could not submit the response.",
-      );
+      if (msg.startsWith("CONFLICT:")) {
+        toast.error(
+          "This action changed on the server after you opened it — your response was NOT sent. Review the refreshed card and submit again if it still applies.",
+        );
+        setRespondingId(null);
+        setNote("");
+      } else {
+        toast.error(
+          msg.includes("NOT_FOUND")
+            ? "That obligation is no longer visible to your account."
+            : msg.includes("FORBIDDEN")
+              ? "Only the site's operator can respond, and only while the action is open."
+              : "Could not submit the response.",
+        );
+      }
     } finally {
       setBusy(false);
     }

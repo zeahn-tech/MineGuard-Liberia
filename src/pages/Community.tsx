@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { ShieldAlert } from "lucide-react";
+import EvidenceSection from "@/components/EvidenceSection";
 
 type Decision = "under_review" | "verified" | "dismissed" | "referred";
 
@@ -139,6 +140,16 @@ export default function Community() {
                     <ShieldAlert className="size-3.5" /> Reviewer role required to triage.
                   </p>
                 )}
+
+                {/* EVD-1: staff attach supporting files directly to the
+                    community report (site-less parent — the 0013 policies
+                    scope these rows to staff accounts). */}
+                <div className="mt-3 border-t border-border pt-3">
+                  <EvidenceSection
+                    parentType="community_report"
+                    parentId={r._id}
+                  />
+                </div>
               </li>
             ))}
           </ul>
