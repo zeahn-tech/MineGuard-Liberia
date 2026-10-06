@@ -363,7 +363,7 @@ describe("performance baseline at pilot scale", () => {
 
   test("F3 staff: audit log (last 200)", async () => {
     setIdentity(f.admin);
-    await timed("stats.recentAuditLog (200 of 12.8k)", 5, () => first(api.stats.recentAuditLog()));
+    await timed("stats.recentAuditLog (200 of 4k)", 5, () => first(api.stats.recentAuditLog()));
   });
 
   test("F4 field: county inspector's scoped inspections list", async () => {

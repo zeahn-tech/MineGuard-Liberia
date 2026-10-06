@@ -4,6 +4,10 @@
 "unmeasured" — this document closes that). Executed against the real data
 layer (`src/lib/backend.ts`) over the RLS-enforcing wire bridge, at a
 defined pilot-scale dataset. Re-run any time: `bun test tests/perf-baseline.test.ts`.
+**RE-MEASURED 2026-10-05 after SEC-4** (paged reads + the DB-side stats RPC;
+the bridge now enforces hosted PostgREST's 1,000-row cap) — see the SEC-4
+section below; the original numbers are kept for comparison, marked
+pre-SEC-4.
 
 ## Why this baseline and not a load test
 
@@ -73,6 +77,64 @@ volumes are asserted non-empty before measurement (a baseline over missing
 data would be worthless), and result-set sizes are printed with each run
 (e.g. riskScores returned exactly 42 entries; the operator feed 161 rows).
 
+## SEC-4 re-measurement 2026-10-05 — the baseline now measures the FIXED wire contract
+
+The 2026-09-28 numbers above were taken through an **unlimited** bridge: the
+harness did not emulate hosted PostgREST's `db-max-rows` cap, so a run could
+not distinguish "fetched every row" from "silently truncated at 1,000" — and
+the Command Center's figure measured a path (ship seven tables to the
+browser, sum in JS) that production truncates past the row cap. This is the
+honesty gap the 17× headline carried: it was a **DB-side** number measured on
+a wire that could not reproduce the defect. SEC-4 closed both halves:
+
+- the wire bridge now caps unranged reads at exactly 1,000 rows, like hosted
+  PostgREST (`tests/helpers/backend-edge.ts`) — a regression to a bare
+  `select("*")` FAILS the suite instead of passing against an uncapped harness;
+- the data layer pages every whole-table read (explicit ordered Range until a
+  short page), and the Command Center aggregates through
+  `mg_command_center_stats()` (migration 0012, SECURITY INVOKER) returning ONE
+  jsonb row.
+
+Same fixture, same budgets, re-run:
+
+| # | Flow | Median | Worst | vs budget | vs 2026-09-28 |
+|---|------|-------:|-----:|-----------|---------------|
+| 1 | F3 staff | `stats.commandCenter` (admin, national — now the stats RPC) | 195 ms | 245 ms | ✅ ≈10× headroom | 115 ms |
+| 2 | F3 staff | `sites.riskScores` (42 site entries, paged inputs) | 154 ms | 185 ms | ✅ ≈13× | 111 ms |
+| 3 | F3 staff | `sites.list` (40 sites + open-action counts) | 30 ms | 32 ms | ✅ ≈66× | 16 ms |
+| 4 | F3 staff | `inspections.list` (321 rows, paged) | 29 ms | 40 ms | ✅ ≈69× | 25 ms |
+| 5 | F3 staff | `records.listIncidents` (81) | 11 ms | 31 ms | ✅ ≈181× | 8 ms |
+| 6 | F3 staff | `records.listObservations` (60) | 11 ms | 60 ms | ✅ ≈181× | 6 ms |
+| 7 | F3 staff | `records.listCommunityReports` (201) | 8 ms | 9 ms | ✅ 250× | 5 ms |
+| 8 | F3 staff | `stats.recentAuditLog` (last 200 of 4k) | 144 ms | 154 ms | ✅ ≈14× | 60 ms |
+| 9 | F4 field | `inspections.list` (county-scoped inspector) | 32 ms | 70 ms | ✅ ≈62× | 40 ms |
+| 10 | F5 operator | `listMyCorrectiveActions` (161-row tenant feed) | 84 ms | 89 ms | ✅ ≈24× | 94 ms |
+| 11 | F5 operator | `records.listNotifications` (deadline math) | 85 ms | 100 ms | ✅ ≈23× | 96 ms |
+| 12 | F5 operator | `records.reportIncident` (full write path) | 2 ms | 3 ms | ✅ 1000× | 3 ms |
+| 13 | F5 operator | `clientRef` dedupe replay | 1 ms | 1 ms | ✅ 2000× | 1 ms |
+
+**Honest reading of the deltas:**
+
+- **commandCenter 115 → ≈195 ms (still ≈10× headroom).** In-process PGlite has
+  **no network to save**: the old path's seven parallel table fetches were
+  cheap in-process, while the stats statement pays SQL planning for ~20
+  scalar aggregates per call. What changed is the *wire* shape, which this
+  bench structurally cannot measure: ONE jsonb row instead of ≈1,660 rows
+  (42 sites + 320 inspections + 640 findings + 320 CAs + 80 incidents +
+  60 observations + 201 reports) plus zero browser-side aggregation. RTT and
+  payload savings are NOT claimed as benchmark numbers; on rural LTE
+  (20–80 ms RTT per round trip, Honest limits #2) fewer rows and one request
+  dominate the user-visible cost.
+- **Row-level lists** moved within noise: at pilot scale every table still
+  fits in a single ≤1,000-row Range request, so paging costs nothing yet —
+  it is the guarantee that correctness no longer depends on that luck.
+- **The bench now asserts completeness** (every seeded row counted; the
+  inspections list whole), so a truncated run FAILS instead of printing a
+  number. The bench file's stale volume header was corrected in the same
+  pass (it claimed 3,200/4,800/12,800 rows; the fixture is 320 inspections /
+  640 findings / 320 CAs / 80 incidents / 60 observations / 4,000 audit rows —
+  the scale table above was already right).
+
 ## What the numbers say
 
 - The **heaviest surfaces are the aggregators**: command center (115 ms) and
@@ -81,7 +143,11 @@ data would be worthless), and result-set sizes are printed with each run
   grows ~10× (the projected END of pilot scale is ≈ this dataset; 10× would
   still sit ≈ 10× on the O(n) portions ≈ 1.1 s, inside budget but without
   headroom — the first place to optimize, with per-table aggregate SQL or
-  maintained counters).
+  maintained counters). *[2026-10-05, SEC-4: done for the command center —
+  per-table aggregate SQL via `mg_command_center_stats()` returns one row;
+  risk scores still aggregate client-side, now over paged inputs (exact at
+  any size), and remain the next candidate if the dataset grows. Post-SEC-4
+  numbers in the re-measurement section below.]*
 - **Scoped reads are cheap**: the operator's tenant feed (94 ms for 161
   joined rows) and the county inspector's list (40 ms) confirm the
   authorization mirror adds negligible cost.
@@ -117,8 +183,10 @@ data would be worthless), and result-set sizes are printed with each run
 2. **No network** — in-process engine; RTT will add a fixed per-call cost
    (typically 20–80 ms per round trip on rural LTE) on top of these figures.
    Surfaces making 1 request per call are unaffected in shape; any surface
-   making N requests scales with N × RTT — currently all surfaces issue
-   few, parallelized requests.
+   making N requests scales with N × RTT. Since SEC-4, whole-table reads
+   page deliberately: ceil(rows ÷ 1,000) serial Range requests per table —
+   **1 request per table at pilot scale**, N×RTT only beyond the 1,000-row
+   mark where the alternative is silent truncation.
 3. **Volumes are projections**, not observed production data; the scale is
    set from the program's pilot planning numbers and is re-runnable at any
    scale by editing `SCALE` in the bench file.

@@ -23,17 +23,19 @@ with required reviewers).
 - Supabase project (Postgres + Auth + Storage under the Supabase project;
   migrations in `supabase/migrations/` are the schema source of truth):
   - **Postgres** — all domain data (tables per doc 03), RLS-enforced.
-    **Migration state [2026-10-05]:** repo carries 0001–0011; the live
-    project has 0001–0008 applied — **0009 (audit & integrity foundation,
-    doc 11 SEC-1/2/3), 0010 (organizations/scopes/permissions tenancy,
-    doc 11 SEC-5/SITE-1) and 0011 (deny-by-default function execute
-    surface, doc 11 Gap 0) still need `supabase db push` by the owner.**
-    Until they land, the live database keeps the old client-appendable
-    `audit_log` surface, client DELETE grants, display-string tenancy with
-    no permission matrix, the unimplemented `site` scope, and the blanket
-    function EXECUTE grants (0002-era surface — anon can invoke every RPC
-    there, stopped only by definer-body checks); do not assume the repo
-    posture is live.
+    **Migration state [2026-10-05, SEC-4 session]:** repo carries 0001–0012.
+    The live project runs 0001–0011 (the owner applied 0009–0011 through
+    the SQL Editor; probe-verified — doc 11). **0012
+    (`mg_command_center_stats`, doc 11 SEC-4) still needs `supabase db push`
+    — or an SQL-Editor run of
+    `supabase/migrations/0012_command_center_stats.sql` — by the owner.**
+    Until it lands, the live Command Center serves from the client-side
+    fallback: paged reads aggregated in the browser (exact at any table
+    size, heavier on the wire, one console warning saying so). Every other
+    SEC-4 guarantee is client code and already live: whole-table reads page
+    with an explicit Range past PostgREST's 1,000-row `db-max-rows` cap,
+    so no statistic, risk score or export is silently truncated. Do not
+    assume the 0012 RPC exists on the live project until it is pushed.
   - **Auth (GoTrue)** — email/password; TOTP MFA supported (doc 04, Gap #4).
   - **Storage** — evidence media under the uid-first-folder contract.
 - No standalone API servers; no containers to manage.
@@ -122,7 +124,7 @@ restore over live production without an explicit, dated incident decision.
 Full record: `docs/drills/restore-rehearsal-2026-09-28.md`. Summary of the
 executed rehearsal (real clusters, real dump, not a simulation):
 
-- **Source**: local PostgreSQL 14.24 with all 8 migrations applied plus the
+- **Source**: local PostgreSQL 14.24 with all 12 migrations applied plus the
   Supabase platform surface (roles, auth schema incl. MFA tables, storage
   schema) and representative seed data (14 data tables populated).
 - **Backup executed**: `pg_dump -Fc` (144,876 bytes), sha256 recorded in

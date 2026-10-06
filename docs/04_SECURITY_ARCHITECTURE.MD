@@ -89,13 +89,17 @@ Verified by `tests/evidence-url.test.ts` and live (docs/11).
    `ALTER DEFAULT PRIVILEGES` cannot remove the PUBLIC default for new
    functions on this PostgreSQL). 0011 resets the surface deny-by-default —
    anon executes exactly the two public flows, authenticated executes the
-   seven documented RPCs + authorization helpers, extensions excluded — and
+   seven documented RPCs + authorization helpers + the SEC-4 stats
+   aggregator `mg_command_center_stats` (0012, SECURITY INVOKER — RLS is
+   its authorization), extensions excluded — and
    `tests/migration-apply.test.ts` (GAP-0) pins the exact allowlists, forbids
    PUBLIC grants, and requires every client-reachable SECURITY DEFINER
    function to self-authorize or be a reviewed helper. The live lineage
-   still runs 0001–0008: until the owner pushes 0009–0011, this entry's
-   original wording (internal checks as the only backstop) remains accurate
-   THERE.
+   carries 0001–0011 (owner-applied 2026-10-05, probe-verified); **0012 is
+   not yet pushed — until it lands, the dashboard uses the client-side
+   paginated fallback (exact figures, heavier wire), and the original
+   wording of this entry (internal checks as the only backstop) was
+   accurate THERE up to 0011.**
 1. Rate limiting on the public report endpoint. Since migration 0005 the
    `submit_community_report` security-definer RPC enforces a 30-reports-per-
    minute rolling bucket **per client source**: the source is derived
