@@ -15,6 +15,7 @@ the React layer (`src/lib/backend-react.ts`) exposes them with Convex
 | `list` | query | staff | Scope-filtered; includes open action counts |
 | `get` | query | staff/operator via access check | Single site |
 | `create` | mutation | admin | Generates code; status pending_verification; audit |
+| `update` | mutation | admin | Field edit (name/operator/geo/notes); operator change re-points the tenant org; server-written before/after audit diff; no-op writes nothing |
 | `setStatus` | mutation | admin | Lifecycle transition; audit |
 | `riskScores` | query | staff | Explainable factor breakdown per site |
 

@@ -1,6 +1,6 @@
 # 13 — Test Strategy
 
-**Status:** 21 suites / 328 tests green as of 2026-10-06 (324 pass, 4 skip —
+**Status:** 21 suites / 335 tests green as of 2026-10-06 (331 pass, 4 skip —
 the live-anon probes require RUN_LIVE_TESTS): the SQL layer runs
 against real Postgres (PGlite) applying every migration in
 `supabase/migrations/` — `tests/migration-apply.test.ts` (clean-apply,
@@ -13,7 +13,10 @@ MFA over the GoTrue API, Gap #4), `tests/operator-portal.test.ts` and
 `tests/operator-isolation.test.ts` (operator feeds + respond flow, and the
 structural isolation proof: route gates asserted, every staff surface fails
 closed for the operator identity, every operator feed strictly own-tenant —
-Priority B §20), `tests/offline-queue.test.ts`,
+Priority B §20 — plus the SEC-5/SITE-1 adversarial block: renamed
+operator, same-name operators, site-scoped staff, cross-county, each
+proven through `api.*` with the SQL-level counterpart in rls),
+`tests/offline-queue.test.ts`,
 `tests/offline-evidence.test.ts`, `tests/offline-reliability.test.ts`
 (Session 4, doc 05: quota-exhaustion durability, mid-sync crash recovery,
 duplicate-replay idempotency, 409 row_version conflict park → resolve →

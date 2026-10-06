@@ -999,6 +999,111 @@ export const api = {
       });
     },
 
+    /** Admin site edit (SITE-1). The client only decides WHICH columns
+     *  change — the boundary lives server-side:
+     *    * RLS "sites update" gates the write on the permission matrix
+     *      (mg_has_permission('sites.update') — admin only), and
+     *      mg_guard_site_write re-checks it before the row moves;
+     *    * the server's mg_audit_row trigger writes the authoritative
+     *      before/after diff in the SAME transaction (SEC-1 — the client
+     *      cannot write audit_log at all), and sites_touch bumps
+     *      row_version/updated_by;
+     *    * changing operatorName clears organization_id first so the
+     *      sites_org trigger re-resolves (or creates) the tenant by name —
+     *      the same contract sites.create uses. A write that changes
+     *      nothing is a no-op: no row_version bump, no audit row. */
+    update: async (args: {
+      siteId: string;
+      name?: string;
+      operatorName?: string;
+      county?: string;
+      district?: string;
+      community?: string;
+      mineralType?: string;
+      latitude?: number | null;
+      longitude?: number | null;
+      notes?: string | null;
+    }) => {
+      const user = await requireAdminUser();
+      const site = await getSite(args.siteId);
+      if (!site) throw new Error("NOT_FOUND");
+
+      const patch: AnyRow = {};
+      const changed: string[] = [];
+      /** Queue a column only when the value actually differs from the row
+       *  (undefined fields are never sent; null-ish strings normalize to
+       *  null so "clear district" works). */
+      const put = (column: string, value: unknown, current: unknown) => {
+        if (value === (current ?? null)) return;
+        patch[column] = value;
+        changed.push(column);
+      };
+
+      if (args.name !== undefined) {
+        const v = args.name.trim();
+        if (!v) throw new Error("INVALID_NAME");
+        put("name", v, site.name);
+      }
+      if (args.county !== undefined) {
+        const v = args.county.trim();
+        if (!v) throw new Error("INVALID_COUNTY");
+        put("county", v, site.county);
+      }
+      if (args.district !== undefined)
+        put("district", args.district.trim() || null, site.district);
+      if (args.community !== undefined)
+        put("community", args.community.trim() || null, site.community);
+      if (args.mineralType !== undefined)
+        put("mineral_type", args.mineralType.trim() || null, site.mineralType);
+      if (args.latitude !== undefined) {
+        if (
+          args.latitude !== null &&
+          (args.latitude < -90 || args.latitude > 90)
+        )
+          throw new Error("INVALID_LATITUDE");
+        put("latitude", args.latitude, site.latitude);
+      }
+      if (args.longitude !== undefined) {
+        if (
+          args.longitude !== null &&
+          (args.longitude < -180 || args.longitude > 180)
+        )
+          throw new Error("INVALID_LONGITUDE");
+        put("longitude", args.longitude, site.longitude);
+      }
+      if (args.notes !== undefined) put("notes", args.notes, site.notes);
+      if (args.operatorName !== undefined) {
+        const v = args.operatorName.trim();
+        if (!v) throw new Error("INVALID_OPERATOR");
+        if (v !== site.operatorName) {
+          // Re-point the tenant: clear the binding so mg_sync_site_org
+          // resolves (or mints) the organization by name on THIS write.
+          // (A bare operator_name change on a bound row would be silently
+          // re-derived from the old organization — see the sites_org trigger.)
+          patch.organization_id = null;
+          patch.operator_name = v;
+          changed.push("operator_name");
+        }
+      }
+
+      if (changed.length === 0) return site; // idempotent no-op
+
+      const { error } = await supabase
+        .from("sites")
+        .update(patch)
+        .eq("id", args.siteId);
+      if (error) throw backendError(error);
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "site.edit",
+        entityType: "sites",
+        entityId: args.siteId,
+        summary: `Site ${site.code} updated: ${changed.join(", ")}`,
+      });
+      return (await getSite(args.siteId)) ?? site;
+    },
+
     riskScores: () =>
       live<Record<string, { score: number; factors: { label: string; points: number }[] }>>(
         async () => {

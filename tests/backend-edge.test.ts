@@ -275,6 +275,119 @@ describe("sites", () => {
     await expectError(() => api.sites.setStatus({ siteId: f.siteA, status: "nonsense" }), "INVALID_STATUS");
   });
 
+  test("authorized: admin edit persists, bumps row_version, and leaves the server-written audit diff", async () => {
+    asAdmin();
+    const id = await api.sites.create({
+      name: "Edge Edit Probe",
+      operatorName: "AgriLib Mining",
+      county: "Bomi",
+      district: "Senjeh",
+    });
+    try {
+      const before = await adminSql(`select row_version from public.sites where id = '${id}'`);
+      const updated = await api.sites.update({
+        siteId: id,
+        name: "Edge Edit Probe Renamed",
+        district: "Kpaileah",
+        community: "Probe Village",
+        mineralType: "Iron",
+        latitude: 6.5,
+        longitude: -10.5,
+        notes: "edited by suite",
+      });
+      expect(updated.name).toBe("Edge Edit Probe Renamed");
+      expect(updated.district).toBe("Kpaileah");
+      expect(updated.community).toBe("Probe Village");
+      expect(updated.mineralType).toBe("Iron");
+      expect(updated.notes).toBe("edited by suite");
+
+      const row = await adminSql(
+        `select row_version, updated_by, name from public.sites where id = '${id}'`,
+      );
+      expect(Number(row[0].row_version)).toBe(Number(before[0].row_version) + 1);
+      expect(row[0].updated_by).toBe(f.admin);
+      expect(row[0].name).toBe("Edge Edit Probe Renamed");
+
+      // SEC-1: the authoritative before/after diff is written by the
+      // SERVER's mg_audit_row trigger in the same transaction — the client
+      // cannot write audit_log at all (0009 revoke).
+      const audit = await adminSql(
+        `select actor_id, details from public.audit_log
+          where action = 'sites.update' and entity_id = '${id}'`,
+      );
+      expect(audit.length).toBe(1);
+      expect(audit[0].actor_id).toBe(f.admin);
+      // The bridge hands jsonb back already parsed — accept either shape.
+      const raw = audit[0].details;
+      const d = typeof raw === "string" ? JSON.parse(raw) : raw;
+      expect(d.before.name).toBe("Edge Edit Probe");
+      expect(d.after.name).toBe("Edge Edit Probe Renamed");
+      expect(d.after.notes).toBe("edited by suite");
+
+      // No-op edit: nothing to change → no write, no row_version bump,
+      // no extra audit row (idempotent contract).
+      const same = await api.sites.update({
+        siteId: id,
+        name: "Edge Edit Probe Renamed",
+        notes: "edited by suite",
+      });
+      expect(same.name).toBe("Edge Edit Probe Renamed");
+      const after = await adminSql(`select row_version from public.sites where id = '${id}'`);
+      expect(Number(after[0].row_version)).toBe(Number(row[0].row_version));
+      const audit2 = await adminSql(
+        `select 1 from public.audit_log where action = 'sites.update' and entity_id = '${id}'`,
+      );
+      expect(audit2.length).toBe(1);
+
+      // Operator re-point: changing the name clears organization_id and the
+      // sites_org trigger resolves (or mints) the tenant by name — the same
+      // contract sites.create uses.
+      const repointed = await api.sites.update({ siteId: id, operatorName: "Probe NewCo" });
+      expect(repointed.operatorName).toBe("Probe NewCo");
+      expect(repointed.organizationId).toBeTruthy();
+      const binds = await adminSql(
+        `select o.name as org_name from public.sites s
+           join public.organizations o on o.id = s.organization_id
+          where s.id = '${id}'`,
+      );
+      expect(binds[0].org_name).toBe("Probe NewCo");
+      // Same-name write on the re-pointed row: display follows the binding,
+      // never re-resolving a bound row against a same-named sibling.
+      const again = await api.sites.update({ siteId: id, operatorName: "Probe NewCo" });
+      expect(again.organizationId).toBe(repointed.organizationId);
+    } finally {
+      // No row cleanup: the platform NEVER deletes a registered site
+      // (mg_guard_site_write) nor an organization (mg_guard_org_write) — the
+      // probe and its tenant remain exactly as a real registration would,
+      // and every assertion in this suite is membership-based, not
+      // exact-count (same precedent as the earlier "Edge Suite Site").
+    }
+  });
+
+  test("denied: site edit is admin-only — non-admins FORBIDDEN, anon UNAUTHENTICATED, bad input rejected", async () => {
+    asOpA();
+    await expectError(() => api.sites.update({ siteId: f.siteA, notes: "x" }), "FORBIDDEN");
+    asCounty();
+    await expectError(() => api.sites.update({ siteId: f.siteA, notes: "x" }), "FORBIDDEN");
+    asGuest();
+    await expectError(() => api.sites.update({ siteId: f.siteA, notes: "x" }), "FORBIDDEN");
+    asAnon();
+    await expectError(() => api.sites.update({ siteId: f.siteA, notes: "x" }), "UNAUTHENTICATED");
+    asAdmin();
+    await expectError(
+      () => api.sites.update({ siteId: "00000000-0000-4000-8000-000000000099", notes: "x" }),
+      "NOT_FOUND",
+    );
+    await expectError(() => api.sites.update({ siteId: f.siteA, name: "   " }), "INVALID_NAME");
+    await expectError(() => api.sites.update({ siteId: f.siteA, latitude: 120 }), "INVALID_LATITUDE");
+    // None of the denied/rejected paths moved the fixture row.
+    const row = await adminSql(
+      `select name, notes from public.sites where id = '${f.siteA}'`,
+    );
+    expect(row[0].name).toBe("Bomi River Wash Plant");
+    expect(row[0].notes).toBeNull();
+  });
+
   test("scoping: operator sees only own tenant; county inspector only own county; detail is null-masked for out-of-scope ids", async () => {
     asOpB();
     const list = await first(api.sites.list());

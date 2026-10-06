@@ -27,6 +27,7 @@ import { join } from "node:path";
 import { api } from "../src/lib/backend";
 import { __testSetSupabaseClient, __testSetAuthUserId } from "../src/lib/supabase";
 import {
+  adminExec,
   adminSql,
   createEdgeClient,
   edgeIdentity,
@@ -335,5 +336,172 @@ describe("operator surfaces: strictly own-tenant through the operator section's 
         siteId: f.siteB,
       }),
     "FORBIDDEN");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SEC-5/SITE-1 — the four adversarial isolation cases from the security
+// roadmap's Session 2, driven through the REAL data layer (api.*) rather
+// than SQL: this is the exact path the UI consumes, so a regression in
+// canAccessSite / the row mappers / the RLS wiring surfaces here, and the
+// server-side proof for each lives in tests/rls.test.ts.
+// ---------------------------------------------------------------------------
+describe("SEC-5/SITE-1 adversarial isolation through the data layer", () => {
+  /** The org-rename cascade is SECURITY INVOKER: sites_rescope re-derives
+   *  display names and then backfills scope stamps onto findings/CAs/
+   *  incidents, whose lifecycle guards read the SESSION's JWT. Statements
+   *  that touch operator_name therefore run with the admin's claims — the
+   *  same prolog tests/rls.test.ts uses inside withRole. */
+  const adminClaims = (sql: string) =>
+    adminExec(
+      `set local role authenticated;
+       set local request.jwt.claims = '{"sub":"${f.admin}","role":"authenticated"}';
+       ${sql}`,
+    );
+
+  test("renamed operator: display follows the rename, tenancy keyed on the UUID does not move", async () => {
+    const orgRows = await adminSql(
+      `select organization_id from public.sites where id = '${f.siteA}'`,
+    );
+    expect(orgRows[0].organization_id).not.toBeNull();
+    const orgId = String(orgRows[0].organization_id);
+    try {
+      await adminClaims(
+        `update public.organizations set name = 'AgriLib Renamed Ltd' where id = '${orgId}'`,
+      );
+
+      setIdentity(f.opA);
+      const sites = await first(api.sites.list());
+      expect(sites!.some((s) => s._id === f.siteA)).toBe(true);
+      // Every visible row follows the renamed display…
+      expect(sites!.every((s) => s.operatorName === "AgriLib Renamed Ltd")).toBe(true);
+      // …while the sibling tenant stays masked.
+      expect(await first(api.sites.get({ siteId: f.siteB }))).toBeNull();
+
+      setIdentity(f.opB);
+      const b = await first(api.sites.list());
+      expect(b!.some((s) => s._id === f.siteB)).toBe(true);
+      expect(b!.every((s) => s.operatorName === "OreCo Liberia")).toBe(true);
+    } finally {
+      await adminClaims(
+        `update public.organizations set name = 'AgriLib Mining' where id = '${orgId}'`,
+      );
+    }
+  });
+
+  test("same-name operators: a same-named sibling tenant's site never leaks into the feed", async () => {
+    // A second registry row deliberately sharing AgriLib's display name.
+    // Organizations are never deleted (mg_guard_org_write: "rename
+    // instead"), so the sibling stays — harmless, because name-based
+    // resolution always prefers the OLDEST match (the fixture tenant).
+    const orgRows = await adminSql(
+      `insert into public.organizations (name) values ('AgriLib Mining') returning id`,
+    );
+    const sibling = String(orgRows[0].id);
+    const own = await adminSql(
+      `select organization_id from public.sites where id = '${f.siteA}'`,
+    );
+    expect(own[0].organization_id).not.toBeNull();
+    const orgId = String(own[0].organization_id);
+    try {
+      // Re-point the fixture site at the same-named sibling: the display
+      // string stays byte-identical while the TENANT UUID changes.
+      await adminClaims(
+        `update public.sites set organization_id = '${sibling}' where id = '${f.siteA}'`,
+      );
+      const shown = await adminSql(
+        `select operator_name, organization_id from public.sites where id = '${f.siteA}'`,
+      );
+      expect(shown[0].operator_name).toBe("AgriLib Mining");
+      expect(String(shown[0].organization_id)).toBe(sibling);
+
+      setIdentity(f.opA);
+      const sites = await first(api.sites.list());
+      // The row's display is IDENTICAL to the operator's own tenant — yet
+      // it is gone from the feed (tenancy keyed on the name would leak it)…
+      expect(sites!.some((s) => s._id === f.siteA)).toBe(false);
+      expect(await first(api.sites.get({ siteId: f.siteA }))).toBeNull();
+      // Every row still visible belongs to the operator's REAL tenant.
+      expect(sites!.every((s) => s.operatorName === "AgriLib Mining")).toBe(true);
+
+      // The sibling tenant does not gain it either…
+      setIdentity(f.opB);
+      const b = await first(api.sites.list());
+      expect(b!.some((s) => s._id === f.siteA)).toBe(false);
+
+      // …while admin (national scope) still sees the whole registry.
+      setIdentity(f.admin);
+      const all = await first(api.sites.list());
+      expect(all!.some((s) => s._id === f.siteA)).toBe(true);
+    } finally {
+      // Restore the binding — display cascades back automatically.
+      await adminClaims(
+        `update public.sites set organization_id = '${orgId}' where id = '${f.siteA}'`,
+      );
+    }
+  });
+
+  test("site-scoped staff: exactly the assigned sites through api.sites.list, writes stay denied", async () => {
+    // A fresh inspector bound through explicit site membership (scope='site'
+    // — the value 0010 implemented).
+    const created = await adminSql(
+      `insert into auth.users (id, email, raw_user_meta_data)
+         values (gen_random_uuid(), 'sitescoped@edge.test', '{}'::jsonb) returning id`,
+    );
+    const uid = String(created[0].id);
+    try {
+      await adminSql(
+        `update public.profiles set role = 'inspector', scope = 'site',
+                profile_complete = true where id = '${uid}'`,
+      );
+
+      setIdentity(uid);
+      // No assignment recorded → sees NO sites (empty, not an error).
+      expect(await first(api.sites.list())).toEqual([]);
+
+      // Admin grants exactly one site…
+      await adminSql(
+        `insert into public.site_assignments (user_id, site_id, assigned_by)
+           values ('${uid}', '${f.siteA}', '${f.admin}')`,
+      );
+      setIdentity(uid);
+      const sites = await first(api.sites.list());
+      expect(sites!.map((s) => s._id)).toEqual([f.siteA]);
+      expect(await first(api.sites.get({ siteId: f.siteB }))).toBeNull();
+
+      // Assignment grants visibility, never write authority: the edit API
+      // stays admin-only for this persona.
+      await expectError(() => api.sites.update({ siteId: f.siteA, notes: "x" }), "FORBIDDEN");
+    } finally {
+      await adminSql(`delete from public.site_assignments where user_id = '${uid}'`);
+      await adminSql(`delete from public.audit_log where entity_id = '${uid}'`);
+      await adminSql(`delete from public.profiles where id = '${uid}'`);
+    }
+  });
+
+  test("cross-county: county inspector reads own county only; the edit API denies every non-admin", async () => {
+    setIdentity(f.county);
+    const sites = await first(api.sites.list());
+    expect(sites!.length).toBeGreaterThanOrEqual(1);
+    expect(sites!.some((s) => s._id === f.siteA)).toBe(true); // Bomi
+    expect(sites!.every((s) => s.county === "Bomi")).toBe(true);
+    expect(sites!.some((s) => s._id === f.siteB)).toBe(false); // Grand Cape Mount
+    expect(await first(api.sites.get({ siteId: f.siteB }))).toBeNull();
+    await expectError(() => api.sites.update({ siteId: f.siteB, notes: "cross" }), "FORBIDDEN");
+    await expectError(() => api.sites.update({ siteId: f.siteA, notes: "cross" }), "FORBIDDEN");
+
+    setIdentity(f.opA);
+    await expectError(() => api.sites.update({ siteId: f.siteA, notes: "tenant" }), "FORBIDDEN");
+    await expectError(() => api.sites.update({ siteId: f.siteB, notes: "tenant" }), "FORBIDDEN");
+
+    setIdentity(f.guest);
+    await expectError(() => api.sites.update({ siteId: f.siteA, notes: "guest" }), "FORBIDDEN");
+
+    // None of the denied paths moved the fixture rows.
+    const row = await adminSql(
+      `select notes from public.sites where id = '${f.siteA}'`,
+    );
+    expect(row[0].notes).not.toBe("tenant");
+    expect(row[0].notes).not.toBe("cross");
   });
 });

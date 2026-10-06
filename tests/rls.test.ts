@@ -1007,6 +1007,78 @@ describe("SEC-5/SITE-1: tenancy on organization UUIDs (0010)", () => {
     );
   });
 
+  test("site-edit contract: a same-name write keeps the binding; only a cleared binding re-points the tenant", async () => {
+    const f = await getFixture();
+    await withRole(
+      "authenticated",
+      { sub: f.admin, role: "authenticated" },
+      async (run) => {
+        const [site] = await run(
+          `select organization_id from public.sites where id = '${f.siteA}'`,
+        );
+        expect(site.organization_id).not.toBeNull();
+        const orgA = String(site.organization_id);
+
+        // A same-named sibling registry row, minted AFTER orgA — the
+        // name-based resolver prefers the oldest match, and a bound row
+        // must never re-resolve at all.
+        await run(
+          `insert into public.organizations (name) values ('AgriLib Mining')`,
+        );
+
+        // 1) Same-name write on the BOUND row (what a naive edit form
+        //    would send): sites_org re-derives the display from the
+        //    binding — organization_id cannot drift to the sibling.
+        await run(
+          `update public.sites set operator_name = 'AgriLib Mining'
+            where id = '${f.siteA}'`,
+        );
+        const [afterSame] = await run(
+          `select organization_id from public.sites where id = '${f.siteA}'`,
+        );
+        expect(String(afterSame.organization_id)).toBe(orgA);
+
+        // 2) The edit API's re-point (binding cleared + new name in ONE
+        //    write): the trigger resolves-or-mints by name and the tenant
+        //    follows the new UUID — isolation keys on the UUID, never on
+        //    the display string.
+        await run(
+          `update public.sites set organization_id = null, operator_name = 'NewCo E&P'
+            where id = '${f.siteA}'`,
+        );
+        const [re] = await run(
+          `select organization_id, operator_name from public.sites where id = '${f.siteA}'`,
+        );
+        expect(re.operator_name).toBe("NewCo E&P");
+        const newOrg = String(re.organization_id);
+        expect(newOrg).not.toBe(orgA);
+        const [minted] = await run(
+          `select name from public.organizations where id = '${newOrg}'`,
+        );
+        expect(minted.name).toBe("NewCo E&P");
+
+        // The old operator LOST the site — the read path keys on the UUID
+        // (the display name on the row no longer matches either)…
+        await run(claims(f.opA));
+        const opASites = await run("select id from public.sites");
+        expect(opASites.map((r) => String(r.id))).not.toContain(f.siteA);
+
+        // …and restoring the binding restores both display and access.
+        await run(claims(f.admin));
+        await run(
+          `update public.sites set organization_id = '${orgA}' where id = '${f.siteA}'`,
+        );
+        const [back] = await run(
+          `select operator_name from public.sites where id = '${f.siteA}'`,
+        );
+        expect(back.operator_name).toBe("AgriLib Mining");
+        await run(claims(f.opA));
+        const restored = await run("select id from public.sites");
+        expect(restored.map((r) => String(r.id))).toContain(f.siteA);
+      },
+    );
+  });
+
   test("the permission matrix drives the site guard — deleting an admin's rows revokes the capability", async () => {
     const f = await getFixture();
     await withRole("postgres", null, async (run) => {

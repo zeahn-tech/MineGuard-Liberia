@@ -1,5 +1,78 @@
 # 11 — Implementation Status
 
+**Session:** Security roadmap Session 2 (scope completion) — admin site edit
+API + adversarial isolation suite (SEC-5 / SITE-1, §6)
+**Date:** 2026-10-06
+**Verification:** `bun tsc -b --noEmit` ✓ · `bun test` **331 pass / 4 skip
+(opt-in live) / 0 fail** (335 tests, 21 files) ✓
+
+## This session [2026-10-06 — `api.sites.update` (admin, server-audited)
++ the four adversarial isolation cases proven through the data layer]
+
+**Scope audit first.** The Session 2 schema work had already landed in
+migration 0010 (organizations, admin_areas hierarchy, site_assignments, the
+six-value `user_scope` incl. the implemented `site`, the permissions
+matrix, and the `operator_name → organization_id` backfill with the
+compatibility mirror), so no migration was needed here. Two acceptance
+items were still open: **the site edit API** and **operator-isolation
+test coverage** of the four adversarial cases (they existed only at SQL
+level in `tests/rls.test.ts`).
+
+**`api.sites.update` (admin) — `src/lib/backend.ts`.** Edits site fields
+(name, operator, county/district/community, mineral type, coordinates,
+notes) with the boundary kept server-side: requireAdminUser (client gate) →
+RLS "sites update" consumes the permission matrix
+(`mg_has_permission('sites.update')`) → `mg_guard_site_write` re-checks
+before the row moves → the server's `mg_audit_row` trigger writes the
+authoritative before/after diff in the SAME transaction (SEC-1: the client
+cannot write audit_log) while `sites_touch` bumps `row_version/updated_by`.
+Validation rejects blank name/county/operator and out-of-range
+cordinates (`INVALID_*` codes); an edit that changes nothing returns the
+row without writing (no row_version bump, no audit noise). Changing the
+operator **clears `organization_id` in the same write** so `sites_org`
+re-resolves (or mints) the tenant by name — a bare `operator_name` change
+on a bound row would be silently re-derived from the old organization,
+which is exactly the contract the new rls test pins.
+
+**Tests — suite 328 → 335, all green:**
+- `tests/backend-edge.test.ts` +2: authorized path (edit persists,
+  row_version +1, `updated_by` = admin, exactly one `sites.update` audit row
+  with the before/after diff, no-op leaves both untouched, operator
+  re-point binds a minted organization) and denied path (operator / county /
+  guest → FORBIDDEN, anon → UNAUTHENTICATED, unknown id → NOT_FOUND,
+  blank name / bad latitude → INVALID_*, fixture row unmoved).
+- `tests/operator-isolation.test.ts` +4 (NEW adversarial block, through
+  `api.*` — the exact path the UI consumes): **renamed operator** (org
+  rename cascades display; feed still keyed on the UUID; sibling tenant
+  untouched), **same-name operators** (fixture site re-pointed at a
+  same-named sibling org — display byte-identical, yet gone from opA's
+  feed and detail path while admin still sees it), **site-scoped staff**
+  (fresh identity: `scope='site'` sees nothing until assigned, then exactly
+  the granted site; writes stay FORBIDDEN), **cross-county** (county
+  inspector own-county only; edit API denied for every non-admin).
+- `tests/rls.test.ts` +1 (SQL level): the site-edit contract — a same-name
+  write on a bound row can never drift the binding to a same-named sibling;
+  only a cleared binding re-points the tenant (resolve-or-mint); isolation
+  follows the UUID both ways; restoring the binding restores access.
+
+**Harness lessons (pinned here so the next session doesn't relearn them):**
+`mg_guard_site_write` and `mg_guard_org_write` refuse DELETE for EVERY
+role (owner included) — probe rows are therefore never deleted, only
+re-bound/reset, and all cross-file assertions stay membership-based; the
+org-rename cascade is SECURITY INVOKER and its scope-stamp backfill fires
+child lifecycle guards that read the SESSION JWT, so any statement
+touching `operator_name` runs through `adminExec` with an admin-claims
+prolog (the same prolog `withRole` uses in rls); the wire bridge hands
+jsonb columns back already parsed.
+
+**Honest follow-ups:** unchanged from Session 2 — the owner must push
+migrations 0012+0013 live, and the matrix still has no admin UI by design
+(granting a capability is a migration). No edit UI yet: the API is
+exercised by tests; wiring a SiteDetail edit dialog is product polish,
+not part of this directive's acceptance.
+
+---
+
 **Session:** Offline reliability Session 4 — OFF-1…7 / EVD-1
 **Date:** 2026-10-06
 **Verification:** `bun tsc -b --noEmit` ✓ · `bun test` **324 pass / 4 skip
