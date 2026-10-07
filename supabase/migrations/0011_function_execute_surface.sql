@@ -76,7 +76,10 @@
 -- Acceptance (tests/migration-apply.test.ts, describe "GAP-0"):
 --   * anon executes EXACTLY the two public flows (PUBLIC fallback included)
 --   * no non-extension function retains a PUBLIC grant
---   * the authenticated surface equals the pinned allowlist
+--   * the authenticated surface equals the pinned allowlist (which now
+--     also carries the 0012 stats RPC and 0014's five scale surfaces —
+--     SECURITY INVOKER row sources this migration must keep granted when
+--     it re-runs)
 --   * default privileges grant future functions to neither client role
 --   * every client-REACHABLE SECURITY DEFINER function either carries an
 --     internal authorization pattern or is on the reviewed helper /
@@ -175,7 +178,9 @@ begin
              'mg_operator_name', 'mg_is_admin', 'mg_is_staff',
              'mg_is_reviewer', 'mg_has_permission', 'mg_any_profile_role',
              'mg_can_access_site', 'mg_can_access_site_row',
-             'mg_command_center_stats')
+             'mg_command_center_stats', 'mg_risk_scores',
+             'mg_risk_explanation', 'mg_incidents_page',
+             'mg_inspections_page', 'mg_compliance_page')
   loop
     execute format(
       'grant execute on function public.%I(%s) to authenticated',
@@ -194,7 +199,9 @@ begin
              'mg_operator_name', 'mg_is_admin', 'mg_is_staff',
              'mg_is_reviewer', 'mg_has_permission', 'mg_any_profile_role',
              'mg_can_access_site', 'mg_can_access_site_row',
-             'mg_command_center_stats'
+             'mg_command_center_stats', 'mg_risk_scores',
+             'mg_risk_explanation', 'mg_incidents_page',
+             'mg_inspections_page', 'mg_compliance_page'
            ]) as u(proname)
      where not exists (
              select 1

@@ -26,7 +26,13 @@ import {
   uploadWithProgress,
 } from "./supabase";
 import { validateTemplateSections } from "./template-schema";
-import { computeRiskFactors, type RiskFactor } from "./risk-model";
+import {
+  computeRiskFactors,
+  factorsFromCounts,
+  factorsFromCountsAndIds,
+  type RiskFactor,
+  type RiskInputCounts,
+} from "./risk-model";
 import { sha256Hex } from "./sha256";
 
 /** doc 08: AI output is labeled as assistance — this label ships with every
@@ -450,9 +456,399 @@ async function allSiteCodes(): Promise<string[]> {
   return rows.map((r) => r.code);
 }
 
+/** Paged read of one parent's children (or any eq-filtered slice) — the
+ *  same ordered Range windows as allRows; correctness never depends on the
+ *  server's row cap, however deep the slice grows (SEC-4). */
+async function pagedEqRows<T>(
+  table: string,
+  column: string,
+  value: unknown,
+): Promise<T[]> {
+  return pagedRows<T>((from, to) =>
+    supabase
+      .from(table)
+      .select("*")
+      .eq(column, value)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SEC-4 v2 — keyset pages: the list pages' and the exports' row sources.
+//
+// Rows arrive in (sort_at DESC, id DESC) windows driven by a (cursorAt,
+// cursorId) keyset predicate computed in Postgres by the SECURITY INVOKER
+// RPCs of migration 0014. Unlike offset windows, a keyset window CANNOT skip
+// or repeat rows when the table grows underneath the pager: the predicate is
+// "everything strictly before the last row the caller actually received".
+// Each page carries the cursor of its own last row, so the next request
+// resumes exactly where the previous one stopped.
+// ---------------------------------------------------------------------------
+
+export type KeysetCursor = { at: number; id: string };
+
+export interface KeysetPage<T> {
+  rows: T[];
+  /** Cursor of the page's last row — null when the feed is exhausted. */
+  nextCursor: KeysetCursor | null;
+  /** How this page was produced: "rpc" (SQL keyset page, migration 0014) or
+   *  "fallback" (the full authorized feed in one page — pre-0014 lineage). */
+  source: "rpc" | "fallback";
+}
+
+/** The list pages' window size — well under the hosted row cap, deep enough
+ *  that a normal session never taps "Load more" twice. */
+const KEYSET_PAGE_SIZE = 500;
+
+/** Coerce one RPC jsonb field to a finite number (mapCommandCenterStats
+ *  discipline: no downstream UI math may ever see undefined/NaN). */
+function numOf(v: unknown): number {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Coerce one RPC jsonb field to a string array (id arrays from
+ *  mg_risk_explanation). */
+function strArr(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((x) => String(x));
+}
+
+/** One keyset page through a 0014 RPC. Returns null when the RPC is not on
+ *  this lineage (error) — the caller falls back to the exact full-feed path
+ *  instead of guessing what a half-page means. */
+async function keysetPageRpc<T>(
+  fn: string,
+  before: KeysetCursor | null,
+  limit: number,
+  mapRow: (raw: AnyRow) => T,
+): Promise<KeysetPage<T> | null> {
+  const { data, error } = await supabase.rpc(fn, {
+    p_before: before ? iso(before.at) : null,
+    p_before_id: before ? before.id : null,
+    p_limit: limit,
+  });
+  if (error || !Array.isArray(data)) return null;
+  const raw = data as AnyRow[];
+  const last = raw.length > 0 ? raw[raw.length - 1] : null;
+  return {
+    rows: raw.map(mapRow),
+    // A full page MIGHT have a successor; a short page cannot.
+    nextCursor:
+      last && raw.length >= limit
+        ? { at: numOf(last.cursorAt), id: String(last.cursorId) }
+        : null,
+    source: "rpc",
+  };
+}
+
+/** Stream a keyset feed page by page to exhaustion — the exports' row
+ *  source. Each page is serialized (and released) before the next is
+ *  fetched, so the export's memory tracks one page, not the table. */
+function keysetPages<T>(
+  fetch: (before: KeysetCursor | null) => Promise<KeysetPage<T>>,
+): AsyncGenerator<T[]> {
+  return (async function* () {
+    let before: KeysetCursor | null = null;
+    for (;;) {
+      const page = await fetch({ before });
+      yield page.rows;
+      if (!page.nextCursor) return;
+      before = page.nextCursor;
+    }
+  })();
+}
+
 async function refreshPublicStats() {
   const { error } = await supabase.rpc("refresh_public_stats");
   if (error) console.warn("[backend] publicStats refresh skipped:", error.message);
+}
+
+// ---------------------------------------------------------------------------
+// SEC-4 v2 — full-feed fetchers (the live lists and the keyset pages'
+// fallback both consume them; single body per feed so the two paths cannot
+// diverge) and the RPC row mappers.
+// ---------------------------------------------------------------------------
+
+/** The caller-visible incidents feed, enriched — the exact body of the old
+ *  records.listIncidents fetcher. */
+async function fetchIncidents(
+  user: UserProfile,
+): Promise<(Incident & { siteCode: string; siteName: string; county: string })[]> {
+  const [incRaw, siteRaw] = await Promise.all([
+    allRows<AnyRow>("incidents"),
+    allRows<AnyRow>("sites"),
+  ]);
+  const byId = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
+  const out: (Incident & { siteCode: string; siteName: string; county: string })[] = [];
+  for (const r of incRaw) {
+    const inc = mapIncident(r);
+    const site = byId.get(inc.siteId);
+    if (!site) continue;
+    if (user.role === ROLES.OPERATOR) {
+      if (!user.operatorName || site.operatorName !== user.operatorName) continue;
+    }
+    out.push({
+      ...inc,
+      siteCode: site.code,
+      siteName: site.name,
+      county: site.county,
+    });
+  }
+  out.sort((a, b) => b.occurredAt - a.occurredAt);
+  return out;
+}
+
+/** The caller-visible inspections feed, enriched — the exact body of the old
+ *  inspections.list fetcher. */
+export type InspectionListRow = {
+  _id: string;
+  siteId: string;
+  siteCode: string;
+  siteName: string;
+  county: string;
+  status: Inspection["status"];
+  submittedAt?: number;
+  createdAt: number;
+  inspectorId: string;
+};
+
+async function fetchInspections(user: UserProfile): Promise<InspectionListRow[]> {
+  const [inspRaw, siteRaw] = await Promise.all([
+    allRows<AnyRow>("inspections"),
+    allRows<AnyRow>("sites"),
+  ]);
+  const byId = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
+  const out: InspectionListRow[] = [];
+  for (const r of inspRaw) {
+    const insp = mapInspection(r);
+    const site = byId.get(insp.siteId);
+    if (!site) continue;
+    if (!canAccessSite(user, site)) continue;
+    if (
+      user.role === ROLES.INSPECTOR &&
+      user.scope !== "national" &&
+      insp.inspectorId !== user.uid
+    ) {
+      continue;
+    }
+    out.push({
+      _id: insp._id,
+      siteId: insp.siteId,
+      siteCode: site.code,
+      siteName: site.name,
+      county: site.county,
+      status: insp.status,
+      submittedAt: insp.submittedAt,
+      createdAt: insp.createdAt,
+      inspectorId: insp.inspectorId,
+    });
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt);
+  return out;
+}
+
+/** The caller-visible compliance feed, enriched — the exact body of the old
+ *  inspections.listMyCorrectiveActions fetcher. */
+export type ComplianceListRow = CorrectiveAction & {
+  findingTitle: string;
+  findingSeverity: Finding["severity"];
+  siteCode: string;
+  siteName: string;
+  county: string;
+};
+
+async function fetchCompliance(user: UserProfile): Promise<ComplianceListRow[]> {
+  const [caRaw, findingRaw, siteRaw] = await Promise.all([
+    allRows<AnyRow>("corrective_actions"),
+    allRows<AnyRow>("findings"),
+    allRows<AnyRow>("sites"),
+  ]);
+  const findings = new Map(findingRaw.map((r) => [r.id as string, mapFinding(r)]));
+  const sites = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
+  const out: ComplianceListRow[] = [];
+  for (const r of caRaw) {
+    const ca = mapCA(r);
+    const site = sites.get(ca.siteId);
+    if (!site || !canAccessSite(user, site)) continue;
+    const finding = findings.get(ca.findingId);
+    out.push({
+      ...ca,
+      findingTitle: finding?.title ?? "Compliance finding",
+      findingSeverity: finding?.severity ?? "medium",
+      siteCode: site.code,
+      siteName: site.name,
+      county: site.county,
+    });
+  }
+  // Openest obligations first: open/in_progress/submitted before decided
+  // ones, then by soonest deadline.
+  const openRank = (s: CorrectiveAction["status"]) =>
+    s === "open" ? 0 : s === "in_progress" ? 1 : s === "submitted" ? 2 : s === "escalated" ? 3 : 4;
+  out.sort(
+    (a, b) => openRank(a.status) - openRank(b.status) || a.dueAt - b.dueAt,
+  );
+  return out;
+}
+
+// --- SEC-4 v2 mappers: 0014 RPC payloads (camelCase jsonb) → feed shapes ---
+
+/** mg_incidents_page row → the enriched incident shape listIncidents returns
+ *  (fields coerced; the cursor pair stays in the raw row). */
+function mapIncidentPageRow(r: AnyRow): Incident & {
+  siteCode: string;
+  siteName: string;
+  county: string;
+} {
+  return {
+    _id: String(r._id),
+    siteId: r.siteId as string,
+    type: r.type as Incident["type"],
+    severity: r.severity as Incident["severity"],
+    description: r.description as string,
+    occurredAt: numOf(r.occurredAt),
+    fatalities: r.fatalities == null ? undefined : Number(r.fatalities),
+    injured: r.injured == null ? undefined : Number(r.injured),
+    status: r.status as Incident["status"],
+    reportedById: r.reportedById as string,
+    reportSource: r.reportSource as Incident["reportSource"],
+    createdAt: numOf(r.createdAt),
+    siteCode: r.siteCode as string,
+    siteName: r.siteName as string,
+    county: r.county as string,
+  };
+}
+
+/** mg_inspections_page row → the InspectionListRow shape. */
+function mapInspectionPageRow(r: AnyRow): InspectionListRow {
+  return {
+    _id: String(r._id),
+    siteId: r.siteId as string,
+    siteCode: r.siteCode as string,
+    siteName: r.siteName as string,
+    county: r.county as string,
+    status: r.status as Inspection["status"],
+    submittedAt: r.submittedAt == null ? undefined : numOf(r.submittedAt),
+    createdAt: numOf(r.createdAt),
+    inspectorId: r.inspectorId as string,
+  };
+}
+
+/** mg_compliance_page row → the export/feed page shape (the exact columns
+ *  the §9 compliance export serializes; the live feed keeps its richer
+ *  ComplianceListRow). */
+export type CompliancePageRow = {
+  _id: string;
+  siteId: string;
+  findingId: string;
+  description: string;
+  status: CorrectiveAction["status"];
+  dueAt: number;
+  operatorNote?: string;
+  createdAt: number;
+  findingTitle: string;
+  findingSeverity: Finding["severity"];
+  siteCode: string;
+  siteName: string;
+  county: string;
+};
+
+function mapCompliancePageRow(r: AnyRow): CompliancePageRow {
+  return {
+    _id: String(r._id),
+    findingId: r.findingId as string,
+    siteId: r.siteId as string,
+    description: r.description as string,
+    status: r.status as CorrectiveAction["status"],
+    dueAt: numOf(r.dueAt),
+    operatorNote: r.operatorNote == null ? undefined : (r.operatorNote as string),
+    createdAt: numOf(r.createdAt),
+    findingTitle: r.findingTitle == null ? "Compliance finding" : (r.findingTitle as string),
+    findingSeverity: (r.findingSeverity ?? "medium") as Finding["severity"],
+    siteCode: r.siteCode as string,
+    siteName: r.siteName as string,
+    county: r.county as string,
+  };
+}
+
+// --- SEC-4 v2: the explainer's sentence builder + the mg_risk_explanation
+// mapper (shared by the RPC path; the fallback builds the same response
+// inline from computeRiskFactors' factors).
+
+/** The explainer's sentence list — the fixed, factor-grounded text (doc 08:
+ *  cite-or-abstain; every sentence names the records it is grounded in). */
+function explanationSentences(factors: RiskFactor[]): {
+  factor: string;
+  points: number;
+  recordIds: string[];
+  text: string;
+}[] {
+  return factors.map((f) => ({
+    factor: f.label,
+    points: f.points,
+    recordIds: f.recordIds,
+    text: `${f.label} contribute${f.points === 1 ? "s" : ""} ${f.points} point${f.points === 1 ? "" : "s"} to the indicator at this site.`,
+  }));
+}
+
+/** mg_risk_explanation payload → the explainer response: the count aggregates
+ *  rebuild the factors through the shared builder (factorsFromCountsAndIds)
+ *  and the id arrays become the per-sentence citations. */
+function explanationFromRow(row: AnyRow): {
+  siteId: string;
+  generatedAt: number;
+  abstained: boolean;
+  summary: string | null;
+  citations: string[];
+  sentences: { factor: string; points: number; recordIds: string[]; text: string }[];
+  disclaimer: string;
+} {
+  const counts: RiskInputCounts = {
+    findingsTotal: numOf(row.findingsTotal),
+    low: numOf(row.lowFindings),
+    medium: numOf(row.mediumFindings),
+    high: numOf(row.highFindings),
+    critical: numOf(row.criticalFindings),
+    overdueCAs: numOf(row.overdueCAs),
+    fatalityIncidents: numOf(row.fatalityIncidents),
+    seriousIncidents: numOf(row.seriousIncidents),
+    envAlerts: numOf(row.envAlerts),
+  };
+  const { score, factors } = factorsFromCountsAndIds(counts, {
+    allFindingIds: strArr(row.allFindingIds),
+    lowIds: strArr(row.lowIds),
+    mediumIds: strArr(row.mediumIds),
+    highIds: strArr(row.highIds),
+    criticalIds: strArr(row.criticalIds),
+    overdueCaIds: strArr(row.overdueCaIds),
+    fatalityIds: strArr(row.fatalityIds),
+    seriousIncidentIds: strArr(row.seriousIncidentIds),
+    envAlertIds: strArr(row.envAlertIds),
+  });
+  const citations = [...new Set(factors.flatMap((f) => f.recordIds))].sort();
+  // Cite-or-abstain: with no factors there is nothing to explain — abstain
+  // rather than invent a narrative.
+  if (factors.length === 0) {
+    return {
+      siteId: String(row.siteId),
+      generatedAt: Date.now(),
+      abstained: true,
+      summary: null,
+      citations: [],
+      sentences: [],
+      disclaimer: AI_DISCLAIMER,
+    };
+  }
+  return {
+    siteId: String(row.siteId),
+    generatedAt: Date.now(),
+    abstained: false,
+    summary: `The risk indicator of ${score} for ${row.name} (${row.code}) is the sum of ${factors.length} recorded factor${factors.length === 1 ? "" : "s"}; each sentence below names the record it is grounded in.`,
+    citations,
+    sentences: explanationSentences(factors),
+    disclaimer: AI_DISCLAIMER,
+  };
 }
 
 function evidenceKindByMime(mime: string): EvidenceKind {
@@ -1109,6 +1505,42 @@ export const api = {
         async () => {
           const user = await requireAuthed(true);
           if (!user.role) return {};
+          // SEC-4 v2 — AGGREGATE IN THE DATABASE: mg_risk_scores (SECURITY
+          // INVOKER, migration 0014) reduces the five input tables to ONE
+          // count-aggregate row per visible site; the client rebuilds the
+          // exact factor breakdown from RISK_WEIGHTS through the SAME factor
+          // builder the fallback uses. No O(n) rows on the wire at any table
+          // size, and the scope is the caller's RLS visibility — the same
+          // policies the fallback's paged reads go through.
+          const { data, error } = await supabase.rpc("mg_risk_scores");
+          if (!error && Array.isArray(data)) {
+            const byId: Record<
+              string,
+              { score: number; factors: RiskFactor[] }
+            > = {};
+            for (const raw of data as AnyRow[]) {
+              const counts: RiskInputCounts = {
+                findingsTotal: numOf(raw.findingsTotal),
+                low: numOf(raw.lowFindings),
+                medium: numOf(raw.mediumFindings),
+                high: numOf(raw.highFindings),
+                critical: numOf(raw.criticalFindings),
+                overdueCAs: numOf(raw.overdueCAs),
+                fatalityIncidents: numOf(raw.fatalityIncidents),
+                seriousIncidents: numOf(raw.seriousIncidents),
+                envAlerts: numOf(raw.envAlerts),
+              };
+              byId[String(raw.siteId)] = factorsFromCounts(counts);
+            }
+            return byId;
+          }
+          // Fallback (lineage without migration 0014): the original
+          // full-input computation — exact at any size because every input
+          // read pages; only the wire cost differs. Loud about why.
+          console.warn(
+            "[backend] mg_risk_scores unavailable — client-side aggregation fallback:",
+            error ? error.message ?? String(error) : "unexpected payload",
+          );
           const now = Date.now();
           const [sitesRaw, findingsRaw, casRaw, incRaw, envRaw] =
             await Promise.all([
@@ -1182,7 +1614,25 @@ export const api = {
         disclaimer: string;
       } | null>(async () => {
         const user = await requireAuthed();
-        // Same scoped reads as riskScores; re-derive everything server-side.
+        if (!user.role) return null; // no AI narrative for role-less accounts
+        // SEC-4 v2 — the explanation's inputs are assembled IN THE DATABASE:
+        // mg_risk_explanation (SECURITY INVOKER, migration 0014) returns the
+        // one site's count aggregates PLUS the record-id arrays the
+        // cite-or-abstain contract anchors to. Scope is never re-derived
+        // client-side: a site the caller cannot see yields no row — the same
+        // null-mask as before ("not found OR out of scope → same null").
+        const { data, error } = await supabase.rpc("mg_risk_explanation", {
+          p_site_id: args.siteId,
+        });
+        if (!error && data && typeof data === "object") {
+          return explanationFromRow(data as AnyRow);
+        }
+        // Fallback (lineage without migration 0014): the original path —
+        // same scoped reads as the old riskScores; re-derive server-side.
+        console.warn(
+          "[backend] mg_risk_explanation unavailable — client-side fallback:",
+          error ? error.message ?? String(error) : "unexpected payload",
+        );
         const site = await getSite(args.siteId);
         if (!site) return null; // null-masked: not found OR out of scope
         if (!canAccessSite(user, site)) return null;
@@ -1217,19 +1667,13 @@ export const api = {
             disclaimer: AI_DISCLAIMER,
           };
         }
-        const sentences = factors.map((f) => ({
-          factor: f.label,
-          points: f.points,
-          recordIds: f.recordIds,
-          text: `${f.label} contribute${f.points === 1 ? "s" : ""} ${f.points} point${f.points === 1 ? "" : "s"} to the indicator at this site.`,
-        }));
         return {
           siteId: args.siteId,
           generatedAt: Date.now(),
           abstained: false,
           summary: `The risk indicator of ${score} for ${site.name} (${site.code}) is the sum of ${factors.length} recorded factor${factors.length === 1 ? "" : "s"}; each sentence below names the record it is grounded in.`,
           citations,
-          sentences,
+          sentences: explanationSentences(factors),
           disclaimer: AI_DISCLAIMER,
         };
       }, ["sites", "findings", "corrective_actions", "incidents", "environmental_observations"]),
@@ -1240,13 +1684,19 @@ export const api = {
     listTemplates: () =>
       live<InspectionTemplate[]>(async () => {
         await requireAuthed();
-        const { data, error } = await supabase
-          .from("inspection_templates")
-          .select("*")
-          .eq("active", true);
-        if (error) throw backendError(error);
+        // SEC-4: paged read — no unranged select anywhere (the active filter
+        // narrows the set; the ordered Range keeps correctness independent of
+        // the server's row cap at any table size).
+        const rows = await pagedRows<AnyRow>((from, to) =>
+          supabase
+            .from("inspection_templates")
+            .select("*")
+            .eq("active", true)
+            .order("id", { ascending: true })
+            .range(from, to),
+        );
         // 0009: archived templates (soft-deleted) leave every surface.
-        return (data ?? []).filter((r) => !r.archived_at).map(mapTemplate);
+        return rows.filter((r) => !r.archived_at).map(mapTemplate);
       }, ["inspection_templates"]),
 
     /** ALL templates regardless of active flag — the template editor's list
@@ -1254,19 +1704,16 @@ export const api = {
     listTemplatesAll: () =>
       live<InspectionTemplate[]>(async () => {
         const user = await requireStaffUser();
-        if (user.role !== ROLES.ADMIN) {
-          // Inspectors/supervisors may READ templates (the guard allows
-          // staff writes too, but the editor is admin surface — keep the
-          // feed visible so inspectors see what is coming).
-        }
-        const { data, error } = await supabase
-          .from("inspection_templates")
-          .select("*")
-          .order("created_at", { ascending: false });
-        if (error) throw backendError(error);
+        void user; // inspectors/supervisors may READ templates too — admin surface only for writes
+        // SEC-4: paged read ordered by the primary key (stable windows), then
+        // displayed newest-first — the same order the SQL ORDER BY produced.
+        const rows = await allRows<AnyRow>("inspection_templates");
         // 0009: archived templates are gone from the editor list too —
         // archive is this app's delete (row stays for history/audit).
-        return (data ?? []).filter((r) => !r.archived_at).map(mapTemplate);
+        return rows
+          .filter((r) => !r.archived_at)
+          .map(mapTemplate)
+          .sort((a, b) => b.createdAt - a.createdAt);
       }, ["inspection_templates"]),
 
     /** Create or update a template. The sections JSON is validated here —
@@ -1374,58 +1821,70 @@ export const api = {
     },
 
     list: () =>
-      live<
-        {
-          _id: string;
-          siteId: string;
-          siteCode: string;
-          siteName: string;
-          county: string;
-          status: Inspection["status"];
-          submittedAt?: number;
-          createdAt: number;
-          inspectorId: string;
-        }[]
-      >(async () => {
+      live<InspectionListRow[]>(async () => {
         const user = await requireAuthed(true);
         if (!user.role) return [];
-        const [inspRaw, siteRaw] = await Promise.all([
-          allRows<AnyRow>("inspections"),
-          allRows<AnyRow>("sites"),
-        ]);
-        const byId = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
-        const out: {
-          _id: string; siteId: string; siteCode: string; siteName: string;
-          county: string; status: Inspection["status"]; submittedAt?: number;
-          createdAt: number; inspectorId: string;
-        }[] = [];
-        for (const r of inspRaw) {
-          const insp = mapInspection(r);
-          const site = byId.get(insp.siteId);
-          if (!site) continue;
-          if (!canAccessSite(user, site)) continue;
-          if (
-            user.role === ROLES.INSPECTOR &&
-            user.scope !== "national" &&
-            insp.inspectorId !== user.uid
-          ) {
-            continue;
-          }
-          out.push({
-            _id: insp._id,
-            siteId: insp.siteId,
-            siteCode: site.code,
-            siteName: site.name,
-            county: site.county,
-            status: insp.status,
-            submittedAt: insp.submittedAt,
-            createdAt: insp.createdAt,
-            inspectorId: insp.inspectorId,
-          });
-        }
-        out.sort((a, b) => b.createdAt - a.createdAt);
-        return out;
+        return fetchInspections(user);
       }, ["inspections", "sites"]),
+
+    /** SEC-4 v2 — the inspections list page's keyset page (migration 0014's
+     *  SECURITY INVOKER mg_inspections_page): (created_at, id) DESC windows.
+     *  The inspector-owns-row rule is already an RLS predicate on the table,
+     *  so the page reproduces the client list's visible set without
+     *  re-deriving scope. Fallback on a pre-0014 lineage: the complete
+     *  authorized feed in one page (exact, just not incremental); a load-more
+     *  request returns an empty page rather than repeating rows. */
+    inspectionsPage: async (args: {
+      before?: KeysetCursor | null;
+      limit?: number;
+    }): Promise<KeysetPage<InspectionListRow>> => {
+      const user = await requireAuthed(true);
+      if (!user.role) return { rows: [], nextCursor: null, source: "fallback" };
+      const limit = Math.min(
+        Math.max(1, Math.trunc(args.limit ?? KEYSET_PAGE_SIZE)),
+        POSTGREST_MAX_ROWS,
+      );
+      const viaRpc = await keysetPageRpc(
+        "mg_inspections_page",
+        args.before ?? null,
+        limit,
+        mapInspectionPageRow,
+      );
+      if (viaRpc) return viaRpc;
+      if (args.before) return { rows: [], nextCursor: null, source: "fallback" };
+      console.warn(
+        "[backend] mg_inspections_page unavailable — full authorized feed in one page (migration 0014 not applied); list stays exact, paging inactive",
+      );
+      return { rows: await fetchInspections(user), nextCursor: null, source: "fallback" };
+    },
+
+    /** The §9 compliance export's row source (see api.exports): the same
+     *  keyset-page contract over corrective actions + finding + site, joined
+     *  in SQL. No UI page consumes it — the live feed keeps its richer
+     *  openest-first ordering. */
+    compliancePage: async (args: {
+      before?: KeysetCursor | null;
+      limit?: number;
+    }): Promise<KeysetPage<CompliancePageRow>> => {
+      const user = await requireAuthed(true);
+      if (!user.role) return { rows: [], nextCursor: null, source: "fallback" };
+      const limit = Math.min(
+        Math.max(1, Math.trunc(args.limit ?? KEYSET_PAGE_SIZE)),
+        POSTGREST_MAX_ROWS,
+      );
+      const viaRpc = await keysetPageRpc(
+        "mg_compliance_page",
+        args.before ?? null,
+        limit,
+        mapCompliancePageRow,
+      );
+      if (viaRpc) return viaRpc;
+      if (args.before) return { rows: [], nextCursor: null, source: "fallback" };
+      console.warn(
+        "[backend] mg_compliance_page unavailable — full authorized feed in one page (migration 0014 not applied); export stays exact, streaming inactive",
+      );
+      return { rows: await fetchCompliance(user), nextCursor: null, source: "fallback" };
+    },
 
     get: (args: { inspectionId: string }) =>
       live<Inspection | null>(async () => {
@@ -1591,12 +2050,11 @@ export const api = {
         const insp = mapInspection(inspRow);
         const site = await getSite(insp.siteId);
         if (!site || !canAccessSite(user, site)) throw new Error("FORBIDDEN");
-        const { data, error } = await supabase
-          .from("findings")
-          .select("*")
-          .eq("inspection_id", args.inspectionId);
-        if (error) throw backendError(error);
-        return (data ?? []).map(mapFinding);
+        // SEC-4: the same paged read as every whole-table scan — a parent's
+        // findings are bounded by that parent's volume, but the read must
+        // never depend on the server's row cap.
+        const rows = await pagedEqRows<AnyRow>("findings", "inspection_id", args.inspectionId);
+        return rows.map(mapFinding);
       }, ["findings"]),
 
     /** Findings feed for the operator portal (§20): every finding on sites
@@ -1726,12 +2184,9 @@ export const api = {
         const finding = mapFinding(data);
         const site = await getSite(finding.siteId);
         if (!site || !canAccessSite(user, site)) throw new Error("FORBIDDEN");
-        const { data: rows, error } = await supabase
-          .from("corrective_actions")
-          .select("*")
-          .eq("finding_id", args.findingId);
-        if (error) throw backendError(error);
-        return (rows ?? []).map(mapCA);
+        // SEC-4: paged read (see listFindingsForInspection).
+        const rows = await pagedEqRows<AnyRow>("corrective_actions", "finding_id", args.findingId);
+        return rows.map(mapCA);
       }, ["corrective_actions"]),
 
     listSiteCorrectiveActions: (args: { siteId: string }) =>
@@ -1739,12 +2194,9 @@ export const api = {
         const user = await requireAuthed();
         const site = await getSite(args.siteId);
         if (!site || !canAccessSite(user, site)) return [];
-        const { data, error } = await supabase
-          .from("corrective_actions")
-          .select("*")
-          .eq("site_id", args.siteId);
-        if (error) throw backendError(error);
-        return (data ?? []).map(mapCA);
+        // SEC-4: paged read (see listFindingsForInspection).
+        const rows = await pagedEqRows<AnyRow>("corrective_actions", "site_id", args.siteId);
+        return rows.map(mapCA);
       }, ["corrective_actions"]),
 
     /** Compliance obligations for the operator portal (§20): every corrective
@@ -1752,47 +2204,10 @@ export const api = {
      *  and site identity. Operators are strictly tenant-scoped by RLS + the
      *  client mirror; staff get the same feed over their own scope. */
     listMyCorrectiveActions: () =>
-      live<
-        (CorrectiveAction & {
-          findingTitle: string;
-          findingSeverity: Finding["severity"];
-          siteCode: string;
-          siteName: string;
-          county: string;
-        })[]
-      >(async () => {
+      live<ComplianceListRow[]>(async () => {
         const user = await requireAuthed(true);
         if (!user.role) return [];
-        const [caRaw, findingRaw, siteRaw] = await Promise.all([
-          allRows<AnyRow>("corrective_actions"),
-          allRows<AnyRow>("findings"),
-          allRows<AnyRow>("sites"),
-        ]);
-        const findings = new Map(findingRaw.map((r) => [r.id as string, mapFinding(r)]));
-        const sites = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
-        const out = [];
-        for (const r of caRaw) {
-          const ca = mapCA(r);
-          const site = sites.get(ca.siteId);
-          if (!site || !canAccessSite(user, site)) continue;
-          const finding = findings.get(ca.findingId);
-          out.push({
-            ...ca,
-            findingTitle: finding?.title ?? "Compliance finding",
-            findingSeverity: finding?.severity ?? "medium",
-            siteCode: site.code,
-            siteName: site.name,
-            county: site.county,
-          });
-        }
-        // Openest obligations first: open/in_progress/submitted before decided
-        // ones, then by soonest deadline.
-        const openRank = (s: CorrectiveAction["status"]) =>
-          s === "open" ? 0 : s === "in_progress" ? 1 : s === "submitted" ? 2 : s === "escalated" ? 3 : 4;
-        out.sort(
-          (a, b) => openRank(a.status) - openRank(b.status) || a.dueAt - b.dueAt,
-        );
-        return out;
+        return fetchCompliance(user);
       }, ["corrective_actions", "findings", "sites"]),
 
     openCorrectiveAction: async (args: {
@@ -1943,33 +2358,47 @@ export const api = {
   // --------------------------------------------------------------- records
   records: {
     listIncidents: () =>
-      live<Incident[]>(async () => {
-        const user = await requireAuthed(true);
-        if (!user.role) return [];
-        const [incRaw, siteRaw] = await Promise.all([
-          allRows<AnyRow>("incidents"),
-          allRows<AnyRow>("sites"),
-        ]);
-        const byId = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
-        const out: Incident[] = [];
-        for (const r of incRaw) {
-          const inc = mapIncident(r);
-          const site = byId.get(inc.siteId);
-          if (!site) continue;
-          if (user.role === ROLES.OPERATOR) {
-            if (!user.operatorName || site.operatorName !== user.operatorName)
-              continue;
-          }
-          out.push({
-            ...inc,
-            siteCode: site.code,
-            siteName: site.name,
-            county: site.county,
-          });
-        }
-        out.sort((a, b) => b.occurredAt - a.occurredAt);
-        return out;
-      }, ["incidents", "sites"]),
+      live<(Incident & { siteCode: string; siteName: string; county: string })[]>(
+        async () => {
+          const user = await requireAuthed(true);
+          if (!user.role) return [];
+          return fetchIncidents(user);
+        },
+        ["incidents", "sites"],
+      ),
+
+    /** SEC-4 v2 — the incidents list page's keyset page (migration 0014's
+     *  SECURITY INVOKER mg_incidents_page): (occurred_at, id) DESC windows
+     *  resumable by cursor, immune to offset skew from concurrent inserts.
+     *  On a lineage without 0014 the FIRST page falls back to the complete
+     *  authorized feed in one page (hasMore=false — exact either way), and a
+     *  load-more request returns an EMPTY page rather than repeating rows
+     *  that fallback already carried. */
+    incidentsPage: async (args: {
+      before?: KeysetCursor | null;
+      limit?: number;
+    }): Promise<
+      KeysetPage<Incident & { siteCode: string; siteName: string; county: string }>
+    > => {
+      const user = await requireAuthed(true);
+      if (!user.role) return { rows: [], nextCursor: null, source: "fallback" };
+      const limit = Math.min(
+        Math.max(1, Math.trunc(args.limit ?? KEYSET_PAGE_SIZE)),
+        POSTGREST_MAX_ROWS,
+      );
+      const viaRpc = await keysetPageRpc(
+        "mg_incidents_page",
+        args.before ?? null,
+        limit,
+        mapIncidentPageRow,
+      );
+      if (viaRpc) return viaRpc;
+      if (args.before) return { rows: [], nextCursor: null, source: "fallback" };
+      console.warn(
+        "[backend] mg_incidents_page unavailable — full authorized feed in one page (migration 0014 not applied); list stays exact, paging inactive",
+      );
+      return { rows: await fetchIncidents(user), nextCursor: null, source: "fallback" };
+    },
 
     getIncident: (args: { incidentId: string }) =>
       live<Incident | null>(async () => {
@@ -2598,6 +3027,22 @@ export const api = {
     },
   },
 
+  // --------------------------------------------------------------- exports
+  // §9 REPORTING EXPORTS — STREAMING (SEC-4 v2). The row source moved into
+  // the database: pages of site-joined rows come from the SECURITY INVOKER
+  // keyset RPCs (migration 0014) — the same RLS scope as the feeds — and are
+  // serialized incrementally by export-csv (csvChunks/streamCsvFile). Each
+  // page is released as it is consumed, so an export's memory tracks one
+  // page, not the table, and no export path can exceed the caller's
+  // authorization: the row source IS the caller's row visibility (invoker +
+  // RLS; no definer, no service role anywhere).
+  exports: {
+    streamInspections: (): AsyncGenerator<InspectionListRow[]> =>
+      keysetPages((before) => api.inspections.inspectionsPage({ before })),
+    streamCompliance: (): AsyncGenerator<CompliancePageRow[]> =>
+      keysetPages((before) => api.inspections.compliancePage({ before })),
+  },
+
   // -------------------------------------------------------------- evidence
   evidence: {
     /**
@@ -2771,11 +3216,15 @@ export const api = {
     storageFootprint: () =>
       live<{ count: number; totalBytes: number }>(async () => {
         await requireAdminUser();
-        const { data, error } = await supabase
-          .from("evidence")
-          .select("size_bytes");
-        if (error) throw backendError(error);
-        const rows = data ?? [];
+        // SEC-4: paged read — the old unranged select stopped at the server's
+        // row cap, so past 1,000 objects this figure was silently wrong.
+        const rows = await pagedRows<{ size_bytes: unknown }>((from, to) =>
+          supabase
+            .from("evidence")
+            .select("size_bytes")
+            .order("id", { ascending: true })
+            .range(from, to),
+        );
         return {
           count: rows.length,
           totalBytes: rows.reduce((a, e) => a + Number(e.size_bytes ?? 0), 0),

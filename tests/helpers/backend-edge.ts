@@ -646,6 +646,13 @@ const RPC_SPECS: Record<string, RpcSpec> = {
   evidence_url: { fn: "evidence_url", args: ["p_evidence_id", "p_ttl_seconds"] },
   refresh_public_stats: { fn: "refresh_public_stats", args: [] },
   mg_command_center_stats: { fn: "mg_command_center_stats", args: [] },
+  // SEC-4 v2 (migration 0014): scale surfaces — SECURITY INVOKER aggregation
+  // and keyset pages. Named args only (PostgREST named-notation contract).
+  mg_risk_scores: { fn: "mg_risk_scores", args: [] },
+  mg_risk_explanation: { fn: "mg_risk_explanation", args: ["p_site_id"] },
+  mg_incidents_page: { fn: "mg_incidents_page", args: ["p_before", "p_before_id", "p_limit"] },
+  mg_inspections_page: { fn: "mg_inspections_page", args: ["p_before", "p_before_id", "p_limit"] },
+  mg_compliance_page: { fn: "mg_compliance_page", args: ["p_before", "p_before_id", "p_limit"] },
 };
 
 async function execRpc(
