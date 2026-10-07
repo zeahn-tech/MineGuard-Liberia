@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { useMutation, useQuery } from "@/lib/backend-react";
+import { useKeysetPage, useMutation, useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { useAuth } from "@/hooks/use-auth";
 import { isStaffRole } from "@/lib/types";
@@ -28,7 +28,11 @@ import {
   Signal,
   WifiOff,
 } from "lucide-react";
-import { exportInspections } from "@/lib/export-csv";
+import {
+  downloadFile,
+  streamCsvFile,
+  INSPECTION_EXPORT_COLUMNS,
+} from "@/lib/export-csv";
 import {
   deleteDraft,
   enqueueInspectionSubmission,
@@ -50,7 +54,16 @@ type SiteDoc = Doc<"sites">;
 // LIST + NEW INSPECTION
 // ---------------------------------------------------------------------------
 export default function Inspections() {
-  const inspections = useQuery(api.inspections.list);
+  // SEC-4 v2: the list consumes the SERVER-SIDE keyset page (migration
+  // 0014): 500-row windows resumable by cursor. The whole-table list query
+  // stays as the fallback/other-surfaces source (SiteDetail joins, export
+  // fallback path) — no behavior change visible at pilot scale.
+  const feed = useKeysetPage(
+    (before) =>
+      api.inspections.inspectionsPage({ before: before as never, limit: 500 }),
+    1,
+  );
+  const inspections = feed.rows;
   const sites = useQuery(api.sites.list);
   const templates = useQuery(api.inspections.listTemplates);
   const { user } = useAuth();
@@ -98,15 +111,38 @@ export default function Inspections() {
           variant="outline"
           disabled={!inspections?.length}
           onClick={() => {
-            // Export serializes ONLY the rows the authorized list query
-            // returned (§9: no unscoped export path exists).
-            const name = exportInspections(inspections ?? []);
-            toast.success(`Exported ${name} (${inspections?.length ?? 0} rows).`);
+            toast.promise(
+              (async () => {
+                // Export STREAMS the keyset pages (§9 + SEC-4: no unscoped
+                // path — the row source IS the caller's RLS visibility — and
+                // no whole-table buffer). Byte-identical File as before.
+                const rows = await streamCsvFile(
+                  api.exports.streamInspections(),
+                  INSPECTION_EXPORT_COLUMNS,
+                  "inspections",
+                );
+                downloadFile(rows);
+                return rows.name;
+              })(),
+              {
+                loading: "Exporting…",
+                success: (name) => `Exported ${String(name)}.`,
+                error: (e) => (e instanceof Error ? e.message : "Export failed"),
+              },
+            );
           }}
         >
           <Download className="size-4" /> Export CSV
         </Button>
       </header>
+
+      {feed.hasMore && (
+        <div className="flex justify-center">
+          <Button variant="outline" size="sm" disabled={feed.loading} onClick={feed.loadMore}>
+            {feed.loading ? "Loading…" : "Load more inspections"}
+          </Button>
+        </div>
+      )}
 
       {localDrafts.length > 0 && (
         <section>

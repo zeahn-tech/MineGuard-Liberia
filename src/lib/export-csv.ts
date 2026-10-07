@@ -33,6 +33,98 @@ export function toCsv<T>(rows: readonly T[], columns: readonly ExportColumn<T>[]
   return "\uFEFF" + lines.join("\r\n") + "\r\n";
 }
 
+// ---------------------------------------------------------------------------
+// SEC-4 v2 — STREAMING: large tables must not require whole-table memory.
+// The primitives below serialize INCREMENTALLY: one chunk per page of rows
+// (the row source releases each page as it is consumed), and the assembled
+// bytes are exactly toCsv's output — same cell encoding, same BOM, same CRLF
+// discipline — proven by csvByteParity in tests/scale-aggregation.test.ts.
+// ---------------------------------------------------------------------------
+
+/** Incremental cell encoder — the EXACT function toCsv's `cell` uses. */
+export function csvCell(raw: string | number | boolean | null | undefined): string {
+  if (raw === null || raw === undefined) return "";
+  const s = String(raw);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** The CSV's byte framing: BOM + header line + per-row CRLF-terminated lines.
+ *  Exported so the batches/collects tests can splice chunks without knowing
+ *  the framing. */
+export const CSV_BOM = "\uFEFF";
+export const CSV_EOL = "\r\n";
+
+export function csvHeaderLine<T>(columns: readonly ExportColumn<T>[]): string {
+  return columns.map((c) => csvCell(c.header)).join(",");
+}
+
+/** One page of rows → one CSV chunk (rows WITHOUT the framing/header). The
+ *  terminator after the LAST row of a chunk is the caller's concat concern —
+ *  covered by csvChunks/streamCsvFile (each chunk is always CRLF-terminated,
+ *  which is correct for concatenation). */
+export function csvRowChunk<T>(
+  rows: readonly T[],
+  columns: readonly ExportColumn<T>[],
+): string {
+  if (rows.length === 0) return "";
+  return rows.map((r) => columns.map((c) => csvCell(c.value(r))).join(",")).join(
+    CSV_EOL,
+  ) + CSV_EOL;
+}
+
+/** Stream an ENTIRE export as an async generator of page-sized strings:
+ *  chunk 0 = BOM + header, each later chunk = the page's rows. (async
+ *  generators are syntax, not a runtime dependency — runs everywhere the
+ *  app runs.) */
+export function csvChunks<T>(
+  pageSource: AsyncIterable<readonly T[]> | AsyncGenerator<readonly T[], void, unknown>,
+  columns: readonly ExportColumn<T>[],
+): AsyncGenerator<string, void, unknown> {
+  return (async function* () {
+    yield CSV_BOM + csvHeaderLine(columns) + CSV_EOL;
+    for await (const page of pageSource) {
+      const chunk = csvRowChunk(page, columns);
+      if (chunk) yield chunk;
+    }
+  })();
+}
+
+/** Collect a streamed CSV into String parts (large-table friendly: the
+ *  parts array holds the concatenated text, one entry per page). */
+export async function csvParts<T>(
+  pageSource: AsyncIterable<readonly T[]> | AsyncGenerator<readonly T[], void, unknown>,
+  columns: readonly ExportColumn<T>[],
+): Promise<string[]> {
+  const parts: string[] = [];
+  for await (const chunk of csvChunks(pageSource, columns)) parts.push(chunk);
+  return parts;
+}
+
+/** Stream an entire export into ONE File (the full text assembled from the
+ *  page parts) — the download path's behavior is byte-identical to csvFile,
+ *  it just builds the string incrementally. For datasets too large for one
+ *  in-memory string, consume csvChunks directly. */
+export async function streamCsvText<T>(
+  pageSource: AsyncIterable<readonly T[]> | AsyncGenerator<readonly T[], void, unknown>,
+  columns: readonly ExportColumn<T>[],
+): Promise<string> {
+  return (await csvParts(pageSource, columns)).join("");
+}
+
+/** Stream an export into a dated File (csvFile's name/shape contract) from a
+ *  page-source generator. */
+export async function streamCsvFile<T>(
+  pageSource: AsyncIterable<readonly T[]> | AsyncGenerator<readonly T[], void, unknown>,
+  columns: readonly ExportColumn<T>[],
+  baseName: string,
+  now: Date = new Date(),
+): Promise<File> {
+  const text = await streamCsvText(pageSource, columns);
+  const stamp = now.toISOString().slice(0, 10);
+  const name = `mineguard-${baseName}-${stamp}.csv`;
+  return new File([text], name, { type: "text/csv;charset=utf-8" });
+}
+
 /** Build a File from CSV text with a dated filename, e.g.
  *  mineguard-inspections-2026-09-28.csv — BOM + .csv extension. */
 export function csvFile<T>(

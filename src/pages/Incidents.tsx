@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router";
-import { useMutation, useQuery } from "@/lib/backend-react";
+import { useKeysetPage, useMutation, useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,16 @@ const TYPES = [
 const SEVERITIES = ["low", "medium", "high", "critical"] as const;
 
 export default function Incidents() {
-  const incidents = useQuery(api.records.listIncidents);
+  // SEC-4 v2: the list consumes the SERVER-SIDE keyset page (migration
+  // 0014): 500-row windows resumable by cursor. The whole-table list query
+  // stays as the fallback the hook builds on — no behavior change visible
+  // at pilot scale.
+  const feed = useKeysetPage(
+    (before) =>
+      api.records.incidentsPage({ before: before as never, limit: 500 }),
+    1,
+  );
+  const incidents = feed.rows;
   const sites = useQuery(api.sites.list);
   const setStatus = useMutation(api.records.setIncidentStatus);
   const { user } = useAuth();
@@ -68,7 +77,7 @@ export default function Incidents() {
         {sites && sites.length > 0 && <ReportDialog />}
       </header>
 
-      {!incidents ? (
+      {incidents.length === 0 && feed.loading ? (
         <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>
       ) : incidents.length === 0 ? (
         <div className="paper p-10 text-center text-sm text-muted-foreground">
@@ -142,6 +151,13 @@ export default function Incidents() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {feed.hasMore && (
+        <div className="flex justify-center">
+          <Button variant="outline" size="sm" disabled={feed.loading} onClick={feed.loadMore}>
+            {feed.loading ? "Loading…" : "Load more incidents"}
+          </Button>
         </div>
       )}
     </div>

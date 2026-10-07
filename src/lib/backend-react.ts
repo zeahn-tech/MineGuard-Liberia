@@ -19,7 +19,7 @@
 //     per-component state copies, no extra render passes.
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   authUserId,
   isAuthReady,
@@ -252,6 +252,126 @@ function fnCacheId(fn: (args?: any) => AnyHandle): string {
     FN_IDS.set(fn, id);
   }
   return id;
+}
+
+// ---------------------------------------------------------------------------
+// useKeysetPage — the list pages' incremental window (SEC-4 v2).
+//
+// supplies rows ONE keyset page at a time (an async fetch-then-append loop
+// driven by the page's own next-cursor). Reactive inputs (page size bump,
+// resetKey change, auth epoch) restart the accumulation from the first
+// page, so a sign-in/out or filter change can never mix rows from two page
+// streams. Rows arrive newest-first (the SQL pages are (sort_at, id) DESC)
+// and are appended in stream order — the page's contract.
+// ---------------------------------------------------------------------------
+
+export interface KeysetFeed<T> {
+  rows: T[];
+  hasMore: boolean;
+  loading: boolean;
+  loadMore: () => void;
+}
+
+export function useKeysetPage<T>(
+  fetch: (before: {
+    at: number;
+    id: string;
+  } | null) => Promise<{
+    rows: T[];
+    nextCursor: { at: number; id: string } | null;
+    source: string;
+  }>,
+  pageKeys: number,
+  resetKey: string = "",
+): KeysetFeed<T> {
+  const epoch = useAuthEpoch();
+  const [state, setState] = useState<{
+    rows: T[];
+    cursor: { at: number; id: string } | null;
+    hasMore: boolean;
+    loading: boolean;
+    done: boolean;
+    pages: number;
+  }>(() => ({
+    rows: [],
+    cursor: null,
+    hasMore: false,
+    loading: false,
+    done: false,
+    pages: 0,
+  }));
+
+  const fetchRef = useRef(fetch);
+  fetchRef.current = fetch;
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  // Effective pages: pageKeys open pages, kept open once opened (loadMore
+  // must never retract rows the caller has already rendered). pageKeys
+  // starts at 1 (the "does the table have anything" probe).
+  useEffect(() => {
+    setState((s) => ({ ...s, pages: Math.max(1, pageKeys) }));
+  }, [pageKeys]);
+
+  // Pull pages until the requested count is satisfied. Serialized (one fetch
+  // at a time) so the in-flight guard below stays the only coordination.
+  useEffect(() => {
+    let cancelled = false;
+    const step = async () => {
+      const cur = stateRef.current;
+      if (cancelled || cur.loading || cur.done || cur.pages <= 0) return;
+      setState((s) => ({ ...s, loading: true }));
+      try {
+        while (!cancelled) {
+          const s = stateRef.current;
+          if (s.done || s.pages === 0) break;
+          const res = await fetchRef.current(s.cursor);
+          if (cancelled) return;
+          setState((prev) => ({
+            rows: [...prev.rows, ...res.rows],
+            cursor: res.nextCursor,
+            hasMore: res.nextCursor !== null,
+            loading: false,
+            done: res.nextCursor === null,
+            pages: res.nextCursor === null ? 0 : prev.pages - 1,
+          }));
+          if (res.nextCursor === null) break;
+        }
+      } catch (e) {
+        console.error("[keysetpage] fetch failed:", e);
+        if (!cancelled) setState((s) => ({ ...s, loading: false, done: true }));
+      }
+    };
+    void step();
+    return () => {
+      cancelled = true;
+    };
+  }, [epoch, resetKey]);
+
+  // Reset the Accumulation when the identity/feed epoch turns over — the
+  // rows already rendered belong to the previous stream.
+  useEffect(() => {
+    setState({
+      rows: [],
+      cursor: null,
+      hasMore: false,
+      loading: false,
+      done: false,
+      pages: Math.max(1, pageKeys),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [epoch, resetKey]);
+
+  const loadMore = useCallback(() => {
+    setState((s) => (s.done ? s : { ...s, pages: s.pages + 1 }));
+  }, []);
+
+  return {
+    rows: state.rows,
+    hasMore: state.hasMore,
+    loading: state.loading,
+    loadMore,
+  };
 }
 
 // ---------------------------------------------------------------------------

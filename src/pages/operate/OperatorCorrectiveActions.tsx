@@ -21,7 +21,11 @@ import { AlertTriangle, CheckCircle2, Download, Loader2, Send } from "lucide-rea
 import { useState } from "react";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
-import { exportComplianceObligations } from "@/lib/export-csv";
+import {
+  COMPLIANCE_EXPORT_COLUMNS,
+  downloadFile,
+  streamCsvFile,
+} from "@/lib/export-csv";
 import EvidenceSection from "@/components/EvidenceSection";
 import {
   enqueueCaResponse,
@@ -143,10 +147,26 @@ export default function OperatorCorrectiveActions() {
             size="sm"
             disabled={obligationsQ === undefined || obligations.length === 0}
             onClick={() => {
-              // Export serializes ONLY the caller-scoped compliance feed
-              // (§9: the operator's export is exactly their obligations).
-              const name = exportComplianceObligations(obligations);
-              toast.success(`Exported ${name} (${obligations.length} rows).`);
+              // Export STREAMS the caller-scoped compliance pages (§9 + SEC-4:
+              // no unscoped path — the row source IS the caller's RLS
+              // visibility — and no whole-table buffer). Byte-identical File
+              // as before.
+              toast.promise(
+                (async () => {
+                  const file = await streamCsvFile(
+                    api.exports.streamCompliance(),
+                    COMPLIANCE_EXPORT_COLUMNS,
+                    "compliance",
+                  );
+                  downloadFile(file);
+                  return file.name;
+                })(),
+                {
+                  loading: "Exporting…",
+                  success: (name) => `Exported ${String(name)}.`,
+                  error: (e) => (e instanceof Error ? e.message : "Export failed"),
+                },
+              );
             }}
           >
             <Download className="size-4" /> Export CSV

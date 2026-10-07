@@ -552,7 +552,7 @@ function keysetPages<T>(
   return (async function* () {
     let before: KeysetCursor | null = null;
     for (;;) {
-      const page = await fetch({ before });
+      const page = await fetch(before);
       yield page.rows;
       if (!page.nextCursor) return;
       before = page.nextCursor;
