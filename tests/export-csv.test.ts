@@ -256,8 +256,10 @@ describe("export source contract", () => {
     // The lib must not contain any network/DB client at all — client-side
     // serialization only.
     expect(lib).not.toMatch(/supabase|fetch\(|XMLHttpRequest|WebSocket|axios/);
-    // The export calls consume exactly the authorized feed variables.
-    expect(page).toContain("exportInspections(inspections ?? [])");
-    expect(op).toContain("exportComplianceObligations(obligations)");
+    // SEC-4 v2: the exports STREAM the caller-scoped server keyset pages
+    // (api.exports.stream*) — the row source IS the caller's RLS visibility,
+    // never an unscoped whole-table read.
+    expect(page).toContain("api.exports.streamInspections()");
+    expect(op).toContain("api.exports.streamCompliance()");
   });
 });

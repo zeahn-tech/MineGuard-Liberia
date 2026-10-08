@@ -130,8 +130,21 @@ describe("AI output stays inside the caller's authorization (no-leak)", () => {
       const cited = expl!.sentences.reduce((n, s) => n + s.points, 0);
       if (cited !== score.score) return { ok: false, detail: `cited ${cited} != score ${score.score}` };
       const expCites = new Set(expl!.citations);
+      const sentenceCites = new Set(expl!.sentences.flatMap((s) => s.recordIds));
+      // The explainer cites ONLY what its own sentences ground in — no
+      // fabricated citations (cite-or-abstain, doc 08).
+      if (expCites.size !== sentenceCites.size || ![...expCites].every((id) => sentenceCites.has(id))) {
+        return { ok: false, detail: "citation sets diverged" };
+      }
+      // SEC-4 v2: on the counts path (mg_risk_scores) the score entry
+      // deliberately carries NO record ids — citations live on the explainer
+      // surface (mg_risk_explanation), and BOTH breakdowns come from the same
+      // factor builder over the same aggregates (pinned by cited === score).
+      // If the entry DOES carry ids (fallback lineage), the two surfaces must
+      // cite the exact same set.
       const scoreCites = new Set(score.factors.flatMap((x) => (x as { recordIds?: string[] }).recordIds ?? []));
-      if (expCites.size !== scoreCites.size || ![...expCites].every((id) => scoreCites.has(id))) {
+      if (scoreCites.size > 0 &&
+          (expCites.size !== scoreCites.size || ![...expCites].every((id) => scoreCites.has(id)))) {
         return { ok: false, detail: "citation sets diverged" };
       }
       return { ok: true };

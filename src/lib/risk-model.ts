@@ -152,28 +152,26 @@ function buildFactorsFromCounts(
 ): { score: number; factors: TaggedFactor[] } {
   const factors: TaggedFactor[] = [];
   let points = 0;
-  // INVARIANT: score ≡ Σ factor points. Finding-severity points are
-  // accumulated HERE (per severity bucket) and their aggregated factors are
-  // pushed WITHOUT re-adding; every other factor adds its points exactly
-  // once via push(). (Regression note 2026-09-29: the §18 refactor first
-  // DROPPED the non-finding factors from the total, then a naive fix
-  // double-counted severity points — both caught by the AI
-  // explanation-consistency test.)
-  const push = (kind: FactorKind, label: string, pts: number, alreadyCounted = false) => {
+  // INVARIANT: score ≡ Σ factor points. Every factor adds its points
+  // exactly once via push() — the severity factors INCLUDED (the 2026-09-29
+  // `alreadyCounted` variant silently dropped the entire finding-severity
+  // mass from the score; caught by the AI invariant test and the scale
+  // suite's score ≡ Σ sentence-points pin).
+  const push = (kind: FactorKind, label: string, pts: number) => {
     if (pts > 0) {
       factors.push({ label, points: pts, recordIds: [], kind });
-      if (!alreadyCounted) points += pts;
+      points += pts;
     }
   };
 
   if (c.critical)
-    push("criticalFindings", `${c.critical} critical finding(s)`, c.critical * RISK_WEIGHTS.criticalFinding, true);
+    push("criticalFindings", `${c.critical} critical finding(s)`, c.critical * RISK_WEIGHTS.criticalFinding);
   if (c.high)
-    push("highFindings", `${c.high} high finding(s)`, c.high * RISK_WEIGHTS.highFinding, true);
+    push("highFindings", `${c.high} high finding(s)`, c.high * RISK_WEIGHTS.highFinding);
   if (c.medium)
-    push("mediumFindings", `${c.medium} medium finding(s)`, c.medium * RISK_WEIGHTS.mediumFinding, true);
+    push("mediumFindings", `${c.medium} medium finding(s)`, c.medium * RISK_WEIGHTS.mediumFinding);
   if (c.low)
-    push("lowFindings", `${c.low} low finding(s)`, c.low * RISK_WEIGHTS.lowFinding, true);
+    push("lowFindings", `${c.low} low finding(s)`, c.low * RISK_WEIGHTS.lowFinding);
 
   const repeatFactor =
     c.findingsTotal > 3

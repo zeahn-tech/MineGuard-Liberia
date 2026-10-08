@@ -92,6 +92,8 @@ function first<T>(q: { subscribe: (cb: (v: T) => void) => () => void }): Promise
   });
 }
 
+const sum = (xs: number[]): number => xs.reduce((a, x) => a + x, 0);
+
 /** Walk an entire keyset feed using ONLY the page API's cursor — proves the
  *  resumability contract (never offsets, never a second full read). */
 async function walkKeyset<T>(
@@ -330,19 +332,20 @@ describe("scale: risk scores aggregate in the database (RPC-first)", () => {
 
     const gt = (
       await adminSql(`select
-        (select count(*) from public.findings) f,
-        (select count(*) from public.findings where severity='low') low,
-        (select count(*) from public.findings where severity='medium') med,
-        (select count(*) from public.findings where severity='high') high,
-        (select count(*) from public.findings where severity='critical') crit,
+        (select count(*) from public.findings where site_id = '${SITE}') f,
+        (select count(*) from public.findings where site_id = '${SITE}' and severity='low') low,
+        (select count(*) from public.findings where site_id = '${SITE}' and severity='medium') med,
+        (select count(*) from public.findings where site_id = '${SITE}' and severity='high') high,
+        (select count(*) from public.findings where site_id = '${SITE}' and severity='critical') crit,
         (select count(*) from public.corrective_actions c
-           where c.status not in ('closed','verified') and c.due_at < now()) overdue,
-        (select count(*) from public.incidents where type='fatality') fat,
+           where c.site_id = '${SITE}' and c.status not in ('closed','verified') and c.due_at < now()) overdue,
+        (select count(*) from public.incidents where site_id = '${SITE}' and type='fatality') fat,
         (select count(*) from public.incidents
-           where type <> 'fatality' and severity in ('high','critical')) ser`)
+           where site_id = '${SITE}' and type <> 'fatality' and severity in ('high','critical')) ser`)
     )[0] as Record<string, string>;
-    // The admin sees everything → the site's entry must equal the FULL table
-    // (this site's rows dominate; rebuild the counts from the exact SQL).
+    // The admin sees everything → the site's entry must equal the SITE-SCOPED
+    // SQL truth. (Suites share one per-process database — the ground truth is
+    // scoped to SITE so another fixture's rows can never contaminate it.)
     const c: RiskInputCounts = {
       findingsTotal: Number(gt.f),
       low: Number(gt.low),
@@ -384,7 +387,7 @@ describe("scale: risk scores aggregate in the database (RPC-first)", () => {
     const gt = (
       await adminSql(
         `select coalesce(jsonb_agg(id::text), '[]'::jsonb) ids
-           from public.findings where severity = 'critical'`,
+           from public.findings where site_id = '${SITE}' and severity = 'critical'`,
       )
     )[0] as { ids: string[] };
     const expl = await first(api.ai.explainRiskScore({ siteId: SITE }));
