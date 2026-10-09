@@ -87,7 +87,7 @@ export default function CommandCenter() {
   }
 
   const riskEntries = Object.entries(risk ?? {})
-    .map(([siteId, r]) => ({ siteId, ...r }))
+    .map(([siteId, r]) => ({ siteId: String(siteId), score: Number(r.score), factors: r.factors ?? [] }))
     .sort((a, b) => b.score - a.score);
 
   const siteById = new Map((sites ?? []).map((s) => [s._id as string, s]));

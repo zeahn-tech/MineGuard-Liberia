@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useKeysetPage, useMutation, useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
@@ -41,12 +41,36 @@ export default function Incidents() {
   // 0014): 500-row windows resumable by cursor. The whole-table list query
   // stays as the fallback the hook builds on — no behavior change visible
   // at pilot scale.
-  const feed = useKeysetPage(
+  const incidentsPage = useKeysetPage(
     (before) =>
       api.records.incidentsPage({ before: before as never, limit: 500 }),
     1,
   );
+  /** Keyset-page window consumed by the list. */
+  const feed = incidentsPage as {
+    rows: Record<string, unknown>[];
+    loading: boolean;
+    hasMore: boolean;
+    loadMore: () => void;
+  };
   const incidents = feed.rows;
+  // SEC-4 v2: the list consumes the SERVER-SIDE keyset page (migration
+  // 0014): 500-row windows resumable by cursor. The whole-table list query
+  // stays as the fallback the hook builds on — no behavior change visible
+  // at pilot scale.
+  const incidentsPage = useKeysetPage(
+    (before) =>
+      api.records.incidentsPage({ before: before as never, limit: 500 }),
+    1,
+  );
+  /** Keyset-page window consumed by the list. */
+  const feed = incidentsPage as {
+    rows: unknown[];
+    loading: boolean;
+    hasMore: boolean;
+    loadMore: () => void;
+  };
+  const incidents = feed.rows as unknown[];
   const sites = useQuery(api.sites.list);
   const setStatus = useMutation(api.records.setIncidentStatus);
   const { user } = useAuth();
@@ -98,26 +122,26 @@ export default function Incidents() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {incidents.map((i) => (
+              {feed.rows.map((i: Record<string, unknown>) => (
                 <tr key={i._id} className="align-top">
                   <td className="whitespace-nowrap px-4 py-3">
-                    {new Date(i.occurredAt).toLocaleDateString()}
+                    {new Date(String((i as Record<string, unknown>).occurredAt)).toLocaleDateString()}
                   </td>
-                  <td className="px-4 py-3">{i.type.replace(/_/g, " ")}</td>
+                  <td className="px-4 py-3">{String((i as Record<string, unknown>).type).replace(/_/g, " ")}</td>
                   <td className="max-w-md px-4 py-3">
                     <Link
                       to={`/portal/incidents/${i._id}`}
                       className="hover:underline"
                     >
-                      {i.description}
+                      {i.description ? String(i.description) : ""}
                     </Link>
                   </td>
                   <td className="px-4 py-3">
                     <span className="font-mono text-xs">{i.siteCode}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`stamp ${i.severity === "critical" || i.severity === "high" ? "text-destructive" : ""}`}>
-                      {i.severity}
+                    <span className={`stamp ${String(i.severity) === "critical" || String(i.severity) === "high" ? "text-destructive" : ""}`}>
+                      {String(i.severity)}
                     </span>
                   </td>
                   <td className="px-4 py-3">

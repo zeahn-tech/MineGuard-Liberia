@@ -93,7 +93,7 @@ export default function CommunityTrack() {
                     "Status recorded; contact the program office for detail."}
                 </p>
                 <p className="mt-3 text-xs text-muted-foreground">
-                  Submitted {new Date(report.createdAt).toLocaleDateString()}
+                  Submitted {new Date(Number(report.createdAt)).toLocaleDateString()}
                 </p>
               </div>
             )}

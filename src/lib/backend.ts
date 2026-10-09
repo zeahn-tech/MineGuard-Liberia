@@ -2533,9 +2533,7 @@ export const ai = {
   explainRiskScore: (args: { siteId: string }) =>
     live<RiskExplanation | null>(async () => {
       const { profile } = await requireAuthed();
-      if (!profile.role || profile.role === ROLES.OPERATOR ? profile.role !== ROLES.OPERATOR : false) {
-        //aalto
-      }
+      if (!profile.role || profile.role === ROLES.OPERATOR) return null;
       if (isGuestLike(profile)) return null;
       if (!args?.siteId) return null;
       // SEC-4 v2 — the aggregates AND the cite-or-abstain id arrays come
