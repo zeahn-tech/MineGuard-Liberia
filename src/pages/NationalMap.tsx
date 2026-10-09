@@ -1,5 +1,14 @@
-import { useMemo, useCallback, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup, CircleMarker, GeoJSON, LayerGroup } from "react-leaflet";
+import { useEffect, useMemo, useCallback, useState } from "react";
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  CircleMarker,
+  GeoJSON,
+  LayerGroup,
+  useMap,
+} from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import React from "react";
@@ -180,6 +189,19 @@ function polygonStyle(
   };
 }
 
+/** Child of MapContainer: flies the map to a feature when the side-panel
+ *  index selects it. Must live inside the map to access the map instance. */
+function MapFocusHandler({ target }: { target: { lat: number; lng: number } | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!target) return;
+    map.flyTo([target.lat, target.lng], Math.max(map.getZoom(), 10), {
+      duration: 0.8,
+    });
+  }, [target, map]);
+  return null;
+}
+
 export default function NationalMap() {
   const data = useQuery(api.mapFeatures);
 
@@ -294,6 +316,27 @@ export default function NationalMap() {
 
   const hasBoundaryData = adminBoundaries.length > 0 || siteBoundaries.length > 0;
 
+  // Side-panel state: text search across the currently visible features and
+  // the focused feature (the map flies to it when set).
+  const [query, setQuery] = useState("");
+  const [focusTarget, setFocusTarget] = useState<{
+    id: string;
+    lat: number;
+    lng: number;
+  } | null>(null);
+
+  const searchResults = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const base = visibleFeatures.filter(
+      (f) => !q || f.label.toLowerCase().includes(q),
+    );
+    // Unverified locations sort first — the reviewer's likely priority.
+    const rank = (f: MapFeature) => (f.geoVerified === false ? 0 : 1);
+    return [...base].sort(
+      (a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label),
+    );
+  }, [visibleFeatures, query]);
+
   return (
     <div className="space-y-4">
       <header>
@@ -331,8 +374,9 @@ export default function NationalMap() {
         )}
       </div>
 
-      <div className="h-[60vh] min-h-[420px] overflow-hidden rounded-sm border border-border">
-        <MapContainer center={CENTER} zoom={7} scrollWheelZoom className="size-full">
+      <div className="flex flex-col gap-4 lg:flex-row">
+      <div className="h-[60vh] min-h-[420px] flex-1 overflow-hidden rounded-sm border border-border">
+      <MapContainer center={CENTER} zoom={7} scrollWheelZoom className="size-full">
           {/* Offline tile strategy — documented alternative.
            *
            * The live app relies on the browser's native tile HTTP cache for the
@@ -351,16 +395,19 @@ export default function NationalMap() {
            *
            * The tile URL below stays on the standard OSM raster endpoint for the
            * connected case; replacing it with a cached region-bundle URL is the
-           * documented extension point when the project has a licensed offline set. */
+           * documented extension point when the project has a licensed offline set. */}
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
+          {/* Fly-to bridge driven by the side-panel feature index. */}
+          <MapFocusHandler target={focusTarget} />
+
           {/* Boundary polygon layers render here once Session 6 boundary tables
            * exist on the lineage. Until then the arrays are empty and no polygon
            * layer is shown — the map degrades gracefully rather than drawing empty
-           * or placeholder shapes. */
+           * or placeholder shapes. */}
           {adminBoundaryPolylines.map((b) => (
             <GeoJSON key={b.key} data={b.geojson} style={polygonStyle(LAYER_PALETTE["admin_boundaries"], b.level === "national")} />
           ))}
@@ -429,6 +476,57 @@ export default function NationalMap() {
             </LayerGroup>
           ))}
         </MapContainer>
+      </div>
+
+      <aside className="w-full shrink-0 overflow-hidden rounded-sm border border-border bg-card lg:w-80">
+        <div className="flex items-center justify-between border-b border-border px-3 py-2">
+          <span className="kicker">Feature index</span>
+          <span className="text-xs text-muted-foreground">
+            {searchResults.length} shown
+          </span>
+        </div>
+        <div className="border-b border-border p-2">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search visible features…"
+            aria-label="Search map features"
+            className="w-full rounded-sm border border-border bg-background px-2 py-1.5 text-xs outline-none focus:border-ring"
+          />
+        </div>
+        <ul className="max-h-[45vh] divide-y divide-border overflow-y-auto">
+          {searchResults.length === 0 && (
+            <li className="px-3 py-6 text-center text-xs text-muted-foreground">
+              No visible features match this search.
+            </li>
+          )}
+          {searchResults.slice(0, 120).map((f) => (
+            <li key={f.id}>
+              <button
+                type="button"
+                onClick={() =>
+                  setFocusTarget({ id: f.id, lat: f.lat, lng: f.lng })
+                }
+                className={`w-full px-3 py-2 text-left text-xs transition hover:bg-accent ${
+                  focusTarget?.id === f.id ? "bg-accent" : ""
+                }`}
+              >
+                <span className="block truncate font-medium">{f.label}</span>
+                <span className="block truncate text-[10px] text-muted-foreground">
+                  {layers.find((l) => l.id === f.layer)?.label ?? f.layer}
+                  {f.geoVerified === false ? " · geo unverified" : ""}
+                </span>
+              </button>
+            </li>
+          ))}
+          {searchResults.length > 120 && (
+            <li className="px-3 py-2 text-center text-[10px] text-muted-foreground">
+              {searchResults.length - 120} more — refine the search to narrow
+              this list.
+            </li>
+          )}
+        </ul>
+      </aside>
       </div>
 
       <div className="legend flex flex-wrap gap-x-5 gap-y-1.5 border-t border-border pt-3 text-xs text-muted-foreground">
