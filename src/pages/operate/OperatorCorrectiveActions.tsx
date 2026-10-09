@@ -34,7 +34,7 @@ import {
 
 const DAY = 86_400_000;
 
-function severityClasses(sev: Severity): string {
+function severityClasses(sev: string | Severity | undefined): string {
   switch (sev) {
     case "critical":
       return "bg-destructive/15 text-destructive border-destructive/30";

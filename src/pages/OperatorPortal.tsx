@@ -41,7 +41,7 @@ import { toast } from "sonner";
 
 const DAY = 86_400_000;
 
-function severityClasses(sev: Severity): string {
+function severityClasses(sev: string | Severity | undefined): string {
   switch (sev) {
     case "critical":
       return "bg-destructive/15 text-destructive border-destructive/30";
@@ -186,7 +186,7 @@ export default function OperatorPortal() {
               <div key={o._id} className="rounded border border-border bg-muted/30 p-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <span
-                    className={`rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${severityClasses(o.findingSeverity)}`}
+                    className={`rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${severityClasses(o.findingSeverity ?? "low")}`}
                   >
                     {o.findingSeverity}
                   </span>

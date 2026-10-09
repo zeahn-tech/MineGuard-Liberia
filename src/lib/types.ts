@@ -109,6 +109,11 @@ export interface MapFeature {
   /** Optional GeoJSON geometry for polygon layers (admin/site boundaries).
    *  Stored as GeoJSON on the row; rendered directly, never inferred. */
   geometryGeoJson?: string;
+  /** Client-side cluster merge marker (NationalMap clustering) — NOT a
+   *  server field; synthesized per session over dense point layers. */
+  _cluster?: boolean;
+  /** Count of the features merged into this cluster marker. */
+  _memberCount?: number;
   /** Mutable per-session UI state (NOT persisted). */
   visible?: boolean;
 }
@@ -416,6 +421,17 @@ export function siteScopeStamp(site: {
     operatorName: site.operatorName ?? "Unknown",
   };
 }
+
+export const MAP_LAYER_CONFIGS: MapLayerConfig[] = [
+  { id: "sites", label: "Registered sites", defaultVisible: true, supportsClustering: true },
+  { id: "site_boundaries", label: "Site boundaries", defaultVisible: false, supportsClustering: false },
+  { id: "admin_boundaries", label: "Administrative boundaries", defaultVisible: true, supportsClustering: false },
+  { id: "incidents", label: "Incidents", defaultVisible: true, supportsClustering: true },
+  { id: "inspections", label: "Inspections", defaultVisible: false, supportsClustering: true },
+  { id: "observations", label: "Environmental observations", defaultVisible: true, supportsClustering: true },
+  { id: "community_reports", label: "Community reports", defaultVisible: false, supportsClustering: true },
+  { id: "risk_indicators", label: "Risk indicators", defaultVisible: true, supportsClustering: false },
+];
 
 export function canAccessSite(
   user: Pick<UserProfile, "role" | "scope" | "county" | "operatorName" | "organizationId">,
