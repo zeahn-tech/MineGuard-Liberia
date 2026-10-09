@@ -61,6 +61,78 @@ export interface Site {
   createdAt: number;
   // Computed client-side for the registry view:
   openActions?: number;
+  // GIS fields (Session 6): authoritative geo is PostGIS/GeoJSON boundary
+  // tables; these point-sized fields are the legacy registry-only fallback
+  // and exist only when a boundary polygon has not been authored.
+  geoSource?: string;
+  geoAccuracyM?: number;
+  geoVerified?: boolean;
+}
+
+export type GeoLayer =
+  | "sites"
+  | "site_boundaries"
+  | "admin_boundaries"
+  | "incidents"
+  | "inspections"
+  | "observations"
+  | "community_reports"
+  | "risk_indicators";
+
+export interface MapLayerConfig {
+  id: GeoLayer;
+  label: string;
+  /** Defaults drive the legend + initial toggles; the UI may override per session. */
+  defaultVisible: boolean;
+  /** False for point layers only; used by the cluster path. */
+  supportsClustering: boolean;
+}
+
+/** One feature shown on the map. Point features use lng/lat; polygon
+ *  features use their own geometry; both carry the same trust metadata so the
+ *  legend and styling can be driven from real data. */
+export interface MapFeature {
+  id: string;
+  layer: GeoLayer;
+  label: string;
+  lng: number;
+  lat: number;
+  /** For point features with no boundary geometry, the site this feature
+   *  belongs to (if any) so boundary layers can be toggled alongside it. */
+  siteId?: string;
+  /** Verification metadata for the GEOGRAPHIC claim, distinct from record
+   *  lifecycle status. A site can be "active" but its coordinates still
+   *  "unverified" until an authoritative source is attached. */
+  geoSource?: string;
+  geoAccuracyM?: number;
+  geoVerified?: boolean;
+  /** Optional GeoJSON geometry for polygon layers (admin/site boundaries).
+   *  Stored as GeoJSON on the row; rendered directly, never inferred. */
+  geometryGeoJson?: string;
+  /** Mutable per-session UI state (NOT persisted). */
+  visible?: boolean;
+}
+
+export interface AdminBoundary {
+  _id: string;
+  name: string;
+  level: "national" | "county" | "district" | "community";
+  parentId?: string;
+  geometryGeoJson: string;
+  source: string;
+  accuracyM?: number;
+  geoVerified: boolean;
+  createdAt: number;
+}
+
+export interface SiteBoundary {
+  _id: string;
+  siteId: string;
+  geometryGeoJson: string;
+  source: string;
+  accuracyM?: number;
+  geoVerified: boolean;
+  createdAt: number;
 }
 
 export interface TemplateQuestion {
