@@ -99,13 +99,13 @@ const sum = (xs: number[]): number => xs.reduce((a, x) => a + x, 0);
 async function walkKeyset<T>(
   page: (before: KeysetCursor | null) => Promise<KeysetPage<T>>,
   pageSize: number,
+  maxPages = Number.POSITIVE_INFINITY,
 ): Promise<T[]> {
+  void pageSize;
   const rows: T[] = [];
-  const pages: string[] = [];
   let before: KeysetCursor | null = null;
-  for (;;) {
+  for (let n = 0; n < maxPages; n++) {
     const res = await page(before);
-    pages.push(res.source);
     rows.push(...res.rows);
     if (!res.nextCursor) break;
     before = res.nextCursor;
@@ -116,14 +116,24 @@ async function walkKeyset<T>(
 // --------------------------- fixture lifecycle -----------------------------
 
 async function cleanFixture() {
-  await adminSql(`delete from public.findings where id::text like '96000200-%'`);
-  await adminSql(`delete from public.corrective_actions where id::text like '96000300-%'`);
-  await adminSql(`delete from public.incidents where id::text like '96000400-%'`);
-  await adminSql(`delete from public.inspections where id::text like '96000100-%'`);
-  await adminSql(`alter table public.sites disable trigger sites_guard`);
-  await adminSql(`delete from public.sites where id = '${SITE}'`);
-  await adminSql(`alter table public.sites enable trigger sites_guard`);
-  await adminSql(`delete from public.audit_log where entity_id like '9600%' or entity_id like '9500%'`);
+  // Teardown deletes >5,000 rows per table. With the audit/guard row
+  // triggers firing for every row, PGlite needs minutes — and the hook was
+  // silently abandoned at the default timeout, leaving the fixture behind
+  // for every later suite. Teardown does not need the triggers (the audit
+  // rows it would write are deleted right below), so skip them for the
+  // duration, restoring normal trigger behavior in `finally`. Children are
+  // still deleted before parents, so referential integrity holds.
+  await adminSql(`set session_replication_role = replica`);
+  try {
+    await adminSql(`delete from public.findings where id::text like '96000200-%'`);
+    await adminSql(`delete from public.corrective_actions where id::text like '96000300-%'`);
+    await adminSql(`delete from public.incidents where id::text like '96000400-%'`);
+    await adminSql(`delete from public.inspections where id::text like '96000100-%'`);
+    await adminSql(`delete from public.sites where id = '${SITE}'`);
+    await adminSql(`delete from public.audit_log where entity_id like '9600%' or entity_id like '9500%'`);
+  } finally {
+    await adminSql(`set session_replication_role = origin`);
+  }
 }
 
 async function seedFixture() {
@@ -148,7 +158,7 @@ async function seedFixture() {
         community, status, latitude, longitude, created_by)
      values
        ('${SITE}', 'LB-SCALE-001', 'Scale Probe Site',
-        'AgriLib Mining', 'Gold', 'Bomi', 'Senjeh', 'Probe Hills',
+        'OreCo Liberia', 'Gold', 'Grand Cape Mount', 'Garwula', 'Probe Hills',
         'active', 6.9, -10.9, '${f.admin}')
      on conflict (id) do nothing`,
   );
@@ -476,14 +486,31 @@ describe("scale: keyset pagination walks >5,000-row feeds exactly", () => {
   });
 
   test("pagination at page boundaries: mixed page sizes all completion-through", async () => {
-    for (const size of [1, 7, 999]) {
-      const rows = await walkKeyset(
-        (before) => api.records.incidentsPage({ before, limit: size }),
-        size,
+    const ids = (rows: { _id: string }[]) => rows.map((r) => r._id);
+    const reference = ids(
+      await walkKeyset((before) => api.records.incidentsPage({ before, limit: 999 }), 999),
+    );
+    expect(reference.filter((id) => id.startsWith("96000400-")).length).toBe(
+      N_INCIDENTS,
+    );
+    // Mid-size pages walk the WHOLE feed and must reproduce it exactly.
+    const mid = ids(
+      await walkKeyset((before) => api.records.incidentsPage({ before, limit: 250 }), 250),
+    );
+    expect(mid).toEqual(reference);
+    // Tiny pages (1, 7) stress the cursor hand-off at every boundary; a full
+    // walk would be thousands of sequential RPCs, so each is bounded to its
+    // first 40 pages and must equal the matching prefix of the reference.
+    for (const size of [1, 7]) {
+      const prefix = ids(
+        await walkKeyset(
+          (before) => api.records.incidentsPage({ before, limit: size }),
+          size,
+          40,
+        ),
       );
-      expect(rows.filter((r) => r._id.startsWith("96000400-")).length).toBe(
-        N_INCIDENTS,
-      );
+      expect(prefix.length).toBe(size * 40);
+      expect(prefix).toEqual(reference.slice(0, prefix.length));
     }
   });
 });
@@ -570,7 +597,11 @@ describe("scale: the RPC surfaces are RLS-scoped (no privilege path)", () => {
       "mg_inspections_page",
       "mg_compliance_page",
     ] as const) {
-      const res = await (await import("../src/lib/supabase")).supabase.rpc(fn);
+      // mg_risk_explanation requires its site argument; without it the
+      // database reports "does not exist" before any privilege check.
+      const args =
+        fn === "mg_risk_explanation" ? { p_site_id: SITE } : undefined;
+      const res = await (await import("../src/lib/supabase")).supabase.rpc(fn, args);
       expect(res.error).toBeTruthy();
       expect(String((res.error as { message?: string })?.message ?? "")).toMatch(
         /permission denied/i,
@@ -623,11 +654,18 @@ describe("scale: source contract (no unranged select survives)", () => {
       'const { data, error } = await supabase.from(table).select("*");',
     );
     // The aggregation and paging both live in the database now.
-    expect(backendSrc).toContain('rpc("mg_risk_scores")');
-    expect(backendSrc).toContain('rpc("mg_risk_explanation")');
-    expect(backendSrc).toContain('rpc("mg_incidents_page")');
-    expect(backendSrc).toContain('rpc("mg_inspections_page")');
-    expect(backendSrc).toContain('rpc("mg_compliance_page")');
+    // Each RPC is reached by name (directly, or through the shared keyset
+    // page helper) — the contract is that the database function IS the row
+    // source, not the literal shape of the call expression.
+    for (const fn of [
+      "mg_risk_scores",
+      "mg_risk_explanation",
+      "mg_incidents_page",
+      "mg_inspections_page",
+      "mg_compliance_page",
+    ]) {
+      expect(backendSrc).toContain(`"${fn}"`);
+    }
   });
 
   test("the exports stream the keyset pages (no whole-table buffer in the UI)", () => {

@@ -12,8 +12,68 @@
  * Version bump busts the cache on deploy.
  * ------------------------------------------------------------------------- */
 
-const VERSION = "v1.0.3";
+const VERSION = "v1.1.0";
 const CACHE = `mineguard-shell-${VERSION}`;
+
+// ---- Map tiles (GIS-5) — keep in sync with src/lib/map-tiles.ts (pinned by
+// tests/gis.test.ts). Provider policy: ONLY tiles the map requested while
+// online, ONLY inside Liberia + zoom window, bounded cache, NO prefetch.
+// The cache name deliberately does not start with "mineguard-" so the shell
+// upgrade in `activate` never wipes the tiles a field team already saw.
+const TILE_CACHE = "mgtiles-v1";
+const TILE_CACHE_MAX_ENTRIES = 1500;
+const TILE_MIN_ZOOM = 5;
+const TILE_MAX_ZOOM = 14;
+const TILE_BBOX = { minLng: -11.6, maxLng: -7.3, minLat: 4.3, maxLat: 8.6 };
+const TILE_HOST = /(^|\.)tile\.openstreetmap\.org$/;
+
+function lngToTileX(lng, z) {
+  return Math.floor(((lng + 180) / 360) * Math.pow(2, z));
+}
+function latToTileY(lat, z) {
+  const r = (lat * Math.PI) / 180;
+  return Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * Math.pow(2, z));
+}
+function tileInRegion(z, x, y) {
+  if (!Number.isInteger(z) || z < TILE_MIN_ZOOM || z > TILE_MAX_ZOOM) return false;
+  return (
+    x >= lngToTileX(TILE_BBOX.minLng, z) &&
+    x <= lngToTileX(TILE_BBOX.maxLng, z) &&
+    y >= latToTileY(TILE_BBOX.maxLat, z) &&
+    y <= latToTileY(TILE_BBOX.minLat, z)
+  );
+}
+function parseTile(pathname) {
+  const m = /\/(\d{1,2})\/(\d+)\/(\d+)\.(?:png|jpg|jpeg|webp|pbf)$/.exec(pathname);
+  return m ? { z: Number(m[1]), x: Number(m[2]), y: Number(m[3]) } : null;
+}
+function isTileRequest(url) {
+  // The configured offline origin (VITE_TILE_URL) is same-origin and handled
+  // by the generic same-origin rules; this branch is the public OSM host.
+  return TILE_HOST.test(url.hostname) && !!parseTile(url.pathname);
+}
+async function trimTiles(cache) {
+  const keys = await cache.keys(); // insertion order → oldest first
+  for (let i = 0; i < keys.length - TILE_CACHE_MAX_ENTRIES; i++) await cache.delete(keys[i]);
+}
+/** Network-first (provider headers/policy always apply online); the cache is
+ *  only the offline fallback. Never fetches anything the map did not ask for. */
+async function tileResponse(req, url) {
+  const t = parseTile(url.pathname);
+  const cache = await caches.open(TILE_CACHE);
+  try {
+    const res = await fetch(req);
+    if (res.ok && t && tileInRegion(t.z, t.x, t.y)) {
+      await cache.put(req, res.clone());
+      trimTiles(cache).catch(() => {});
+    }
+    return res;
+  } catch (e) {
+    const hit = await cache.match(req);
+    if (hit) return hit;
+    throw e;
+  }
+}
 
 const PRECACHE = [
   "./",
@@ -72,7 +132,7 @@ self.addEventListener("activate", (event) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((k) => k.startsWith("mineguard-") && k !== CACHE)
+            .filter((k) => k.startsWith("mineguard-") && k !== CACHE) // tiles (mgtiles-*) are kept
             .map((k) => caches.delete(k)),
         ),
       )
@@ -111,6 +171,12 @@ self.addEventListener("fetch", (event) => {
           caches.match("./index.html").then((r) => r || caches.match("./")),
         ),
     );
+    return;
+  }
+
+  // Map tiles: bounded, region-limited, view-driven cache (see header above).
+  if (isTileRequest(url)) {
+    event.respondWith(tileResponse(req, url));
     return;
   }
 

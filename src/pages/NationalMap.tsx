@@ -1,341 +1,173 @@
-import { useEffect, useMemo, useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   MapContainer,
   TileLayer,
   Marker,
   Popup,
-  CircleMarker,
   GeoJSON,
   LayerGroup,
   useMap,
+  useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import React from "react";
+import { useEffect } from "react";
 
 import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
+import type { GeoLayer, GeoVerificationLevel, MapFeature } from "@/lib/types";
 import {
-  type GeoLayer,
-  type MapLayerConfig,
-  type MapFeature,
-  type AdminBoundary,
-  type SiteBoundary,
-} from "@/lib/types";
+  LIBERIA_CENTER,
+  NO_FILTERS,
+  VERIFICATION_LABEL,
+  applyFilters,
+  boundaryStyle,
+  buildLegend,
+  clusterPoints,
+  countiesIn,
+  parseBoundaryGeometry,
+  provenanceLine,
+  styleFor,
+  symbolSvg,
+  type ClusterOrPoint,
+  type MapFilters,
+} from "@/lib/gis";
+import { tileAttribution, tileTemplate } from "@/lib/map-tiles";
 
-const CENTER: [number, number] = [6.9, 9.3]; // approximate centroid of Liberia
+const LEVELS: GeoVerificationLevel[] = ["verified", "unverified", "reported"];
 
-// Link layer IDs to stable legend colors so styling is driven by the data
-// model rather than by individual record shapes.
-const LAYER_PALETTE: Record<GeoLayer, { pin?: string; fill?: string; stroke?: string; dash?: string }> = {
-  sites: { pin: "#2c5545" },
-  site_boundaries: { fill: "#2c5545", fillOpacity: 0.12, stroke: "#2c5545" },
-  admin_boundaries: { fill: "#3b6b8a", fillOpacity: 0.10, stroke: "#3b6b8a" },
-  incidents: { fill: "#9c2b1e", fillOpacity: 0.5, stroke: "#9c2b1e" },
-  inspections: { pin: "#6b6558" },
-  observations: { fill: "#b07d2b", fillOpacity: 0.55, stroke: "#b07d2b" },
-  community_reports: { stroke: "#9c2b1e", dash: "3 3" },
-  risk_indicators: { pin: "#7a3b8c" },
-};
-
-function siteIcon(kind: "active" | "other") {
+function markerIcon(item: ClusterOrPoint): L.DivIcon {
+  const f = item.feature;
+  const style = styleFor(f.layer, item.level);
+  const size = item.cluster ? 34 : 24;
   return L.divIcon({
-    className: "",
-    html: `<div class="mg-site-marker" style="background:${kind === "active" ? "#2c5545" : "#6b6558"}"><span style="color:#f0eee6">◆</span></div>`,
-    iconSize: [30, 30],
-    iconAnchor: [15, 28],
+    className: "mg-gis-marker",
+    html: symbolSvg(style, size, item.cluster ? item.count : undefined),
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
   });
 }
 
-function featureStyle(layer: GeoLayer, feature: MapFeature) {
-  const palette = LAYER_PALETTE[layer];
-  if (!palette) return {};
-
-  const isUnverified =
-    feature.geoVerified === false ||
-    (feature.geoSource === "public_report" && layer !== "community_reports");
-
-  const base: Record<string, unknown> = {
-    radius: 8,
-    pathOptions: {
-      weight: 1.5,
-      fillOpacity: 0.55,
-    },
-  };
-
-  if (palette.pin) {
-    return { icon: siteIcon(feature.geoVerified ? "active" : "other") };
-  }
-  if (palette.fill) {
-    const stroke = palette.stroke ?? palette.fill;
-    if (isUnverified) {
-      return {
-        radius: 9,
-        pathOptions: {
-          color: "#1a1410",
-          weight: 2,
-          dashArray: "2 3",
-          fillColor: "#9c2b1e",
-          fillOpacity: 0.30,
-        },
-      };
-    }
-    return {
-      radius: 8,
-      pathOptions: {
-        color: stroke,
-        fillColor: palette.fill,
-        fillOpacity: palette.fillOpacity ?? 0.55,
-        weight: palette.stroke ? 1.5 : 1,
-        ...(palette.dash ? { dashArray: palette.dash } : {}),
-      },
-    };
-  }
-  if (palette.stroke) {
-    if (isUnverified) {
-      return {
-        radius: 9,
-        pathOptions: {
-          color: "#1a1410",
-          weight: 2,
-          dashArray: "2 3",
-          fillColor: "#b07d2b",
-          fillOpacity: 0.20,
-        },
-      };
-    }
-    return {
-      radius: 7,
-      pathOptions: {
-        color: palette.stroke,
-        fillColor: palette.fill ?? palette.stroke,
-        fillOpacity: palette.fillOpacity ?? 0.5,
-        weight: 2,
-        ...(palette.dash ? { dashArray: palette.dash } : {}),
-      },
-    };
-  }
-  return base;
-}
-
-/** Build the visible legend from the layers the query actually returned.
- *  No hardcoded legend shape — if a layer is absent from the response, it is
- *  absent from the legend too. */
-function legendItem(cfg: MapLayerConfig, features: MapFeature[], layerId: GeoLayer) {
-  const visible = features.filter((f) => f.layer === layerId && f.visible !== false);
-  const count = visible.length;
-  const palette = LAYER_PALETTE[layerId];
-  const color = palette?.pin ?? palette?.stroke ?? palette?.fill ?? "#888";
-  return (
-    <span className="legend-item">
-      <span
-        className="legend-swatch"
-        style={
-          palette?.pin
-            ? { background: color }
-            : palette?.dash
-            ? { borderColor: color, background: "transparent" }
-            : { background: `${color}cc`, borderColor: color }
-        }
-      >
-        {palette?.pin ? (
-          <span className="legend-pin" />
-        ) : palette?.dash ? (
-          <span className="legend-dashed" />
-        ) : (
-          <span className="legend-circle" />
-        )}
-      </span>
-      <span className="legend-text">
-        {cfg.label}
-        {layerId === "community_reports" && visible.length > 0 && (
-          <span className="legend-soft"> — unverified</span>
-        )}
-        {count > 0 && layerId !== "community_reports" && (
-          <span className="legend-count"> · {count}</span>
-        )}
-      </span>
-    </span>
-  );
-}
-
-/** Parse a stored GeoJSON string into a geometry or feature for the boundary
- *  polygon layers. Boundary tables store the GeoJSON as text; we rehydrate it
- *  here only when the authoritative dataset exists on the lineage. */
-function geoJsonGeometryParse(g: string): GeoJSON.Geometry | GeoJSON.Feature<GeoJSON.Geometry> {
-  const parsed = JSON.parse(g);
-  if (parsed && typeof parsed === "object" && "type" in parsed && typeof (parsed as any).type === "string") {
-    return parsed as any;
-  }
-  return parsed as any;
-}
-
-/** Style helper for boundary polygons: verified admin/site outlines use the
- *  layer palette; an unverified boundary is rendered with a dashed outline so
- *  it stays visually distinct from authoritative borders. */
-function polygonStyle(
-  palette: { fill?: string; fillOpacity?: number; stroke?: string; dash?: string } | undefined,
-  national = false,
-) {
-  const stroke = palette?.stroke ?? palette?.fill ?? "#3b6b8a";
-  const fill = palette?.fill ?? stroke;
-  return {
-    color: stroke,
-    weight: national ? 2.5 : 1.5,
-    opacity: 0.9,
-    fillColor: fill,
-    fillOpacity: palette?.fillOpacity ?? (national ? 0.10 : 0.08),
-    ...(palette?.dash ? { dashArray: palette.dash } : {}),
-  };
-}
-
-/** Child of MapContainer: flies the map to a feature when the side-panel
- *  index selects it. Must live inside the map to access the map instance. */
-function MapFocusHandler({ target }: { target: { lat: number; lng: number } | null }) {
+/** Child of MapContainer: reports the zoom to the parent (clustering is
+ *  zoom-aware) and flies to a feature chosen from the side index. */
+function MapBridge({
+  onZoom,
+  target,
+}: {
+  onZoom: (z: number) => void;
+  target: { lat: number; lng: number } | null;
+}) {
   const map = useMap();
+  useMapEvents({ zoomend: () => onZoom(map.getZoom()) });
   useEffect(() => {
-    if (!target) return;
-    map.flyTo([target.lat, target.lng], Math.max(map.getZoom(), 10), {
-      duration: 0.8,
-    });
+    if (target) map.flyTo([target.lat, target.lng], Math.max(map.getZoom(), 11), { duration: 0.8 });
   }, [target, map]);
   return null;
 }
 
 export default function NationalMap() {
   const data = useQuery(api.mapFeatures);
+  const layers = useMemo(() => data?.layers ?? [], [data]);
+  const features = useMemo(() => data?.features ?? [], [data]);
+  const adminBoundaries = useMemo(() => data?.adminBoundaries ?? [], [data]);
+  const siteBoundaries = useMemo(() => data?.siteBoundaries ?? [], [data]);
 
-  const layers = (data ?? {}).layers ?? [];
-  const features = (data ?? {}).features ?? [];
-  const adminBoundaries = (data ?? {}).adminBoundaries ?? [];
-  const siteBoundaries = (data ?? {}).siteBoundaries ?? [];
-
-  const [toggles, setToggles] = useState<Record<GeoLayer, boolean>>(
+  // Toggles are OVERRIDES on top of each layer's default, so layers that
+  // arrive after first render get their defaults (no empty initial state).
+  const [overrides, setOverrides] = useState<Partial<Record<GeoLayer, boolean>>>({});
+  const visibleLayers = useMemo(
     () =>
-      Object.fromEntries(
-        layers.map((l) => [l.id, l.defaultVisible]),
-      ) as Record<GeoLayer, boolean>,
+      Object.fromEntries(layers.map((l) => [l.id, overrides[l.id] ?? l.defaultVisible])) as Record<
+        GeoLayer,
+        boolean
+      >,
+    [layers, overrides],
   );
-
   const toggleLayer = useCallback(
-    (layer: GeoLayer) =>
-      setToggles((prev) => ({ ...prev, [layer]: !prev[layer] })),
+    (id: GeoLayer, current: boolean) => setOverrides((p) => ({ ...p, [id]: !current })),
     [],
   );
 
+  const [filters, setFilters] = useState<MapFilters>(NO_FILTERS);
+  const [zoom, setZoom] = useState(7);
+  const [focus, setFocus] = useState<{ id: string; lat: number; lng: number } | null>(null);
+
+  const counties = useMemo(() => countiesIn(features), [features]);
+
   const visibleFeatures = useMemo(
-    () => features.filter((f) => toggles[f.layer] && f.visible !== false),
-    [features, toggles],
+    () => applyFilters(features.filter((f) => visibleLayers[f.layer]), filters),
+    [features, visibleLayers, filters],
   );
 
-  // Client-side point clustering for the dense point layers. Polygons are
-  // rendered directly (they do not cluster) and are intentionally empty on
-  // the current lineage; when Session 6 boundary tables exist, map them as
-  // Leaflet GeoJSON polylines/multi-polygons here.
-  const clustered = useMemo(() => {
-    const buckets = new Map<GeoLayer, MapFeature[]>();
-    for (const f of visibleFeatures) {
-      if (f.layer === "site_boundaries" || f.layer === "admin_boundaries") continue;
-      const list = buckets.get(f.layer) ?? [];
-      list.push(f);
-      buckets.set(f.layer, list);
-    }
-    const chunks: { layer: GeoLayer; features: MapFeature[] }[] = [];
-    for (const [layer, list] of buckets) {
+  const items = useMemo(() => {
+    const byLayer = new Map<GeoLayer, MapFeature[]>();
+    for (const f of visibleFeatures) byLayer.set(f.layer, [...(byLayer.get(f.layer) ?? []), f]);
+    const out: { layer: GeoLayer; items: ClusterOrPoint[] }[] = [];
+    for (const [layer, list] of byLayer) {
       const cfg = layers.find((l) => l.id === layer);
-      if (!cfg?.supportsClustering || list.length <= 60) {
-        chunks.push({ layer, features: list });
-        continue;
-      }
-      const sorted = [...list].sort((a, b) => a.lat - b.lat || a.lng - b.lng);
-      const grid = new Map<string, MapFeature[]>();
-      for (const f of sorted) {
-        const cell = `${Math.round(f.lat / 0.12)},${Math.round(f.lng / 0.12)}`;
-        const row = grid.get(cell) ?? [];
-        row.push(f);
-        grid.set(cell, row);
-      }
-      const merged: MapFeature[] = [];
-      for (const row of grid.values()) {
-        if (row.length <= 8) {
-          merged.push(...row);
-          continue;
-        }
-        const lat = row.reduce((s, f) => s + f.lat, 0) / row.length;
-        const lng = row.reduce((s, f) => s + f.lng, 0) / row.length;
-        merged.push({
-          ...row[0],
-          id: `cluster:${layer}:${lat.toFixed(4)}:${lng.toFixed(4)}`,
-          label: `${row.length} ${cfg.label.toLowerCase()}`,
-          lng,
-          lat,
-          visible: true,
-          _cluster: true,
-          _memberCount: row.length,
-        });
-      }
-      chunks.push({ layer, features: merged });
+      out.push({ layer, items: clusterPoints(list, zoom, !!cfg?.supportsClustering) });
     }
-    return chunks;
-  }, [visibleFeatures, layers]);
+    return out;
+  }, [visibleFeatures, layers, zoom]);
 
-  const adminBoundaryPolylines = useMemo(() => {
-    if (adminBoundaries.length === 0) return [];
-    return adminBoundaries.map((b) => {
-      try {
-        const parsed = geoJsonGeometryParse(b.geometryGeoJson);
-        const geom: GeoJSON.Geometry = parsed.geometry ?? parsed as GeoJSON.Geometry;
-        return {
-          key: b._id,
-          name: b.name,
-          level: b.level,
-          geojson: { type: "Feature", geometry: geom, properties: { source: b.source, verified: b.geoVerified } },
-        };
-      } catch {
-        return { key: b._id, name: b.name, level: b.level, geojson: { type: "GeometryCollection", geometries: [] } };
-      }
-    });
-  }, [adminBoundaries]);
+  const siteCounty = useMemo(
+    () => new Map(features.filter((f) => f.layer === "sites").map((f) => [f.id, f.county])),
+    [features],
+  );
+  const shownSiteBoundaries = useMemo(
+    () =>
+      visibleLayers.site_boundaries
+        ? siteBoundaries.filter(
+            (b) => !filters.counties.length || filters.counties.includes(siteCounty.get(b.siteId) ?? ""),
+          )
+        : [],
+    [siteBoundaries, visibleLayers, filters.counties, siteCounty],
+  );
+  const shownAdminBoundaries = useMemo(
+    () =>
+      visibleLayers.admin_boundaries
+        ? adminBoundaries.filter(
+            (b) => b.level !== "county" || !filters.counties.length || filters.counties.includes(b.name),
+          )
+        : [],
+    [adminBoundaries, visibleLayers, filters.counties],
+  );
+  const levelFilteredBoundary = (verified: boolean) =>
+    !filters.levels.length || filters.levels.includes(verified ? "verified" : "unverified");
 
-  const siteBoundaryPolylines = useMemo(() => {
-    if (siteBoundaries.length === 0) return [];
-    return siteBoundaries.map((b) => {
-      try {
-        const parsed = geoJsonGeometryParse(b.geometryGeoJson);
-        const geom: GeoJSON.Geometry = parsed.geometry ?? parsed as GeoJSON.Geometry;
-        return {
-          key: b._id,
-          siteId: b.siteId,
-          geojson: { type: "Feature", geometry: geom, properties: { source: b.source, verified: b.geoVerified } },
-        };
-      } catch {
-        return { key: b._id, siteId: b.siteId, geojson: { type: "GeometryCollection", geometries: [] } };
-      }
-    });
-  }, [siteBoundaries]);
+  const legend = useMemo(
+    () =>
+      buildLegend(
+        layers,
+        visibleFeatures,
+        {
+          admin: shownAdminBoundaries.filter((b) => levelFilteredBoundary(b.geoVerified)),
+          site: shownSiteBoundaries.filter((b) => levelFilteredBoundary(b.geoVerified)),
+        },
+        visibleLayers,
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [layers, visibleFeatures, shownAdminBoundaries, shownSiteBoundaries, visibleLayers, filters.levels],
+  );
 
+  const unverifiedCount = visibleFeatures.filter((f) => f.verification !== "verified").length;
   const hasBoundaryData = adminBoundaries.length > 0 || siteBoundaries.length > 0;
 
-  // Side-panel state: text search across the currently visible features and
-  // the focused feature (the map flies to it when set).
-  const [query, setQuery] = useState("");
-  const [focusTarget, setFocusTarget] = useState<{
-    id: string;
-    lat: number;
-    lng: number;
-  } | null>(null);
-
   const searchResults = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const base = visibleFeatures.filter(
-      (f) => !q || f.label.toLowerCase().includes(q),
-    );
-    // Unverified locations sort first — the reviewer's likely priority.
-    const rank = (f: MapFeature) => (f.geoVerified === false ? 0 : 1);
-    return [...base].sort(
-      (a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label),
-    );
-  }, [visibleFeatures, query]);
+    const rank = (f: MapFeature) => (f.verification === "verified" ? 1 : 0);
+    return [...visibleFeatures].sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label));
+  }, [visibleFeatures]);
+
+  const toggleCounty = (c: string) =>
+    setFilters((p) => ({
+      ...p,
+      counties: p.counties.includes(c) ? p.counties.filter((x) => x !== c) : [...p.counties, c],
+    }));
+  const toggleLevel = (l: GeoVerificationLevel) =>
+    setFilters((p) => ({
+      ...p,
+      levels: p.levels.includes(l) ? p.levels.filter((x) => x !== l) : [...p.levels, l],
+    }));
 
   return (
     <div className="space-y-4">
@@ -343,204 +175,220 @@ export default function NationalMap() {
         <p className="kicker">GIS</p>
         <h1 className="display text-3xl">National map</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Verified registry data, authoritative observations, and reported
-          information are shown distinctly. Boundaries are rendered when the
-          authoritative boundary dataset is available; until then the map shows
-          point records only.
+          Only records you are authorized to see are shown. Verified positions are drawn solid;
+          unverified positions are dashed and pale; unvetted public reports are dotted and hollow.
+          {!hasBoundaryData &&
+            " No authoritative boundary dataset has been loaded yet, so the map shows point records only."}
         </p>
       </header>
 
-      <div className="flex flex-wrap items-center gap-3 border-b border-border pb-3">
-        <div className="flex flex-wrap gap-2">
-          {layers.map((cfg) => (
+      <div className="space-y-2 border-b border-border pb-3">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Map layers">
+          {layers.map((cfg) => {
+            const on = visibleLayers[cfg.id];
+            return (
+              <button
+                key={cfg.id}
+                type="button"
+                aria-pressed={on}
+                className={`layer-toggle rounded-full border px-3 py-1 text-xs transition ${
+                  on ? "bg-background border-border shadow-sm" : "border-border bg-transparent opacity-60 hover:opacity-100"
+                }`}
+                onClick={() => toggleLayer(cfg.id, on)}
+              >
+                {cfg.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs" role="group" aria-label="Position verification filter">
+          <span className="text-muted-foreground">Position:</span>
+          {LEVELS.map((l) => (
             <button
-              key={cfg.id}
+              key={l}
               type="button"
-              className={`layer-toggle rounded-full border px-3 py-1 text-xs transition ${
-                toggles[cfg.id]
-                  ? "bg-background border-border shadow-sm"
-                  : "border-border bg-transparent opacity-60 hover:opacity-100"
+              aria-pressed={filters.levels.includes(l)}
+              onClick={() => toggleLevel(l)}
+              className={`rounded-full border px-2.5 py-0.5 ${
+                filters.levels.includes(l) ? "bg-accent border-ring" : "border-border opacity-70 hover:opacity-100"
               }`}
-              onClick={() => toggleLayer(cfg.id)}
             >
-              {cfg.label}
+              {VERIFICATION_LABEL[l]}
             </button>
           ))}
+          {counties.length > 0 && <span className="ml-2 text-muted-foreground">County:</span>}
+          {counties.map((c) => (
+            <button
+              key={c}
+              type="button"
+              aria-pressed={filters.counties.includes(c)}
+              onClick={() => toggleCounty(c)}
+              className={`rounded-full border px-2.5 py-0.5 ${
+                filters.counties.includes(c) ? "bg-accent border-ring" : "border-border opacity-70 hover:opacity-100"
+              }`}
+            >
+              {c}
+            </button>
+          ))}
+          {(filters.counties.length > 0 || filters.levels.length > 0) && (
+            <button type="button" className="underline" onClick={() => setFilters(NO_FILTERS)}>
+              Clear filters
+            </button>
+          )}
         </div>
-        {hasBoundaryData && (
-          <span className="text-xs text-muted-foreground">
-            Boundary polygons shown from the authoritative dataset.
-          </span>
-        )}
       </div>
 
       <div className="flex flex-col gap-4 lg:flex-row">
-      <div className="h-[60vh] min-h-[420px] flex-1 overflow-hidden rounded-sm border border-border">
-      <MapContainer center={CENTER} zoom={7} scrollWheelZoom className="size-full">
-          {/* Offline tile strategy — documented alternative.
-           *
-           * The live app relies on the browser's native tile HTTP cache for the
-           * OpenStreetMap raster layer during short connectivity drops (the tile
-           * URLs are cacheable by design, so a tile recently seen while online is
-           * served from cache on a brief offline moment). For sustained offline
-           * field mapping in a verified region, the recommended path is a cached
-           * offline tile set (MBTiles / offline tile provider) loaded only for
-           * the region the field team is working in, sourced from a provider whose
-           * terms permit offline redistribution (e.g. a licensed offline tile
-           * bundle, or a derived set from OpenStreetMap data that the project has
-           * the right to cache). This codebase does not bundle offline tiles: the
-           * app avoids shipping or caching tiles beyond what the browser already
-           * holds for the currently viewed region, so it never makes a caching
-           * policy claim it cannot keep.
-           *
-           * The tile URL below stays on the standard OSM raster endpoint for the
-           * connected case; replacing it with a cached region-bundle URL is the
-           * documented extension point when the project has a licensed offline set. */}
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
+        <div className="h-[60vh] min-h-[420px] flex-1 overflow-hidden rounded-sm border border-border">
+          <MapContainer center={LIBERIA_CENTER} zoom={7} scrollWheelZoom className="size-full">
+            {/* Offline tiles: see src/lib/map-tiles.ts + public/sw.js — viewed
+             *  tiles inside Liberia are cached (bounded, no prefetch) per the
+             *  provider's tile usage policy; VITE_TILE_URL swaps in a licensed
+             *  offline bundle. */}
+            <TileLayer attribution={tileAttribution()} url={tileTemplate()} minZoom={5} maxZoom={14} />
+            <MapBridge onZoom={setZoom} target={focus} />
 
-          {/* Fly-to bridge driven by the side-panel feature index. */}
-          <MapFocusHandler target={focusTarget} />
-
-          {/* Boundary polygon layers render here once Session 6 boundary tables
-           * exist on the lineage. Until then the arrays are empty and no polygon
-           * layer is shown — the map degrades gracefully rather than drawing empty
-           * or placeholder shapes. */}
-          {adminBoundaryPolylines.map((b) => (
-            <GeoJSON key={b.key} data={b.geojson} style={polygonStyle(LAYER_PALETTE["admin_boundaries"], b.level === "national")} />
-          ))}
-          {siteBoundaryPolylines.map((b) => (
-            <GeoJSON key={b.key} data={b.geojson} style={polygonStyle(LAYER_PALETTE["site_boundaries"])} />
-          ))}
-
-          {clustered.map(({ layer, features: chunk }) => (
-            <LayerGroup key={layer}>
-              {chunk.map((f) => {
-                if (f._cluster) {
-                  const palette = LAYER_PALETTE[f.layer];
-                  const color = palette?.pin ?? palette?.stroke ?? palette?.fill ?? "#888";
-                  return (
-                    <CircleMarker
-                      key={f.id}
-                      center={[f.lat, f.lng]}
-                      radius={15}
-                      pathOptions={{
-                        color,
-                        fillColor: color,
-                        fillOpacity: 0.8,
-                        weight: 2,
-                      }}
-                    >
-                      <Popup>
-                        <strong>{f.label}</strong>
-                      </Popup>
-                    </CircleMarker>
-                  );
-                }
-                const style = featureStyle(layer, f);
-                if (style.icon) {
-                  return (
-                    <Marker
-                      key={f.id}
-                      position={[f.lat, f.lng]}
-                      icon={style.icon}
-                    >
-                      <Popup>
-                        <strong>{f.label}</strong>
-                        <br />
-                        {f.geoVerified === false ? "Geographic position unverified" : "Position as recorded"}
-                      </Popup>
-                    </Marker>
-                  );
-                }
+            {shownAdminBoundaries
+              .filter((b) => levelFilteredBoundary(b.geoVerified))
+              .map((b) => {
+                const geom = parseBoundaryGeometry(b.geometryGeoJson);
+                if (!geom) return null;
                 return (
-                  <CircleMarker
-                    key={f.id}
-                    center={[f.lat, f.lng]}
-                    {...style}
+                  <GeoJSON
+                    key={`${b._id}:${b.geoVerified}`}
+                    data={geom}
+                    style={boundaryStyle("admin_boundaries", b.geoVerified, b.level === "national")}
                   >
                     <Popup>
-                      <strong>{f.label}</strong>
-                      {f.geoVerified === false && <br />}
-                      {f.geoVerified === false && (
-                        <span className="text-[11px] text-muted-foreground">
-                          Geographic position unverified — treat location as approximate.
-                        </span>
-                      )}
+                      <strong>{b.name}</strong> ({b.level})
+                      <br />
+                      {b.geoVerified ? "Verified boundary" : "Unverified boundary"} · source: {b.source}
                     </Popup>
-                  </CircleMarker>
+                  </GeoJSON>
                 );
               })}
-            </LayerGroup>
-          ))}
-        </MapContainer>
+            {shownSiteBoundaries
+              .filter((b) => levelFilteredBoundary(b.geoVerified))
+              .map((b) => {
+                const geom = parseBoundaryGeometry(b.geometryGeoJson);
+                if (!geom) return null;
+                return (
+                  <GeoJSON
+                    key={`${b._id}:${b.geoVerified}`}
+                    data={geom}
+                    style={boundaryStyle("site_boundaries", b.geoVerified)}
+                  >
+                    <Popup>
+                      Site outline — {b.geoVerified ? "verified" : "unverified"} · source: {b.source}
+                    </Popup>
+                  </GeoJSON>
+                );
+              })}
+
+            {items.map(({ layer, items: chunk }) => (
+              <LayerGroup key={layer}>
+                {chunk.map((it) => (
+                  <Marker key={it.feature.id} position={[it.feature.lat, it.feature.lng]} icon={markerIcon(it)}>
+                    <Popup>
+                      <strong>{it.feature.label}</strong>
+                      <br />
+                      {it.cluster ? (
+                        <span className="text-[11px]">
+                          {it.byLevel.verified} verified · {it.byLevel.unverified} unverified ·{" "}
+                          {it.byLevel.reported} reported — zoom in for individual records.
+                        </span>
+                      ) : (
+                        <span className="text-[11px]">{provenanceLine(it.feature)}</span>
+                      )}
+                      {!it.cluster && it.feature.layer === "community_reports" && (
+                        <>
+                          <br />
+                          <span className="text-[11px]">
+                            Reported by the public; location unverified. Not an accusation.
+                          </span>
+                        </>
+                      )}
+                    </Popup>
+                  </Marker>
+                ))}
+              </LayerGroup>
+            ))}
+          </MapContainer>
+        </div>
+
+        <aside className="w-full shrink-0 overflow-hidden rounded-sm border border-border bg-card lg:w-80">
+          <div className="flex items-center justify-between border-b border-border px-3 py-2">
+            <span className="kicker">Feature index</span>
+            <span className="text-xs text-muted-foreground">
+              {searchResults.length} shown · {unverifiedCount} not verified
+            </span>
+          </div>
+          <div className="border-b border-border p-2">
+            <input
+              value={filters.text}
+              onChange={(e) => setFilters((p) => ({ ...p, text: e.target.value }))}
+              placeholder="Search visible features…"
+              aria-label="Search map features"
+              className="w-full rounded-sm border border-border bg-background px-2 py-1.5 text-xs outline-none focus:border-ring"
+            />
+          </div>
+          <ul className="max-h-[45vh] divide-y divide-border overflow-y-auto">
+            {searchResults.length === 0 && (
+              <li className="px-3 py-6 text-center text-xs text-muted-foreground">
+                No visible features match the current layers and filters.
+              </li>
+            )}
+            {searchResults.slice(0, 120).map((f) => (
+              <li key={f.id}>
+                <button
+                  type="button"
+                  onClick={() => setFocus({ id: f.id, lat: f.lat, lng: f.lng })}
+                  className={`w-full px-3 py-2 text-left text-xs transition hover:bg-accent ${
+                    focus?.id === f.id ? "bg-accent" : ""
+                  }`}
+                >
+                  <span className="block truncate font-medium">{f.label}</span>
+                  <span className="block truncate text-[10px] text-muted-foreground">
+                    {layers.find((l) => l.id === f.layer)?.label ?? f.layer} · {VERIFICATION_LABEL[f.verification]}
+                  </span>
+                </button>
+              </li>
+            ))}
+            {searchResults.length > 120 && (
+              <li className="px-3 py-2 text-center text-[10px] text-muted-foreground">
+                {searchResults.length - 120} more — refine the filters to narrow this list.
+              </li>
+            )}
+          </ul>
+        </aside>
       </div>
 
-      <aside className="w-full shrink-0 overflow-hidden rounded-sm border border-border bg-card lg:w-80">
-        <div className="flex items-center justify-between border-b border-border px-3 py-2">
-          <span className="kicker">Feature index</span>
-          <span className="text-xs text-muted-foreground">
-            {searchResults.length} shown
+      <div
+        className="legend flex flex-wrap gap-x-5 gap-y-1.5 border-t border-border pt-3 text-xs text-muted-foreground"
+        aria-label="Map legend"
+      >
+        {legend.length === 0 && <span>No features in the current view.</span>}
+        {legend.map((e) => (
+          <span key={`${e.layer}:${e.level}`} className="legend-item inline-flex items-center gap-1.5">
+            <span
+              className="legend-swatch"
+              // Same renderer as the map markers (gis.symbolSvg).
+              dangerouslySetInnerHTML={{ __html: symbolSvg(e.style, 18) }}
+            />
+            <span className="legend-text">
+              {e.label} — {e.note}
+              <span className="legend-count"> · {e.count}</span>
+            </span>
           </span>
-        </div>
-        <div className="border-b border-border p-2">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search visible features…"
-            aria-label="Search map features"
-            className="w-full rounded-sm border border-border bg-background px-2 py-1.5 text-xs outline-none focus:border-ring"
-          />
-        </div>
-        <ul className="max-h-[45vh] divide-y divide-border overflow-y-auto">
-          {searchResults.length === 0 && (
-            <li className="px-3 py-6 text-center text-xs text-muted-foreground">
-              No visible features match this search.
-            </li>
-          )}
-          {searchResults.slice(0, 120).map((f) => (
-            <li key={f.id}>
-              <button
-                type="button"
-                onClick={() =>
-                  setFocusTarget({ id: f.id, lat: f.lat, lng: f.lng })
-                }
-                className={`w-full px-3 py-2 text-left text-xs transition hover:bg-accent ${
-                  focusTarget?.id === f.id ? "bg-accent" : ""
-                }`}
-              >
-                <span className="block truncate font-medium">{f.label}</span>
-                <span className="block truncate text-[10px] text-muted-foreground">
-                  {layers.find((l) => l.id === f.layer)?.label ?? f.layer}
-                  {f.geoVerified === false ? " · geo unverified" : ""}
-                </span>
-              </button>
-            </li>
-          ))}
-          {searchResults.length > 120 && (
-            <li className="px-3 py-2 text-center text-[10px] text-muted-foreground">
-              {searchResults.length - 120} more — refine the search to narrow
-              this list.
-            </li>
-          )}
-        </ul>
-      </aside>
-      </div>
-
-      <div className="legend flex flex-wrap gap-x-5 gap-y-1.5 border-t border-border pt-3 text-xs text-muted-foreground">
-        {layers.map((cfg) => (
-          <React.Fragment key={cfg.id}>{legendItem(cfg, visibleFeatures, cfg.id)}</React.Fragment>
         ))}
       </div>
 
       <p className="text-xs leading-relaxed text-muted-foreground">
-        Community report locations are as reported by the public and have not
-        been verified. They never constitute an accusation against any party.
-        Verified geographic data comes from the site registry and staff
-        observations only. Positions marked unverified are visually distinct on
-        the map and in the legend.
+        Community report locations are as reported by the public and have not been verified; they
+        never constitute an accusation against any party. A position is "verified" only when an
+        authorized administrator has recorded an authoritative source for it. Incidents, risk
+        indicators and inspections without their own GPS fix are drawn at the site's registry
+        position and are never shown as more certain than that position.
       </p>
     </div>
   );

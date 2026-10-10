@@ -91,9 +91,25 @@ export interface MapLayerConfig {
 /** One feature shown on the map. Point features use lng/lat; polygon
  *  features use their own geometry; both carry the same trust metadata so the
  *  legend and styling can be driven from real data. */
+/** How far the GEOGRAPHIC claim of a feature is trusted (GIS-3/GIS-4). Fail-safe:
+ *  anything not explicitly verified is NOT "verified".
+ *  - verified   — geo_verified = true with a recorded source (geo.write act)
+ *  - unverified — staff/registry/device position, source recorded, not verified
+ *  - reported   — supplied by the public; never vetted (community reports) */
+export type GeoVerificationLevel = "verified" | "unverified" | "reported";
+
 export interface MapFeature {
   id: string;
   layer: GeoLayer;
+  /** Trust level of the position — drives styling, legend and clustering. */
+  verification: GeoVerificationLevel;
+  /** Scope/filter facets (denormalized from the row or its site). */
+  county?: string;
+  district?: string;
+  status?: string;
+  severity?: string;
+  riskScore?: number;
+  riskLevel?: "low" | "moderate" | "high" | "critical";
   label: string;
   lng: number;
   lat: number;

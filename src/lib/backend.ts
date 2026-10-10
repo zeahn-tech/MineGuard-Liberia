@@ -34,121 +34,863 @@ import {
   type RiskInputCounts,
 } from "./risk-model";
 import { sha256Hex } from "./sha256";
-import {
-  MAP_LAYER_CONFIGS,
-  type MapFeature,
-  type MapLayerConfig,
-  type AdminBoundary,
-  type SiteBoundary,
-} from "./types";
-import {
-  ROLES,
-  canAccessSite,
-  isStaffRole,
-  makeTrackingCode,
-  nextSiteCodeFrom,
-  siteScopeStamp,
-  type CommunityReport,
-  type CorrectiveAction,
-  type EnvironmentalObservation,
-  type Evidence,
-  type EvidenceParentType,
-  type Finding,
-  type Incident,
-  type Inspection,
-  type InspectionTemplate,
-  type Role,
-  type Scope,
-  type Severity,
-  type Site,
-  type UserProfile,
-} from "./types";
 
 /** doc 08: AI output is labeled as assistance — this label ships with every
  *  AI payload so no surface can present it as fact without the marker. */
 const AI_DISCLAIMER =
   "AI-assisted explanation — generated from the recorded risk factors only; decision support, not a determination.";
-
- // Re-export the template-shape validator (the Templates editor and
- // saveTemplate share one contract).
-export { validateTemplateSections } from "./template-schema";
+import {
+  adminBoundaryFromRow,
+  communityReportFeature,
+  incidentFeature,
+  indexSites,
+  inspectionFeature,
+  observationFeature,
+  parseBoundaryGeometry,
+  riskIndicatorFeature,
+  siteBoundaryFromRow,
+  siteFeature,
+  validateGeoJsonPolygon,
+} from "./gis";
+import {
+  MAP_LAYER_CONFIGS,
+  canAccessSite,
+  isStaffRole,
+  makeTrackingCode,
+  nextSiteCodeFrom,
+  type AdminBoundary,
+  type AuditEntry,
+  type CommunityReport,
+  type CorrectiveAction,
+  type EnvironmentalObservation,
+  type Evidence,
+  type EvidenceKind,
+  type Finding,
+  type Incident,
+  type Inspection,
+  type InspectionTemplate,
+  type MapFeature,
+  type MapLayerConfig,
+  type Role,
+  type Scope,
+  type Site,
+  type SiteBoundary,
+  type UserProfile,
+  ROLES,
+} from "./types";
 
 // ---------------------------------------------------------------------------
-// QueryHandle — the value subscribe()'d to by backend-react.ts (and directly
-// by the test suites). An error inside the fetcher resolves UNDEFINED (the
-// documented live() contract: a bad subscription never hangs or throws into
-// the UI) — the error is logged so tests can assert the denial token.
+// QUERY HANDLES — a Convex useQuery-compatible subscription surface
 // ---------------------------------------------------------------------------
 
 export interface QueryHandle<T> {
-  subscribe(cb: (value: T | undefined) => void): () => void;
-  /** Auth-bound handles are re-derived on identity/profile change. */
+  /** True when the result depends on the signed-in user. Consumed by the
+   *  React cache layer to re-derive subscriptions after auth changes. */
   authBound?: boolean;
+  subscribe(cb: (value: T | undefined) => void): () => void;
 }
 
-/** Establish a live query handle around one async fetch. Errors inside the
- *  fetcher are logged and resolve as `undefined` — never hang, never throw. */
-export function live<T>(
-  fetcher: () => Promise<T | undefined | null>,
-  opts: { authBound?: boolean } = {},
-): QueryHandle<T> {
-  let unsubscribed = false;
-  const handle: QueryHandle<T> & { _subs: Set<(v: T | undefined) => void>; _latest?: T | undefined; _done?: boolean } = {
-    _subs: new Set(),
-    authBound: opts.authBound ?? true,
-    subscribe(cb) {
-      handle._subs.add(cb);
-      // Replay the latest value to a late subscriber (cache semantics).
-      if (handle._done) cb(handle._latest);
-      // Establish a fresh fetch on first subscription.
-      if (handle._subs.size === 1) {
-        void (async () => {
-          try {
-            const v = await fetcher();
-            if (unsubscribed) return;
-            handle._latest = v === null ? (undefined as unknown as T) : (v as T);
-            handle._done = true;
-            for (const l of [...handle._subs]) l(handle._latest);
-          } catch (e) {
-            console.error("[live] query failed:", backendError(e));
-            if (unsubscribed) return;
-            handle._done = true;
-            for (const l of [...handle._subs]) l(undefined);
-          }
-        })();
-      }
-      return () => {
-        handle._subs.delete(cb);
-        unsubscribed = handle._subs.size === 0;
-      };
-    },
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyRow = Record<string, any>;
+
+// ---------------------------------------------------------------------------
+// TIME HELPERS — timestamptz <-> epoch-ms
+// ---------------------------------------------------------------------------
+
+function toMs(v: unknown): number {
+  if (v == null) return 0;
+  if (typeof v === "number") return v;
+  const t = Date.parse(String(v));
+  return Number.isNaN(t) ? 0 : t;
+}
+function toMsOrNull(v: unknown): number | undefined {
+  if (v == null) return undefined;
+  const t = toMs(v);
+  return t === 0 ? undefined : t;
+}
+function iso(ms: number): string {
+  return new Date(ms).toISOString();
+}
+
+// ---------------------------------------------------------------------------
+// ROW MAPPERS — public.* (snake_case) -> domain types (camelCase, _id)
+// ---------------------------------------------------------------------------
+
+function mapProfile(r: AnyRow): UserProfile {
+  return {
+    uid: r.id as string,
+    email: (r.email as string) ?? null,
+    name: (r.name as string) ?? null,
+    role: (r.role as Role) ?? undefined,
+    jobTitle: (r.job_title as string) ?? undefined,
+    organization: (r.organization as string) ?? undefined,
+    scope: (r.scope as Scope) ?? undefined,
+    county: (r.county as string) ?? undefined,
+    operatorName: (r.operator_name as string) ?? undefined,
+    organizationId: (r.organization_id as string) ?? undefined,
+    profileComplete: r.profile_complete === true,
+    createdAt: toMs(r.created_at),
   };
-  return handle;
+}
+
+function mapSite(r: AnyRow): Site {
+  return {
+    _id: r.id as string,
+    code: r.code,
+    name: r.name,
+    operatorName: r.operator_name,
+    organizationId: r.organization_id ?? undefined,
+    mineralType: r.mineral_type ?? undefined,
+    county: r.county,
+    district: r.district ?? undefined,
+    community: r.community ?? undefined,
+    status: r.status,
+    latitude: r.latitude ?? undefined,
+    longitude: r.longitude ?? undefined,
+    notes: r.notes ?? undefined,
+    createdBy: r.created_by,
+    createdAt: toMs(r.created_at),
+    geoSource: (r.geo_source as string | null) ?? undefined,
+    geoAccuracyM:
+      r.geo_accuracy_m === null || r.geo_accuracy_m === undefined
+        ? undefined
+        : Number(r.geo_accuracy_m),
+    geoVerified: r.geo_verified === true,
+  };
+}
+
+function mapTemplate(r: AnyRow): InspectionTemplate {
+  return {
+    _id: r.id as string,
+    name: r.name,
+    description: r.description ?? undefined,
+    active: r.active === true,
+    sections: (r.sections ?? []) as InspectionTemplate["sections"],
+    createdBy: r.created_by,
+    createdAt: toMs(r.created_at),
+  };
+}
+
+function mapInspection(r: AnyRow): Inspection {
+  return {
+    _id: r.id as string,
+    siteId: r.site_id,
+    templateId: r.template_id,
+    inspectorId: r.inspector_id,
+    status: r.status,
+    answers: (r.answers ?? undefined) as Inspection["answers"],
+    notes: r.notes ?? undefined,
+    latitude: r.latitude ?? undefined,
+    longitude: r.longitude ?? undefined,
+    gpsAccuracyM: r.gps_accuracy_m ?? undefined,
+    clientRef: r.client_ref ?? undefined,
+    submittedAt: toMsOrNull(r.submitted_at),
+    reviewedAt: toMsOrNull(r.reviewed_at),
+    reviewerId: r.reviewer_id ?? undefined,
+    reviewNote: r.review_note ?? undefined,
+    createdAt: toMs(r.created_at),
+  };
+}
+
+function mapFinding(r: AnyRow): Finding {
+  return {
+    _id: r.id as string,
+    inspectionId: r.inspection_id,
+    siteId: r.site_id,
+    title: r.title,
+    description: r.description ?? undefined,
+    severity: r.severity,
+    status: r.status,
+    createdById: r.created_by_id,
+    createdAt: toMs(r.created_at),
+  };
+}
+
+function mapCA(r: AnyRow): CorrectiveAction {
+  return {
+    _id: r.id as string,
+    findingId: r.finding_id,
+    siteId: r.site_id,
+    description: r.description,
+    status: r.status,
+    dueAt: toMs(r.due_at),
+    openedById: r.opened_by_id,
+    operatorNote: r.operator_note ?? undefined,
+    verifiedById: r.verified_by_id ?? undefined,
+    closedAt: toMsOrNull(r.closed_at),
+    createdAt: toMs(r.created_at),
+    rowVersion: r.row_version == null ? undefined : Number(r.row_version),
+  };
+}
+
+function mapIncident(r: AnyRow): Incident {
+  return {
+    _id: r.id as string,
+    siteId: r.site_id,
+    type: r.type,
+    severity: r.severity,
+    description: r.description,
+    occurredAt: toMs(r.occurred_at),
+    fatalities: r.fatalities ?? undefined,
+    injured: r.injured ?? undefined,
+    status: r.status,
+    reportedById: r.reported_by_id,
+    reportSource: r.report_source,
+    createdAt: toMs(r.created_at),
+  };
+}
+
+function mapObservation(r: AnyRow): EnvironmentalObservation {
+  return {
+    _id: r.id as string,
+    siteId: r.site_id,
+    category: r.category,
+    verification: r.verification,
+    description: r.description,
+    observedAt: toMs(r.observed_at),
+    latitude: r.latitude ?? undefined,
+    longitude: r.longitude ?? undefined,
+    status: r.status,
+    reportedById: r.reported_by_id,
+    createdAt: toMs(r.created_at),
+  };
+}
+
+function mapReport(r: AnyRow): CommunityReport {
+  return {
+    _id: r.id as string,
+    trackingCode: r.tracking_code,
+    category: r.category,
+    description: r.description,
+    county: r.county,
+    district: r.district ?? undefined,
+    community: r.community ?? undefined,
+    latitude: r.latitude ?? undefined,
+    longitude: r.longitude ?? undefined,
+    contactPhone: r.contact_phone ?? undefined,
+    status: r.status,
+    triageNote: r.triage_note ?? undefined,
+    reviewedById: r.reviewed_by_id ?? undefined,
+    reviewedAt: toMsOrNull(r.reviewed_at),
+    createdAt: toMs(r.created_at),
+  };
+}
+
+function mapAudit(r: AnyRow): AuditEntry {
+  return {
+    _id: r.id as string,
+    actorId: r.actor_id ?? undefined,
+    actorLabel: r.actor_label,
+    action: r.action,
+    entityType: r.entity_type,
+    entityId: r.entity_id ?? undefined,
+    summary: r.summary,
+    createdAt: toMs(r.created_at),
+  };
+}
+
+function mapEvidence(r: AnyRow): Evidence {
+  return {
+    _id: r.id as string,
+    storagePath: r.storage_path,
+    parentType: r.parent_type,
+    parentId: r.parent_id,
+    siteId: r.site_id ?? undefined,
+    kind: r.kind,
+    fileName: r.file_name,
+    mimeType: r.mime_type,
+    sizeBytes: Number(r.size_bytes ?? 0),
+    caption: r.caption ?? undefined,
+    capturedAt: toMsOrNull(r.captured_at),
+    uploadedById: r.uploaded_by_id,
+    createdAt: toMs(r.created_at),
+    sha256: r.sha256 ?? undefined,
+  };
 }
 
 // ---------------------------------------------------------------------------
-// KEYSET PAGE TYPES — the list/export window contract (SEC-4 v2). Pages are
-// (sort_at DESC, id DESC) ordered rows plus the cursor of the page's LAST
-// row; the next request resumes exactly where this one stopped.
+// INTERNAL HELPERS
 // ---------------------------------------------------------------------------
 
-export interface KeysetCursor {
-  at: number;
-  id: string;
+async function getProfile(uid: string): Promise<UserProfile | null> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", uid)
+    .maybeSingle();
+  if (error) throw backendError(error);
+  return data ? mapProfile(data) : null;
 }
+
+// Short-TTL profile cache: list queries re-derive authorization on every run;
+// without this, one dashboard render costs a profiles read per query. TTL is
+// intentionally short (5s) so role changes surface quickly. Auth mutations
+// always use a fresh read (cached=false default).
+let profileCache: { uid: string; profile: UserProfile | null; at: number } | null =
+  null;
+const PROFILE_TTL_MS = 5_000;
+
+async function getProfileCached(uid: string): Promise<UserProfile | null> {
+  if (
+    profileCache &&
+    profileCache.uid === uid &&
+    Date.now() - profileCache.at < PROFILE_TTL_MS
+  ) {
+    return profileCache.profile;
+  }
+  const profile = await getProfile(uid);
+  profileCache = { uid, profile, at: Date.now() };
+  return profile;
+}
+
+async function requireAuthed(cached = false): Promise<UserProfile> {
+  const uid = authUserId();
+  if (!uid) throw new Error("UNAUTHENTICATED");
+  const profile = cached ? await getProfileCached(uid) : await getProfile(uid);
+  if (!profile) throw new Error("UNREGISTERED_USER");
+  return profile;
+}
+
+async function requireStaffUser(cached = false): Promise<UserProfile> {
+  const user = await requireAuthed(cached);
+  if (!isStaffRole(user.role)) throw new Error("FORBIDDEN");
+  return user;
+}
+
+async function requireAdminUser(cached = false): Promise<UserProfile> {
+  const user = await requireAuthed(cached);
+  if (user.role !== ROLES.ADMIN) throw new Error("FORBIDDEN");
+  return user;
+}
+
+async function requireReviewerUser(cached = false): Promise<UserProfile> {
+  const user = await requireAuthed(cached);
+  if (user.role !== ROLES.ADMIN && user.role !== ROLES.SUPERVISOR)
+    throw new Error("FORBIDDEN");
+  return user;
+}
+
+async function actorLabel(user: UserProfile): Promise<string> {
+  return user.email ?? user.name ?? user.uid;
+}
+
+/** NON-AUTHORITATIVE breadcrumb (SEC-1, migration 0009).
+ *  The authoritative audit trail is written by the server: every mutation
+ *  fires mg_audit_row(), which records the session actor (auth.uid(), never
+ *  client-supplied), entity, timestamp and before/after diff in the SAME
+ *  transaction as the write — so a client crash can neither lose nor forge a
+ *  row. audit_log INSERT/UPDATE/DELETE is revoked from all client roles.
+ *  This helper now only leaves a console trace of what the UI intended. */
+async function logAudit(entry: {
+  actorId?: string;
+  actorLabel: string;
+  action: string;
+  entityType: string;
+  entityId?: string;
+  summary: string;
+}) {
+  console.debug(
+    "[audit:breadcrumb]",
+    entry.action,
+    `${entry.entityType}:${entry.entityId ?? "-"}`,
+    entry.summary,
+    `(${entry.actorLabel})`,
+  );
+}
+
+async function getSite(siteId: string): Promise<Site | null> {
+  const { data, error } = await supabase
+    .from("sites")
+    .select("*")
+    .eq("id", siteId)
+    .maybeSingle();
+  if (error) throw backendError(error);
+  return data ? mapSite(data) : null;
+}
+
+async function insertReturningId(
+  table: string,
+  values: AnyRow,
+): Promise<string> {
+  const { data, error } = await supabase
+    .from(table)
+    .insert(values)
+    .select("id")
+    .single();
+  if (error) throw backendError(error);
+  return data.id as string;
+}
+
+// ---------------------------------------------------------------------------
+// SEC-4 — paged reads: hosted PostgREST caps an unranged response
+// (db-max-rows, default 1,000 rows). A bare `select("*")` therefore
+// SILENTLY TRUNCATES past that size and every statistic, risk score and
+// export computed from it is quietly wrong — the defect this section closes.
+// ---------------------------------------------------------------------------
+
+/** The hosted PostgREST default row cap — the size of one wire page. */
+const POSTGREST_MAX_ROWS = 1000;
+
+type PagedPage = PromiseLike<{
+  data: unknown;
+  error: { message: string; code?: string } | null;
+}>;
+
+/** Fetch EVERY row a query yields by paging with an explicit ordered Range
+ *  until a short page comes back. Correctness never depends on the server's
+ *  row cap, at any table size. (An error on any page throws — truncation is
+ *  never an acceptable outcome here.) */
+async function pagedRows<T>(
+  page: (from: number, to: number) => PagedPage,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += POSTGREST_MAX_ROWS) {
+    const { data, error } = await page(from, from + POSTGREST_MAX_ROWS - 1);
+    if (error) throw backendError(error);
+    const rows = (data ?? []) as T[];
+    out.push(...rows);
+    if (rows.length < POSTGREST_MAX_ROWS) return out;
+  }
+}
+
+/** Fetch all rows of a table the caller can see (RLS enforces the scope) —
+ *  paged, ordered by primary key so the Range windows are stable across
+ *  requests (SEC-4). */
+async function allRows<T>(table: string): Promise<T[]> {
+  return pagedRows<T>((from, to) =>
+    supabase
+      .from(table)
+      .select("*")
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+}
+
+/** Every site code in the registry — paged for the same SEC-4 reason: a
+ *  truncated scan would re-propose an existing code once a lineage passes
+ *  the row cap (the unique constraint would then refuse the insert). */
+async function allSiteCodes(): Promise<string[]> {
+  const rows = await pagedRows<{ code: string }>((from, to) =>
+    supabase
+      .from("sites")
+      .select("code")
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  return rows.map((r) => r.code);
+}
+
+/** Paged read of one parent's children (or any eq-filtered slice) — the
+ *  same ordered Range windows as allRows; correctness never depends on the
+ *  server's row cap, however deep the slice grows (SEC-4). */
+async function pagedEqRows<T>(
+  table: string,
+  column: string,
+  value: unknown,
+): Promise<T[]> {
+  return pagedRows<T>((from, to) =>
+    supabase
+      .from(table)
+      .select("*")
+      .eq(column, value)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SEC-4 v2 — keyset pages: the list pages' and the exports' row sources.
+//
+// Rows arrive in (sort_at DESC, id DESC) windows driven by a (cursorAt,
+// cursorId) keyset predicate computed in Postgres by the SECURITY INVOKER
+// RPCs of migration 0014. Unlike offset windows, a keyset window CANNOT skip
+// or repeat rows when the table grows underneath the pager: the predicate is
+// "everything strictly before the last row the caller actually received".
+// Each page carries the cursor of its own last row, so the next request
+// resumes exactly where the previous one stopped.
+// ---------------------------------------------------------------------------
+
+export type KeysetCursor = { at: number; id: string };
 
 export interface KeysetPage<T> {
   rows: T[];
+  /** Cursor of the page's last row — null when the feed is exhausted. */
   nextCursor: KeysetCursor | null;
-  /** ui | rpc — which source served the rows (tests pin rpc). */
-  source: string;
+  /** How this page was produced: "rpc" (SQL keyset page, migration 0014) or
+   *  "fallback" (the full authorized feed in one page — pre-0014 lineage). */
+  source: "rpc" | "fallback";
+}
+
+/** The list pages' window size — well under the hosted row cap, deep enough
+ *  that a normal session never taps "Load more" twice. */
+const KEYSET_PAGE_SIZE = 500;
+
+/** Coerce one RPC jsonb field to a finite number (mapCommandCenterStats
+ *  discipline: no downstream UI math may ever see undefined/NaN). */
+function numOf(v: unknown): number {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Coerce one RPC jsonb field to a string array (id arrays from
+ *  mg_risk_explanation). */
+function strArr(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((x) => String(x));
+}
+
+/** One keyset page through a 0014 RPC. Returns null when the RPC is not on
+ *  this lineage (error) — the caller falls back to the exact full-feed path
+ *  instead of guessing what a half-page means. */
+async function keysetPageRpc<T>(
+  fn: string,
+  before: KeysetCursor | null,
+  limit: number,
+  mapRow: (raw: AnyRow) => T,
+): Promise<KeysetPage<T> | null> {
+  const { data, error } = await supabase.rpc(fn, {
+    p_before: before ? iso(before.at) : null,
+    p_before_id: before ? before.id : null,
+    p_limit: limit,
+  });
+  if (error || !Array.isArray(data)) return null;
+  const raw = data as AnyRow[];
+  const last = raw.length > 0 ? raw[raw.length - 1] : null;
+  return {
+    rows: raw.map(mapRow),
+    // A full page MIGHT have a successor; a short page cannot.
+    nextCursor:
+      last && raw.length >= limit
+        ? { at: numOf(last.cursorAt), id: String(last.cursorId) }
+        : null,
+    source: "rpc",
+  };
+}
+
+/** Stream a keyset feed page by page to exhaustion — the exports' row
+ *  source. Each page is serialized (and released) before the next is
+ *  fetched, so the export's memory tracks one page, not the table. */
+function keysetPages<T>(
+  fetch: (before: KeysetCursor | null) => Promise<KeysetPage<T>>,
+): AsyncGenerator<T[]> {
+  return (async function* () {
+    let before: KeysetCursor | null = null;
+    for (;;) {
+      const page = await fetch(before);
+      yield page.rows;
+      if (!page.nextCursor) return;
+      before = page.nextCursor;
+    }
+  })();
+}
+
+async function refreshPublicStats() {
+  const { error } = await supabase.rpc("refresh_public_stats");
+  if (error) console.warn("[backend] publicStats refresh skipped:", error.message);
 }
 
 // ---------------------------------------------------------------------------
-// Command-center stats shape (mg_command_center_stats, migration 0012).
+// SEC-4 v2 — full-feed fetchers (the live lists and the keyset pages'
+// fallback both consume them; single body per feed so the two paths cannot
+// diverge) and the RPC row mappers.
 // ---------------------------------------------------------------------------
 
-export type CommandCenterStats = {
+/** The caller-visible incidents feed, enriched — the exact body of the old
+ *  records.listIncidents fetcher. */
+async function fetchIncidents(
+  user: UserProfile,
+): Promise<(Incident & { siteCode: string; siteName: string; county: string })[]> {
+  const [incRaw, siteRaw] = await Promise.all([
+    allRows<AnyRow>("incidents"),
+    allRows<AnyRow>("sites"),
+  ]);
+  const byId = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
+  const out: (Incident & { siteCode: string; siteName: string; county: string })[] = [];
+  for (const r of incRaw) {
+    const inc = mapIncident(r);
+    const site = byId.get(inc.siteId);
+    if (!site) continue;
+    if (user.role === ROLES.OPERATOR) {
+      if (!user.operatorName || site.operatorName !== user.operatorName) continue;
+    }
+    out.push({
+      ...inc,
+      siteCode: site.code,
+      siteName: site.name,
+      county: site.county,
+    });
+  }
+  out.sort((a, b) => b.occurredAt - a.occurredAt);
+  return out;
+}
+
+/** The caller-visible inspections feed, enriched — the exact body of the old
+ *  inspections.list fetcher. */
+/** One row of the keyset incident page (feed + CSV export). */
+export type IncidentPageRow = Incident & {
+  siteCode: string;
+  siteName: string;
+  county: string;
+};
+
+export type InspectionListRow = {
+  _id: string;
+  siteId: string;
+  siteCode: string;
+  siteName: string;
+  county: string;
+  status: Inspection["status"];
+  submittedAt?: number;
+  createdAt: number;
+  inspectorId: string;
+};
+
+async function fetchInspections(user: UserProfile): Promise<InspectionListRow[]> {
+  const [inspRaw, siteRaw] = await Promise.all([
+    allRows<AnyRow>("inspections"),
+    allRows<AnyRow>("sites"),
+  ]);
+  const byId = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
+  const out: InspectionListRow[] = [];
+  for (const r of inspRaw) {
+    const insp = mapInspection(r);
+    const site = byId.get(insp.siteId);
+    if (!site) continue;
+    if (!canAccessSite(user, site)) continue;
+    if (
+      user.role === ROLES.INSPECTOR &&
+      user.scope !== "national" &&
+      insp.inspectorId !== user.uid
+    ) {
+      continue;
+    }
+    out.push({
+      _id: insp._id,
+      siteId: insp.siteId,
+      siteCode: site.code,
+      siteName: site.name,
+      county: site.county,
+      status: insp.status,
+      submittedAt: insp.submittedAt,
+      createdAt: insp.createdAt,
+      inspectorId: insp.inspectorId,
+    });
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt);
+  return out;
+}
+
+/** The caller-visible compliance feed, enriched — the exact body of the old
+ *  inspections.listMyCorrectiveActions fetcher. */
+export type ComplianceListRow = CorrectiveAction & {
+  findingTitle: string;
+  findingSeverity: Finding["severity"];
+  siteCode: string;
+  siteName: string;
+  county: string;
+};
+
+async function fetchCompliance(user: UserProfile): Promise<ComplianceListRow[]> {
+  const [caRaw, findingRaw, siteRaw] = await Promise.all([
+    allRows<AnyRow>("corrective_actions"),
+    allRows<AnyRow>("findings"),
+    allRows<AnyRow>("sites"),
+  ]);
+  const findings = new Map(findingRaw.map((r) => [r.id as string, mapFinding(r)]));
+  const sites = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
+  const out: ComplianceListRow[] = [];
+  for (const r of caRaw) {
+    const ca = mapCA(r);
+    const site = sites.get(ca.siteId);
+    if (!site || !canAccessSite(user, site)) continue;
+    const finding = findings.get(ca.findingId);
+    out.push({
+      ...ca,
+      findingTitle: finding?.title ?? "Compliance finding",
+      findingSeverity: finding?.severity ?? "medium",
+      siteCode: site.code,
+      siteName: site.name,
+      county: site.county,
+    });
+  }
+  // Openest obligations first: open/in_progress/submitted before decided
+  // ones, then by soonest deadline.
+  const openRank = (s: CorrectiveAction["status"]) =>
+    s === "open" ? 0 : s === "in_progress" ? 1 : s === "submitted" ? 2 : s === "escalated" ? 3 : 4;
+  out.sort(
+    (a, b) => openRank(a.status) - openRank(b.status) || a.dueAt - b.dueAt,
+  );
+  return out;
+}
+
+// --- SEC-4 v2 mappers: 0014 RPC payloads (camelCase jsonb) → feed shapes ---
+
+/** mg_incidents_page row → the enriched incident shape listIncidents returns
+ *  (fields coerced; the cursor pair stays in the raw row). */
+function mapIncidentPageRow(r: AnyRow): Incident & {
+  siteCode: string;
+  siteName: string;
+  county: string;
+} {
+  return {
+    _id: String(r._id),
+    siteId: r.siteId as string,
+    type: r.type as Incident["type"],
+    severity: r.severity as Incident["severity"],
+    description: r.description as string,
+    occurredAt: numOf(r.occurredAt),
+    fatalities: r.fatalities == null ? undefined : Number(r.fatalities),
+    injured: r.injured == null ? undefined : Number(r.injured),
+    status: r.status as Incident["status"],
+    reportedById: r.reportedById as string,
+    reportSource: r.reportSource as Incident["reportSource"],
+    createdAt: numOf(r.createdAt),
+    siteCode: r.siteCode as string,
+    siteName: r.siteName as string,
+    county: r.county as string,
+  };
+}
+
+/** mg_inspections_page row → the InspectionListRow shape. */
+function mapInspectionPageRow(r: AnyRow): InspectionListRow {
+  return {
+    _id: String(r._id),
+    siteId: r.siteId as string,
+    siteCode: r.siteCode as string,
+    siteName: r.siteName as string,
+    county: r.county as string,
+    status: r.status as Inspection["status"],
+    submittedAt: r.submittedAt == null ? undefined : numOf(r.submittedAt),
+    createdAt: numOf(r.createdAt),
+    inspectorId: r.inspectorId as string,
+  };
+}
+
+/** mg_compliance_page row → the export/feed page shape (the exact columns
+ *  the §9 compliance export serializes; the live feed keeps its richer
+ *  ComplianceListRow). */
+export type CompliancePageRow = {
+  _id: string;
+  siteId: string;
+  findingId: string;
+  description: string;
+  status: CorrectiveAction["status"];
+  dueAt: number;
+  operatorNote?: string;
+  createdAt: number;
+  findingTitle: string;
+  findingSeverity: Finding["severity"];
+  siteCode: string;
+  siteName: string;
+  county: string;
+};
+
+function mapCompliancePageRow(r: AnyRow): CompliancePageRow {
+  return {
+    _id: String(r._id),
+    findingId: r.findingId as string,
+    siteId: r.siteId as string,
+    description: r.description as string,
+    status: r.status as CorrectiveAction["status"],
+    dueAt: numOf(r.dueAt),
+    operatorNote: r.operatorNote == null ? undefined : (r.operatorNote as string),
+    createdAt: numOf(r.createdAt),
+    findingTitle: r.findingTitle == null ? "Compliance finding" : (r.findingTitle as string),
+    findingSeverity: (r.findingSeverity ?? "medium") as Finding["severity"],
+    siteCode: r.siteCode as string,
+    siteName: r.siteName as string,
+    county: r.county as string,
+  };
+}
+
+// --- SEC-4 v2: the explainer's sentence builder + the mg_risk_explanation
+// mapper (shared by the RPC path; the fallback builds the same response
+// inline from computeRiskFactors' factors).
+
+/** The explainer's sentence list — the fixed, factor-grounded text (doc 08:
+ *  cite-or-abstain; every sentence names the records it is grounded in). */
+function explanationSentences(factors: RiskFactor[]): {
+  factor: string;
+  points: number;
+  recordIds: string[];
+  text: string;
+}[] {
+  return factors.map((f) => ({
+    factor: f.label,
+    points: f.points,
+    recordIds: f.recordIds,
+    text: `${f.label} contribute${f.points === 1 ? "s" : ""} ${f.points} point${f.points === 1 ? "" : "s"} to the indicator at this site.`,
+  }));
+}
+
+/** mg_risk_explanation payload → the explainer response: the count aggregates
+ *  rebuild the factors through the shared builder (factorsFromCountsAndIds)
+ *  and the id arrays become the per-sentence citations. */
+function explanationFromRow(row: AnyRow): {
+  siteId: string;
+  generatedAt: number;
+  abstained: boolean;
+  summary: string | null;
+  citations: string[];
+  sentences: { factor: string; points: number; recordIds: string[]; text: string }[];
+  disclaimer: string;
+} {
+  const counts: RiskInputCounts = {
+    findingsTotal: numOf(row.findingsTotal),
+    low: numOf(row.lowFindings),
+    medium: numOf(row.mediumFindings),
+    high: numOf(row.highFindings),
+    critical: numOf(row.criticalFindings),
+    overdueCAs: numOf(row.overdueCAs),
+    fatalityIncidents: numOf(row.fatalityIncidents),
+    seriousIncidents: numOf(row.seriousIncidents),
+    envAlerts: numOf(row.envAlerts),
+  };
+  const { score, factors } = factorsFromCountsAndIds(counts, {
+    allFindingIds: strArr(row.allFindingIds),
+    lowIds: strArr(row.lowIds),
+    mediumIds: strArr(row.mediumIds),
+    highIds: strArr(row.highIds),
+    criticalIds: strArr(row.criticalIds),
+    overdueCaIds: strArr(row.overdueCaIds),
+    fatalityIds: strArr(row.fatalityIds),
+    seriousIncidentIds: strArr(row.seriousIncidentIds),
+    envAlertIds: strArr(row.envAlertIds),
+  });
+  const citations = [...new Set(factors.flatMap((f) => f.recordIds))].sort();
+  // Cite-or-abstain: with no factors there is nothing to explain — abstain
+  // rather than invent a narrative.
+  if (factors.length === 0) {
+    return {
+      siteId: String(row.siteId),
+      generatedAt: Date.now(),
+      abstained: true,
+      summary: null,
+      citations: [],
+      sentences: [],
+      disclaimer: AI_DISCLAIMER,
+    };
+  }
+  return {
+    siteId: String(row.siteId),
+    generatedAt: Date.now(),
+    abstained: false,
+    summary: `The risk indicator of ${score} for ${row.name} (${row.code}) is the sum of ${factors.length} recorded factor${factors.length === 1 ? "" : "s"}; each sentence below names the record it is grounded in.`,
+    citations,
+    sentences: explanationSentences(factors),
+    disclaimer: AI_DISCLAIMER,
+  };
+}
+
+function evidenceKindByMime(mime: string): EvidenceKind {
+  const m = mime.toLowerCase();
+  if (m.startsWith("image/")) return "photo";
+  if (m.startsWith("video/")) return "video";
+  if (m.startsWith("audio/")) return "audio";
+  return "document";
+}
+
+export interface CommandCenterStats {
   scope: string;
   sites: number;
   activeSites: number;
@@ -167,546 +909,475 @@ export type CommandCenterStats = {
   inspectionCoveragePct: number;
   countyCounts: Record<string, number>;
   incidentTypes: Record<string, number>;
-};
+}
+
+/** SEC-4 — field-by-field coercion for the mg_command_center_stats RPC
+ *  payload (jsonb arrives as plain JSON). Every figure becomes a finite
+ *  number and every group-by a number map, so no downstream UI math can
+ *  ever see undefined/NaN. Key names match the SQL jsonb_build_object
+ *  keys exactly; the scope falls back to the caller's profile only if the
+ *  RPC somehow omitted it. */
+function mapCommandCenterStats(
+  raw: unknown,
+  scope: string | null | undefined,
+): CommandCenterStats {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const n = (v: unknown): number => {
+    const x = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(x) ? x : 0;
+  };
+  const m = (v: unknown): Record<string, number> => {
+    const out: Record<string, number> = {};
+    if (v && typeof v === "object") {
+      for (const [k, val] of Object.entries(v as Record<string, unknown>))
+        out[k] = n(val);
+    }
+    return out;
+  };
+  return {
+    scope: typeof r.scope === "string" && r.scope ? r.scope : scope ?? "national",
+    sites: n(r.sites),
+    activeSites: n(r.activeSites),
+    inspectionsTotal: n(r.inspectionsTotal),
+    inspectionsUnderReview: n(r.inspectionsUnderReview),
+    findingsTotal: n(r.findingsTotal),
+    findingsCriticalOpen: n(r.findingsCriticalOpen),
+    correctiveActionsOpen: n(r.correctiveActionsOpen),
+    correctiveActionsOverdue: n(r.correctiveActionsOverdue),
+    incidentsTotal: n(r.incidentsTotal),
+    fatalities: n(r.fatalities),
+    envAlerts: n(r.envAlerts),
+    envByCategory: m(r.envByCategory),
+    communityReports: n(r.communityReports),
+    communityReportsPending: n(r.communityReportsPending),
+    inspectionCoveragePct: n(r.inspectionCoveragePct),
+    countyCounts: m(r.countyCounts),
+    incidentTypes: m(r.incidentTypes),
+  };
+}
 
 // ---------------------------------------------------------------------------
-// AUTH — GoTrue wrappers with stable error tokens the UI matches on.
+// LIVE QUERIES — fetch once, then push-refresh via Postgres realtime
+//
+// PERF CONTRACT (unchanged from the Firebase layer):
+//  - The fetcher runs ONCE on subscribe, then at most once per burst of
+//    realtime events (300ms trailing debounce), never concurrently.
+//  - authBound (default true): the result depends on the signed-in user, so
+//    the shared cache re-derives it after sign-in/out or profile changes.
+//  - RLS scopes every list server-side; the client adds no correctness
+//    filters of its own.
 // ---------------------------------------------------------------------------
 
-/** Map GoTrue auth failures to stable tokens. */
-export function authErrorMessage(err: { message?: string } | null | undefined): string {
+function live<T>(
+  fetcher: () => Promise<T>,
+  watch: string[],
+  opts?: { authBound?: boolean },
+): QueryHandle<T> {
+  const authBound = opts?.authBound !== false;
+  return {
+    authBound,
+    subscribe(cb) {
+      let cancelled = false;
+      let inFlight = false;
+      let dirty = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let retryTimer: ReturnType<typeof setTimeout> | null = null;
+      let attempts = 0;
+      const unsubs: (() => void)[] = [];
+      let watchersReady = false;
+
+      const onWatchEvent = () => {
+        if (cancelled) return;
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          timer = null;
+          void run();
+        }, 300);
+      };
+
+      const setupWatchers = () => {
+        if (watchersReady || cancelled || watch.length === 0) return;
+        watchersReady = true;
+        try {
+          const uid = authUserId();
+          let channel = supabase.channel(
+            `mg:${watch.join("|")}:${uid ?? "anon"}`,
+          );
+          for (const table of watch) {
+            channel = channel.on(
+              "postgres_changes",
+              { event: "*", schema: "public", table },
+              onWatchEvent,
+            );
+          }
+          channel.subscribe();
+          unsubs.push(() => {
+            void supabase.removeChannel(channel);
+          });
+        } catch {
+          // Realtime is best-effort; the initial fetch already ran.
+        }
+      };
+
+      const run = async () => {
+        if (inFlight) {
+          dirty = true;
+          return;
+        }
+        inFlight = true;
+        try {
+          const value = await fetcher();
+          if (!cancelled) {
+            attempts = 0;
+            cb(value);
+          }
+        } catch (err) {
+          console.error("[backend] query failed:", err);
+          if (!cancelled) {
+            cb(undefined); // no value yet — consumers stay in "loading"
+            // SELF-HEAL: without this retry the FIRST failure bricked the
+            // screen forever — the shared cache reads the error's
+            // `undefined` as "still loading" and nothing ever re-ran the
+            // fetcher (the "loads forever" failure mode). Capped backoff:
+            // 1s, 2s, 4s, 8s, 16s, then every 30s.
+            attempts += 1;
+            const delay = Math.min(30_000, 1_000 * 2 ** Math.min(attempts, 5));
+            retryTimer = setTimeout(() => {
+              retryTimer = null;
+              void run();
+            }, delay);
+          }
+        } finally {
+          inFlight = false;
+          if (!cancelled) setupWatchers();
+          if (dirty && !cancelled) {
+            dirty = false;
+            timer = setTimeout(() => {
+              timer = null;
+              void run();
+            }, 100);
+          }
+        }
+      };
+      void run();
+      return () => {
+        cancelled = true;
+        if (timer) clearTimeout(timer);
+        if (retryTimer) clearTimeout(retryTimer);
+        for (const u of unsubs) u();
+      };
+    },
+  };
+}
+
+/** Single-row live query: true push reactivity via a filtered realtime
+ *  subscription. Used for the user profile and public stats. */
+function liveDoc<T>(
+  getTarget: () => { table: string; column: string; value: string } | null,
+  mapRow: (r: AnyRow) => T,
+  opts?: { authBound?: boolean },
+): QueryHandle<T | null> {
+  const authBound = opts?.authBound !== false;
+  return {
+    authBound,
+    subscribe(cb) {
+      let cancelled = false;
+      const target = getTarget();
+      if (!target) {
+        cb(null);
+        return () => {};
+      }
+      const { table, column, value } = target;
+
+      const unsubs: (() => void)[] = [];
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let inFlight = false;
+      let dirty = false;
+      let retryTimer: ReturnType<typeof setTimeout> | null = null;
+      let attempts = 0;
+
+      const onWatchEvent = () => {
+        if (cancelled) return;
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          timer = null;
+          void run();
+        }, 300);
+      };
+
+      const run = async () => {
+        if (inFlight) {
+          dirty = true;
+          return;
+        }
+        inFlight = true;
+        try {
+          const { data, error } = await supabase
+            .from(table)
+            .select("*")
+            .eq(column, value)
+            .maybeSingle();
+          if (error) throw backendError(error);
+          const v = data ? mapRow(data) : null;
+          if (!cancelled) {
+            attempts = 0;
+            cb(v);
+          }
+        } catch (err) {
+          console.error("[backend] doc query failed:", err);
+          if (!cancelled) {
+            // An ERROR is not "no row": emitting null here pushed signed-in
+            // users into the wrong empty state ("no portal role assigned")
+            // on a transient failure. Stay silent — the document keeps
+            // loading — and retry with the same capped backoff.
+            attempts += 1;
+            const delay = Math.min(30_000, 1_000 * 2 ** Math.min(attempts, 5));
+            retryTimer = setTimeout(() => {
+              retryTimer = null;
+              void run();
+            }, delay);
+          }
+        } finally {
+          inFlight = false;
+          if (!cancelled && unsubs.length === 0) {
+            try {
+              let channel = supabase.channel(
+                `mg:${table}:${column}:${value}`,
+              );
+              channel = channel.on(
+                "postgres_changes",
+                {
+                  event: "*",
+                  schema: "public",
+                  table,
+                  filter: `${column}=eq.${value}`,
+                },
+                onWatchEvent,
+              );
+              channel.subscribe();
+              unsubs.push(() => {
+                void supabase.removeChannel(channel);
+              });
+            } catch {
+              /* best-effort */
+            }
+          }
+          if (dirty && !cancelled) {
+            dirty = false;
+            void run();
+          }
+        }
+      };
+      void run();
+      return () => {
+        cancelled = true;
+        if (timer) clearTimeout(timer);
+        if (retryTimer) clearTimeout(retryTimer);
+        for (const u of unsubs) u();
+      };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// AUTH
+// ---------------------------------------------------------------------------
+
+/** Map Supabase auth errors to the stable message tokens Auth.tsx renders. */
+function authErrorMessage(err: { message?: string } | null | undefined): string {
   const m = (err?.message ?? "").toLowerCase();
   if (m.includes("invalid login credentials")) return "INCORRECT_CREDENTIALS";
-  if (m.includes("user already registered") || m.includes("email rate limit exceeded"))
+  if (m.includes("email not confirmed")) return "EMAIL_NOT_CONFIRMED";
+  if (m.includes("already registered") || m.includes("already exists"))
     return "EMAIL_IN_USE";
-  if (m.includes("enabled in the dashboard") || m.includes("not enabled")) return "PROVIDER_DISABLED";
-  if (m.includes("password")) return "WEAK_PASSWORD";
+  if (m.includes("password should be at least") || m.includes("weak_password"))
+    return "WEAK_PASSWORD";
+  if (m.includes("over_request_rate_limit") || m.includes("too many"))
+    return "TOO_MANY_ATTEMPTS";
+  if (m.includes("anonymous sign-ins are disabled") || m.includes("anonymous"))
+    return "ANON_DISABLED";
+  if (m.includes("signups not allowed")) return "SIGNUPS_DISABLED";
   return err?.message ?? "AUTH_FAILED";
 }
 
-export async function signUpEmail(email: string, password: string, name?: string): Promise<void> {
-  const { error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: { data: { name: name ?? null } },
-  });
-  if (error) throw new Error(authErrorMessage(error));
-}
+// ---------------------------------------------------------------------------
+// ACCOUNT RECOVERY + MFA — Gap Closure Directive Gap #4 (docs/04 gap 2).
+// Password reset (request + set) and TOTP factor lifecycle over the GoTrue
+// helpers in src/lib/supabase.ts. Recovery CODES and WebAuthn/phone factors
+// are NOT implemented (documented residual).
+// ---------------------------------------------------------------------------
 
-export async function signInEmail(email: string, password: string): Promise<void> {
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) throw new Error(authErrorMessage(error));
-}
-
-/** MFA-aware sign-in: if GoTrue reports a challenge for an aal2 account the
- *  code is verified here before the caller proceeds (Auth.tsx flow). */
-export type SignInEmailMfaResult =
-  | { mfaRequired: false }
-  | { mfaRequired: true; factorId: string };
-
-export async function signInEmailMfaAware(
-  email: string,
-  password: string,
-  verifyCode?: (factorId: string) => Promise<string>,
-): Promise<SignInEmailMfaResult> {
-  try {
-    await signInEmail(email, password);
-    return { mfaRequired: false };
-  } catch (e) {
-    // GoTrue surfaces the MFA requirement as an aal2/next-error; only an
-    // aal2 account which has no fresh session lands here via a session
-    // probe below. Implementation: after INCORRECT_CREDENTIALS-shaped
-    // failures we probe the account's assurance level via the profile —
-    // a full GoTrue challenge flow needs the session GoTrue refuses to
-    // hand out pre-verification, so the MFA challenge path runs through
-    // supabase.auth.mfa directly (the bridge exposes it identically).
-    void verifyCode;
-    throw e;
-  }
-}
-
-/** Anonymous demo identity (a real GoTrue anonymous user). */
-export async function signInGuest(): Promise<void> {
-  const { error } = await supabase.auth.signInAnonymously();
-  if (error) throw new Error(authErrorMessage(error));
-}
-
-export async function signOut(): Promise<void> {
-  await supabase.auth.signOut();
-}
-
-/** Recovery-email request (the mail itself is GoTrue's infrastructure). */
-export async function resetPasswordEmail(email: string): Promise<void> {
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${window.location.origin}/auth?mode=recovery`,
-  });
-  if (error) throw new Error(authErrorMessage(error));
-}
-
-/** Set a NEW password on a recovery session (or change with a session). */
-export async function updatePassword(password: string): Promise<void> {
-  if (!password || password.length < 6) throw new Error("WEAK_PASSWORD");
-  const { error } = await supabase.auth.updateUser({ password });
-  if (error) throw new Error(authErrorMessage(error));
-}
-
-// Re-export the typed MFA surface (supabase.ts owns the wire vocabulary).
-export { mfaAal };
-export type { MfaAal, MfaEnrollStart, MfaFactor } from "./supabase";
 export {
+  mfaAal,
   mfaEnrollStart,
   mfaEnrollVerify,
   mfaListFactors,
   mfaUnenroll,
 } from "./supabase";
+export { validateTemplateSections } from "./template-schema";
+export type { MfaAal, MfaEnrollStart, MfaFactor } from "./supabase";
 
-// ---------------------------------------------------------------------------
-// AUTHORIZATION CORE — the profile cache and the require* gates. Every
-// function re-derives authorization from the LIVE profile before touching
-// data (the mirror; RLS remains the server boundary).
-// ---------------------------------------------------------------------------
-
-let PROFILE_CACHE = new Map<string, UserProfile | null | undefined>();
-const PROFILE_WAITERS = new Set<() => void>();
-
-function profileCacheEvict() {
-  PROFILE_CACHE = new Map();
+/** Request a password-reset email. Response and timing are identical for
+ *  known and unknown addresses (no account enumeration) — Supabase does the
+ *  same server-side. The redirect lands on the app ROOT (not a hash route):
+ *  supabase-js exchanges the recovery token in the URL fragment/query before
+ *  the router sees it, restoring a session for setting the new password.
+ *  With a recovery session active, change the password on /portal/security
+ *  or via the /auth reset panel. */
+export async function resetPasswordEmail(email: string) {
+  // Bun/SSR-safe: tests run the data layer without a DOM.
+  const base =
+    typeof window !== "undefined"
+      ? `${window.location.origin}${window.location.pathname}`
+      : "http://localhost:5173/";
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: base,
+  });
+  if (error) throw new Error(authErrorMessage(error));
 }
-// Idle the cache whenever the signed-in identity or its profile version turns
-// over (src/lib/supabase.ts bumps/profile events).
-void bumpProfileVersion;
 
-export async function ensureProfileDoc(): Promise<void> {
+/** Set a new password from a recovery session (the email link restores a
+ *  privileged session GoTrue treats as aal1 for password update). */
+export async function updatePassword(newPassword: string) {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw new Error(authErrorMessage(error));
+}
+
+/** Create the profile row for a fresh account (idempotent; the
+ *  on_auth_user_created trigger normally does this first). */
+export async function ensureProfileDoc() {
   const uid = authUserId();
-  if (!uid) throw new Error("UNAUTHENTICATED");
-  const { data } = await supabase
+  if (!uid) return;
+  const { error } = await supabase
     .from("profiles")
-    .select("id, email, name, role, job_title, organization, scope, county, operator_name, organization_id, profile_complete, created_at")
-    .eq("id", uid)
-    .maybeSingle();
-  if (data) return; // the trigger-created row exists
-  // Unregistered auth identity (no trigger row): create a stub the rules
-  // allow (self-insert on own id) — role stays null until provisioning.
-  const { error } = await supabase.from("profiles").insert({ id: uid });
-  if (error) throw backendError(error);
+    .upsert({ id: uid }, { onConflict: "id", ignoreDuplicates: true });
+  if (error) console.warn("[backend] profile ensure skipped:", error.message);
 }
 
-export async function getProfile(): Promise<UserProfile | null> {
-  const uid = authUserId();
-  if (!uid) return null;
-  if (PROFILE_CACHE.has(uid)) return PROFILE_CACHE.get(uid) ?? null;
+export async function signInEmail(email: string, password: string) {
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw new Error(authErrorMessage(error));
   await ensureProfileDoc();
-  const { data, error } = await supabase
-    .from("profiles")
-    .select(
-      "id, email, name, role, job_title, organization, scope, county, operator_name, organization_id, profile_complete, created_at",
-    )
-    .eq("id", uid)
-    .maybeSingle();
-  if (error) {
-    // A profile the caller cannot read (or a hard failure) is null: the
-    // authorization gates below treat null as unauthorized.
-    console.error("[getProfile] profile read failed:", backendError(error));
-    PROFILE_CACHE.set(uid, null);
-    return null;
+}
+
+/** Sign in and return whether the account requires a second step. GoTrue's
+ *  assurance contract: when a VERIFIED factor exists, a fresh password
+ *  session is aal1 while the account requires aal2 — MFA_CHALLENGE_REQUIRED
+ *  tells the UI to run the authenticator-code step. profileVersion is
+ *  intentionally NOT bumped here (ensureProfileDoc runs post-challenge). */
+export async function signInEmailMfaAware(email: string, password: string) {
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw new Error(authErrorMessage(error));
+  const aal = await mfaAal();
+  if (aal.next === "aal2" && aal.current !== "aal2") {
+    return { mfaRequired: true };
   }
-  const p = mapProfile(data);
-  PROFILE_CACHE.set(uid, p);
-  return p;
+  await ensureProfileDoc();
+  return { mfaRequired: false };
 }
 
-export function mapProfile(row: Record<string, unknown> | null): UserProfile | null {
-  if (!row) return null;
-  return {
-    uid: String(row.id),
-    email: (row.email as string) ?? null,
-    name: (row.name as string) ?? null,
-    role: (row.role as Role | null) ?? undefined,
-    jobTitle: (row.job_title as string) ?? undefined,
-    organization: (row.organization as string) ?? undefined,
-    scope: (row.scope as Scope | null) ?? undefined,
-    county: (row.county as string) ?? undefined,
-    operatorName: (row.operator_name as string) ?? undefined,
-    organizationId: (row.organization_id as string) ?? undefined,
-    profileComplete: Boolean(row.profile_complete),
-    createdAt: tsMs(row.created_at) ?? 0,
-  };
-}
-
-async function requireAuthed(): Promise<{ uid: string; profile: UserProfile }> {
-  const uid = authUserId();
-  if (!uid) throw new Error("UNAUTHENTICATED");
-  const profile = await getProfile();
-  if (!profile) throw new Error("UNREGISTERED_USER");
-  return { uid, profile };
-}
-
-async function requireStaff(): Promise<{ uid: string; profile: UserProfile }> {
-  const c = await requireAuthed();
-  if (!isStaffRole(c.profile.role)) throw new Error("FORBIDDEN");
-  return c;
-}
-
-async function requireAdmin(): Promise<{ uid: string; profile: UserProfile }> {
-  const c = await requireAuthed();
-  if (c.profile.role !== ROLES.ADMIN) throw new Error("FORBIDDEN");
-  return c;
-}
-
-async function requireReviewer(): Promise<{ uid: string; profile: UserProfile }> {
-  const c = await requireAuthed();
-  if (c.profile.role !== ROLES.ADMIN && c.profile.role !== ROLES.SUPERVISOR)
-    throw new Error("FORBIDDEN");
-  return c;
-}
-
-/** Re-derive site visibility from the live profile (the client mirror; the
- *  RLS policies are the server authority and mask what this cannot prove). */
-async function canAccessSiteNow(siteId: string): Promise<Site | null> {
-  const { profile } = await requireAuthed();
-  const { data, error } = await supabase
-    .from("sites")
-    .select("*")
-    .eq("id", siteId)
-    .maybeSingle();
-  if (error) throw backendError(error);
-  if (!data) return null; // not found OR not visible under RLS — same mask
-  const site = mapSite(data);
-  if (!canAccessSite(profile, site)) return null;
-  return site;
-}
-
-// ---------------------------------------------------------------------------
-// PAGED ROW PRIMITIVES — every whole-table read pages with an explicit
-// ordered Range until a short page returns (SEC-4: hosted PostgREST caps
-// unranged responses at db-max-rows with a 200 and NO error; an unranged
-// select silently truncates).
-// ---------------------------------------------------------------------------
-
-const PAGE_SIZE = 1000;
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyQuery = any;
-
-async function pagedRows<T>(
-  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-  build: (q: AnyQuery) => AnyQuery,
-): Promise<T[]> {
-  const out: T[] = [];
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const to = from + PAGE_SIZE - 1;
-    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-    const base: AnyQuery = supabase.from("").select();
-    void base; // the real query comes from build()
-    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-    const q: AnyQuery = build({} as AnyQuery);
-    const { data, error } = await q.range(from, to);
-    if (error) throw backendError(error);
-    const rows = (data ?? []) as T[];
-    out.push(...rows);
-    if (rows.length < PAGE_SIZE) break;
-  }
-  return out;
-}
-
-/** allRows — pagedRows over ONE table with a stable sort key (so the Range
- *  window is deterministic). */
-async function allRows<T>(
-  table: string,
-  order: string = "id",
-): Promise<T[]> {
-  return pagedRows<T>((q) =>
-    supabase
-      .from(table)
-      .select("*")
-      .order(order, { ascending: true }),
-  );
-}
-
-/** ms-epoch coercion for a timestamptz (the UI's number contract). */
-function tsMs(v: unknown): number | undefined {
-  if (v === null || v === undefined) return undefined;
-  const t = new Date(String(v)).getTime();
-  return Number.isFinite(t) ? t : undefined;
-}
-
-function optionalNumber(v: unknown): number | undefined {
-  if (v === null || v === undefined) return undefined;
-  return Number(v);
-}
-
-// ---------------------------------------------------------------------------
-// ROW MAPPERS — Postgres snake_case → the camelCase domain types.
-// ---------------------------------------------------------------------------
-
-export interface SiteRow extends Record<string, unknown> {}
-
-export function mapSite(row: Record<string, unknown>): Site {
-  return {
-    _id: String(row.id),
-    code: String(row.code),
-    name: String(row.name),
-    operatorName: (row.operator_name as string) ?? "",
-    organizationId: (row.organization_id as string) ?? undefined,
-    mineralType: (row.mineral_type as string) ?? undefined,
-    county: String(row.county ?? ""),
-    district: (row.district as string) ?? undefined,
-    community: (row.community as string) ?? undefined,
-    status: (row.status as Site["status"]) ?? "pending_verification",
-    latitude: optionalNumber(row.latitude),
-    longitude: optionalNumber(row.longitude),
-    notes: (row.notes as string) ?? undefined,
-    createdBy: String(row.created_by ?? ""),
-    createdAt: tsMs(row.created_at) ?? 0,
-    geoSource: (row.geo_source as string) ?? undefined,
-    geoAccuracyM: optionalNumber(row.geo_accuracy_m),
-    geoVerified: row.geo_verified === undefined ? undefined : Boolean(row.geo_verified),
-  };
-}
-
-export function mapTemplate(row: Record<string, unknown>): InspectionTemplate {
-  return {
-    _id: String(row.id),
-    name: String(row.name),
-    description: (row.description as string) ?? undefined,
-    active: Boolean(row.active),
-    sections: (row.sections as InspectionTemplate["sections"]) ?? [],
-    createdBy: String(row.created_by ?? ""),
-    createdAt: tsMs(row.created_at) ?? 0,
-  };
-}
-
-export function mapInspection(
-  row: Record<string, unknown>,
-  site?: { code?: string | null; name?: string | null; county?: string | null } | null,
-): Inspection {
-  return {
-    _id: String(row.id),
-    siteId: String(row.site_id),
-    templateId: String(row.template_id),
-    inspectorId: String(row.inspector_id),
-    status: (row.status as Inspection["status"]) ?? "draft",
-    answers: (row.answers as Inspection["answers"]) ?? undefined,
-    notes: (row.notes as string) ?? undefined,
-    latitude: optionalNumber(row.latitude),
-    longitude: optionalNumber(row.longitude),
-    gpsAccuracyM: optionalNumber(row.gps_accuracy_m),
-    clientRef: (row.client_ref as string) ?? undefined,
-    submittedAt: tsMs(row.submitted_at),
-    reviewedAt: tsMs(row.reviewed_at),
-    reviewerId: (row.reviewer_id as string) ?? undefined,
-    reviewNote: (row.review_note as string) ?? undefined,
-    createdAt: tsMs(row.created_at) ?? 0,
-  };
-}
-
-export function mapFinding(row: Record<string, unknown>): Finding {
-  return {
-    _id: String(row.id),
-    inspectionId: String(row.inspection_id),
-    siteId: String(row.site_id),
-    title: String(row.title),
-    description: (row.description as string) ?? undefined,
-    severity: (row.severity as Severity) ?? "low",
-    status: (row.status as Finding["status"]) ?? "open",
-    createdById: String(row.created_by_id ?? ""),
-    createdAt: tsMs(row.created_at) ?? 0,
-  };
-}
-
-export function mapCorrectiveAction(row: Record<string, unknown>): CorrectiveAction {
-  return {
-    _id: String(row.id),
-    findingId: String(row.finding_id),
-    siteId: String(row.site_id),
-    description: String(row.description),
-    status: (row.status as CorrectiveAction["status"]) ?? "open",
-    dueAt: tsMs(row.due_at) ?? 0,
-    openedById: String(row.opened_by_id ?? ""),
-    operatorNote: (row.operator_note as string) ?? undefined,
-    verifiedById: (row.verified_by_id as string) ?? undefined,
-    closedAt: tsMs(row.closed_at),
-    createdAt: tsMs(row.created_at) ?? 0,
-    rowVersion: row.row_version === undefined ? undefined : Number(row.row_version),
-  };
-}
-
-export function mapIncident(row: Record<string, unknown>): Incident {
-  return {
-    _id: String(row.id),
-    siteId: String(row.site_id),
-    type: row.type as Incident["type"],
-    severity: (row.severity as Severity) ?? "low",
-    description: String(row.description),
-    occurredAt: tsMs(row.occurred_at) ?? tsMs(row.created_at) ?? 0,
-    fatalities: optionalNumber(row.fatalities),
-    injured: optionalNumber(row.injured),
-    status: (row.status as Incident["status"]) ?? "reported",
-    reportedById: String(row.reported_by_id ?? ""),
-    reportSource: (row.report_source as Incident["reportSource"]) ?? "inspector",
-    createdAt: tsMs(row.created_at) ?? 0,
-    siteCode: (row.site_code as string) ?? undefined,
-    siteName: (row.site_name as string) ?? undefined,
-    county: (row.county as string) ?? undefined,
-  };
-}
-
-export function mapObservation(row: Record<string, unknown>): EnvironmentalObservation {
-  return {
-    _id: String(row.id),
-    siteId: String(row.site_id),
-    category: row.category as EnvironmentalObservation["category"],
-    verification: row.verification as EnvironmentalObservation["verification"],
-    description: String(row.description),
-    observedAt: tsMs(row.observed_at) ?? tsMs(row.created_at) ?? 0,
-    latitude: optionalNumber(row.latitude),
-    longitude: optionalNumber(row.longitude),
-    status: (row.status as EnvironmentalObservation["status"]) ?? "open",
-    reportedById: String(row.reported_by_id ?? ""),
-    createdAt: tsMs(row.created_at) ?? 0,
-    siteCode: (row.site_code as string) ?? undefined,
-    siteName: (row.site_name as string) ?? undefined,
-    county: (row.county as string) ?? undefined,
-  };
-}
-
-export function mapCommunityReport(row: Record<string, unknown>): CommunityReport {
-  return {
-    _id: String(row.id),
-    trackingCode: String(row.tracking_code),
-    category: row.category as CommunityReport["category"],
-    description: String(row.description),
-    county: String(row.county ?? ""),
-    district: (row.district as string) ?? undefined,
-    community: (row.community as string) ?? undefined,
-    latitude: optionalNumber(row.latitude),
-    longitude: optionalNumber(row.longitude),
-    contactPhone: (row.contact_phone as string) ?? undefined,
-    status: (row.status as CommunityReport["status"]) ?? "submitted",
-    triageNote: (row.triage_note as string) ?? undefined,
-    reviewedById: (row.reviewed_by_id as string) ?? undefined,
-    reviewedAt: tsMs(row.reviewed_at),
-    createdAt: tsMs(row.created_at) ?? 0,
-  };
-}
-
-export function mapAuditEntry(row: Record<string, unknown>) {
-  return {
-    _id: String(row.id),
-    actorId: (row.actor_id as string) ?? undefined,
-    actorLabel: String(row.actor_label ?? ""),
-    action: String(row.action),
-    entityType: String(row.entity_type ?? ""),
-    entityId: (row.entity_id as string) ?? undefined,
-    summary: String(row.summary ?? ""),
-    createdAt: tsMs(row.created_at) ?? 0,
-  };
-}
-
-export function mapEvidence(row: Record<string, unknown>): Evidence {
-  return {
-    _id: String(row.id),
-    storagePath: String(row.storage_path),
-    parentType: row.parent_type as Evidence["parentType"],
-    parentId: String(row.parent_id),
-    siteId: (row.site_id === null || row.site_id === undefined) ? undefined : String(row.site_id),
-    kind: (row.kind as Evidence["kind"]) ?? "photo",
-    fileName: String(row.file_name),
-    mimeType: String(row.mime_type),
-    sizeBytes: Number(row.size_bytes ?? 0),
-    caption: (row.caption as string) ?? undefined,
-    capturedAt: tsMs(row.captured_at),
-    uploadedById: String(row.uploaded_by_id ?? ""),
-    createdAt: tsMs(row.created_at) ?? 0,
-    sha256: (row.sha256 as string) ?? undefined,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// THE API SURFACE
-// ---------------------------------------------------------------------------
-
-type SiteStatus = Site["status"];
-
-function assertValidStatus(status: string): asserts status is SiteStatus {
-  if (!["active", "suspended", "closed", "pending_verification"].includes(status))
-    throw new Error("INVALID_STATUS");
-}
-
-function assertValidLatitude(v: number | undefined): void {
-  if (v === undefined) return;
-  if (Number.isNaN(v) || v < -90 || v > 90) throw new Error("INVALID_LATITUDE");
-}
-
-function assertValidLongitude(v: number | undefined): void {
-  if (v === undefined) return;
-  if (Number.isNaN(v) || v < -180 || v > 180) throw new Error("INVALID_LONGITUDE");
-}
-
-// ----------------------------------------------------------- sites
-
-export const sites = {
-  list: () =>
-    live<Site[]>(async () => {
-      const { profile } = await requireAuthed();
-      // RLS serves the visible set; the mirror scopes for consistency and
-      // never widens it.
-      const rows = await allRows<Record<string, unknown>>("sites", "id");
-      let list = rows.map(mapSite);
-      if (profile.role !== ROLES.ADMIN && profile.scope !== "national") {
-        list = list.filter((s) =>
-          canAccessSite(profile, s),
-        );
-      }
-      // openActions: non-closed/verified CAs per site — a secondary paged
-      // read (the mirrors are small; the count pages too).
-      const cas = await allRows<Record<string, unknown>>("corrective_actions", "id");
-      const openBySite = new Map<string, number>();
-      for (const r of cas) {
-        if (r.status !== "closed" && r.status !== "verified") {
-          const sid = String(r.site_id);
-          openBySite.set(sid, (openBySite.get(sid) ?? 0) + 1);
-        }
-      }
-      return list.map((s) => ({ ...s, openActions: openBySite.get(s._id) ?? 0 }));
-    }, { authBound: true }),
-
-  get: (args: { siteId: string }) =>
-    live<Site | null>(async () => {
-      await requireAuthed();
-      if (!args?.siteId) return null;
-      const site = await canAccessSiteNow(args.siteId);
-      return site;
-    }, { authBound: true }),
-
-  create: async (args: {
-    name: string;
-    operatorName: string;
-    county: string;
-    district?: string;
-    community?: string;
-    mineralType?: string;
-    latitude?: number;
-    longitude?: number;
-    notes?: string;
-  }): Promise<string> => {
-    const { uid } = await requireAdmin();
-    if (!args.name || !args.name.trim()) throw new Error("INVALID_NAME");
-    if (!args.operatorName || !args.operatorName.trim()) throw new Error("INVALID_OPERATOR_NAME");
-    if (!args.county || !args.county.trim()) throw new Error("INVALID_COUNTY");
-    assertValidLatitude(args.latitude);
-    assertValidLongitude(args.longitude);
-    // The code generator needs this county's existing codes.
-    const rows = await pagedRows<Record<string, unknown>>((q) =>
-      supabase.from("sites").select("code").eq("county", args.county).order("code"),
+export async function signUpEmail(email: string, password: string, name?: string) {
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { name: name ?? null } },
+  });
+  if (error) throw new Error(authErrorMessage(error));
+  if (!data.session) {
+    throw new Error(
+      "CONFIRM_EMAIL: account created — check your inbox to confirm the address before signing in.",
     );
-    const code = nextSiteCodeFrom(args.county, rows.map((r) => String(r.code ?? "")));
-    const { data, error } = await supabase
-      .from("sites")
-      .insert({
-        code,
-        name: args.name.trim(),
-        operator_name: args.operatorName.trim(),
+  }
+  await ensureProfileDoc();
+}
+
+export async function signInGuest() {
+  const { error } = await supabase.auth.signInAnonymously();
+  if (error)
+    throw new Error(
+      `ANON_DISABLED: ${authErrorMessage(error)} — guest sign-in requires anonymous sign-ins to be enabled for this Supabase project.`,
+    );
+  await ensureProfileDoc();
+}
+
+export async function signOut() {
+  await supabase.auth.signOut();
+  profileCache = null;
+}
+
+// ---------------------------------------------------------------------------
+// API SURFACE — identical shape to the previous layer
+// ---------------------------------------------------------------------------
+
+export const api = {
+  // ----------------------------------------------------------------- users
+  users: {
+    currentUser: () =>
+      liveDoc<UserProfile>(
+        () => {
+          const uid = authUserId();
+          return uid ? { table: "profiles", column: "id", value: uid } : null;
+        },
+        mapProfile,
+      ),
+  },
+
+  // ----------------------------------------------------------------- sites
+  sites: {
+    list: () =>
+      live<(Site & { openActions: number })[]>(async () => {
+        const user = await requireAuthed(true);
+        // Unassigned accounts have no readable scope — empty, not an error.
+        if (!user.role) return [];
+        const [sitesRaw, casRaw] = await Promise.all([
+          allRows<AnyRow>("sites"),
+          allRows<AnyRow>("corrective_actions"),
+        ]);
+        const openBySite = new Map<string, number>();
+        for (const ca of casRaw) {
+          if (ca.status !== "closed" && ca.status !== "verified") {
+            openBySite.set(
+              ca.site_id as string,
+              (openBySite.get(ca.site_id as string) ?? 0) + 1,
+            );
+          }
+        }
+        return sitesRaw
+          .map(mapSite)
+          .filter((s) => canAccessSite(user, s))
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((s) => ({ ...s, openActions: openBySite.get(s._id) ?? 0 }));
+      }, ["sites", "corrective_actions"]),
+
+    get: (args: { siteId: string }) =>
+      live<Site | null>(async () => {
+        const user = await requireAuthed();
+        const site = await getSite(args.siteId);
+        // Null (not a throw) so the detail page renders its
+        // "not found or access denied" state instead of spinning forever.
+        if (!site) return null;
+        if (!canAccessSite(user, site)) return null;
+        return site;
+      }, ["sites"]),
+
+    create: async (args: {
+      name: string;
+      operatorName: string;
+      county: string;
+      district?: string;
+      community?: string;
+      mineralType?: string;
+      latitude?: number;
+      longitude?: number;
+      notes?: string;
+    }) => {
+      const user = await requireAdminUser();
+      const existingCodes = await allSiteCodes();
+      const code = nextSiteCodeFrom(args.county, existingCodes);
+      const id = await insertReturningId("sites", {
+        name: args.name,
+        operator_name: args.operatorName,
+        county: args.county,
         district: args.district ?? null,
         community: args.community ?? null,
         mineral_type: args.mineralType ?? null,
@@ -714,2127 +1385,2381 @@ export const sites = {
         longitude: args.longitude ?? null,
         notes: args.notes ?? null,
         status: "pending_verification",
-        created_by: uid,
-        ...siteScopeStamp({ county: args.county, operatorName: args.operatorName }),
-      })
-      .select("id")
-      .single();
-    if (error) throw backendError(error);
-    return String((data as { id: string }).id);
-  },
+        code,
+        created_by: user.uid,
+      });
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "site.create",
+        entityType: "sites",
+        entityId: id,
+        summary: `Registered site ${code} (${args.name}) in ${args.county}`,
+      });
+      await refreshPublicStats();
+      return id;
+    },
 
-  update: async (args: {
-    siteId: string;
-    name?: string;
-    operatorName?: string;
-    county?: string;
-    district?: string;
-    community?: string;
-    mineralType?: string;
-    latitude?: number;
-    longitude?: number;
-    notes?: string;
-  }): Promise<Site> => {
-    await requireAdmin();
-    assertValidLatitude(args.latitude);
-    assertValidLongitude(args.longitude);
-    if (args.name !== undefined && !args.name.trim()) throw new Error("INVALID_NAME");
-    // Load the current row inside the ADMIN session (RLS masks unknown ids
-    // to empty — the NOT_FOUND mask).
-    const current = await canAccessSiteNow(args.siteId);
-    if (!current) throw new Error("NOT_FOUND");
-    const patch: Record<string, unknown> = {};
-    if (args.name !== undefined && args.name !== current.name) patch.name = args.name;
-    if (args.county !== undefined && args.county !== current.county) patch.county = args.county;
-    if (args.district !== undefined) patch.district = args.district;
-    if (args.community !== undefined) patch.community = args.community;
-    if (args.mineralType !== undefined) patch.mineral_type = args.mineralType;
-    if (args.latitude !== undefined) patch.latitude = args.latitude;
-    if (args.longitude !== undefined) patch.longitude = args.longitude;
-    if (args.notes !== undefined) patch.notes = args.notes;
-    if (args.operatorName !== undefined && args.operatorName !== current.operatorName) {
-      // Re-point: organizations.name resolution happens in the sites_org
-      // trigger (migration 0010); clearing organization_id re-resolves it.
-      patch.operator_name = args.operatorName;
-      patch.organization_id = null;
-    }
-    if (Object.keys(patch).length === 0) return current; // no-op writes nothing
-    const { data, error } = await supabase
-      .from("sites")
-      .update(patch)
-      .eq("id", args.siteId)
-      .select("*")
-      .single();
-    if (error) throw backendError(error);
-    return mapSite(data);
-  },
-
-  setStatus: async (args: { siteId: string; status: string }): Promise<void> => {
-    await requireAdmin();
-    assertValidStatus(args.status);
-    const current = await canAccessSiteNow(args.siteId);
-    if (!current) throw new Error("NOT_FOUND");
-    if (current.status === args.status) return; // idempotent set
-    const { error } = await supabase
-      .from("sites")
-      .update({ status: args.status })
-      .eq("id", args.siteId);
-    if (error) throw backendError(error);
-  },
-
-  riskScores: () =>
-    live<Record<string, { siteId: string; score: number; factors: RiskFactor[] }>>(async () => {
-      await requireStaff();
-      // SEC-4 v2: the AGGREGATES come from the SECURITY INVOKER RPC
-      // (migration 0014); the client rebuilds the factors from RISK_WEIGHTS.
-      // Fallback (RPC unavailable): page every input table and reduce.
-      let payload: Record<string, unknown>[] | null = null;
-      try {
-        const { data, error } = await supabase.rpc("mg_risk_scores");
-        if (!error && data) payload = data as Record<string, unknown>[];
-        else console.warn("[sites.riskScores] mg_risk_scores fell back:", error?.message ?? data);
-      } catch (e) {
-        console.warn("[sites.riskScores] mg_risk_scores fell back:", backendError(e));
+    setStatus: async (args: { siteId: string; status: string }) => {
+      const user = await requireAdminUser();
+      const site = await getSite(args.siteId);
+      if (!site) throw new Error("NOT_FOUND");
+      if (
+        !["active", "suspended", "closed", "pending_verification"].includes(
+          args.status,
+        )
+      ) {
+        throw new Error("INVALID_STATUS");
       }
-      const now = Date.now();
-      const scores: Record<string, { siteId: string; score: number; factors: RiskFactor[] }> = {};
-      if (payload) {
-        for (const row of payload) {
-          const counts: RiskInputCounts = {
-            findingsTotal: Number(row.findingsTotal ?? 0),
-            low: Number(row.lowFindings ?? 0),
-            medium: Number(row.mediumFindings ?? 0),
-            high: Number(row.highFindings ?? 0),
-            critical: Number(row.criticalFindings ?? 0),
-            overdueCAs: Number(row.overdueCAs ?? 0),
-            fatalityIncidents: Number(row.fatalityIncidents ?? 0),
-            seriousIncidents: Number(row.seriousIncidents ?? 0),
-            envAlerts: Number(row.envAlerts ?? 0),
-          };
-          const built = factorsFromCounts(counts);
-          scores[String(row.siteId)] = {
-            siteId: String(row.siteId),
-            score: built.score,
-            factors: built.factors,
-          };
+      const { error } = await supabase
+        .from("sites")
+        .update({ status: args.status })
+        .eq("id", args.siteId);
+      if (error) throw backendError(error);
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "site.status",
+        entityType: "sites",
+        entityId: args.siteId,
+        summary: `Site ${site.code} status set to ${args.status}`,
+      });
+    },
+
+    /** Admin site edit (SITE-1). The client only decides WHICH columns
+     *  change — the boundary lives server-side:
+     *    * RLS "sites update" gates the write on the permission matrix
+     *      (mg_has_permission('sites.update') — admin only), and
+     *      mg_guard_site_write re-checks it before the row moves;
+     *    * the server's mg_audit_row trigger writes the authoritative
+     *      before/after diff in the SAME transaction (SEC-1 — the client
+     *      cannot write audit_log at all), and sites_touch bumps
+     *      row_version/updated_by;
+     *    * changing operatorName clears organization_id first so the
+     *      sites_org trigger re-resolves (or creates) the tenant by name —
+     *      the same contract sites.create uses. A write that changes
+     *      nothing is a no-op: no row_version bump, no audit row. */
+    update: async (args: {
+      siteId: string;
+      name?: string;
+      operatorName?: string;
+      county?: string;
+      district?: string;
+      community?: string;
+      mineralType?: string;
+      latitude?: number | null;
+      longitude?: number | null;
+      notes?: string | null;
+    }) => {
+      const user = await requireAdminUser();
+      const site = await getSite(args.siteId);
+      if (!site) throw new Error("NOT_FOUND");
+
+      const patch: AnyRow = {};
+      const changed: string[] = [];
+      /** Queue a column only when the value actually differs from the row
+       *  (undefined fields are never sent; null-ish strings normalize to
+       *  null so "clear district" works). */
+      const put = (column: string, value: unknown, current: unknown) => {
+        if (value === (current ?? null)) return;
+        patch[column] = value;
+        changed.push(column);
+      };
+
+      if (args.name !== undefined) {
+        const v = args.name.trim();
+        if (!v) throw new Error("INVALID_NAME");
+        put("name", v, site.name);
+      }
+      if (args.county !== undefined) {
+        const v = args.county.trim();
+        if (!v) throw new Error("INVALID_COUNTY");
+        put("county", v, site.county);
+      }
+      if (args.district !== undefined)
+        put("district", args.district.trim() || null, site.district);
+      if (args.community !== undefined)
+        put("community", args.community.trim() || null, site.community);
+      if (args.mineralType !== undefined)
+        put("mineral_type", args.mineralType.trim() || null, site.mineralType);
+      if (args.latitude !== undefined) {
+        if (
+          args.latitude !== null &&
+          (args.latitude < -90 || args.latitude > 90)
+        )
+          throw new Error("INVALID_LATITUDE");
+        put("latitude", args.latitude, site.latitude);
+      }
+      if (args.longitude !== undefined) {
+        if (
+          args.longitude !== null &&
+          (args.longitude < -180 || args.longitude > 180)
+        )
+          throw new Error("INVALID_LONGITUDE");
+        put("longitude", args.longitude, site.longitude);
+      }
+      if (args.notes !== undefined) put("notes", args.notes, site.notes);
+      if (args.operatorName !== undefined) {
+        const v = args.operatorName.trim();
+        if (!v) throw new Error("INVALID_OPERATOR");
+        if (v !== site.operatorName) {
+          // Re-point the tenant: clear the binding so mg_sync_site_org
+          // resolves (or mints) the organization by name on THIS write.
+          // (A bare operator_name change on a bound row would be silently
+          // re-derived from the old organization — see the sites_org trigger.)
+          patch.organization_id = null;
+          patch.operator_name = v;
+          changed.push("operator_name");
         }
-        return scores;
       }
-      // ---- client-side fallback over paged inputs (documented path) ----
-      const [findings, cas, incidents, observations, sitesRows] = await Promise.all([
-        allRows<Record<string, unknown>>("findings", "id"),
-        allRows<Record<string, unknown>>("corrective_actions", "id"),
-        allRows<Record<string, unknown>>("incidents", "id"),
-        allRows<Record<string, unknown>>("environmental_observations", "id"),
-        allRows<Record<string, unknown>>("sites", "id"),
-      ]);
-      const findingsMapped = findings.map(mapFinding);
-      const casMapped = cas.map(mapCorrectiveAction);
-      const incidentsMapped = incidents.map(mapIncident);
-      const observationsMapped = observations.map(mapObservation);
-      for (const s of sitesRows) {
-        const site = mapSite(s);
-        const built = computeRiskFactors(
+
+      if (changed.length === 0) return site; // idempotent no-op
+
+      const { error } = await supabase
+        .from("sites")
+        .update(patch)
+        .eq("id", args.siteId);
+      if (error) throw backendError(error);
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "site.edit",
+        entityType: "sites",
+        entityId: args.siteId,
+        summary: `Site ${site.code} updated: ${changed.join(", ")}`,
+      });
+      return (await getSite(args.siteId)) ?? site;
+    },
+
+    riskScores: () =>
+      live<Record<string, { score: number; factors: { label: string; points: number }[] }>>(
+        async () => {
+          const user = await requireAuthed(true);
+          if (!user.role) return {};
+          // SEC-4 v2 — AGGREGATE IN THE DATABASE: mg_risk_scores (SECURITY
+          // INVOKER, migration 0014) reduces the five input tables to ONE
+          // count-aggregate row per visible site; the client rebuilds the
+          // exact factor breakdown from RISK_WEIGHTS through the SAME factor
+          // builder the fallback uses. No O(n) rows on the wire at any table
+          // size, and the scope is the caller's RLS visibility — the same
+          // policies the fallback's paged reads go through.
+          const { data, error } = await supabase.rpc("mg_risk_scores");
+          if (!error && Array.isArray(data)) {
+            const byId: Record<
+              string,
+              { score: number; factors: RiskFactor[] }
+            > = {};
+            for (const raw of data as AnyRow[]) {
+              const counts: RiskInputCounts = {
+                findingsTotal: numOf(raw.findingsTotal),
+                low: numOf(raw.lowFindings),
+                medium: numOf(raw.mediumFindings),
+                high: numOf(raw.highFindings),
+                critical: numOf(raw.criticalFindings),
+                overdueCAs: numOf(raw.overdueCAs),
+                fatalityIncidents: numOf(raw.fatalityIncidents),
+                seriousIncidents: numOf(raw.seriousIncidents),
+                envAlerts: numOf(raw.envAlerts),
+              };
+              byId[String(raw.siteId)] = factorsFromCounts(counts);
+            }
+            return byId;
+          }
+          // Fallback (lineage without migration 0014): the original
+          // full-input computation — exact at any size because every input
+          // read pages; only the wire cost differs. Loud about why.
+          console.warn(
+            "[backend] mg_risk_scores unavailable — client-side aggregation fallback:",
+            error ? error.message ?? String(error) : "unexpected payload",
+          );
+          const now = Date.now();
+          const [sitesRaw, findingsRaw, casRaw, incRaw, envRaw] =
+            await Promise.all([
+              allRows<AnyRow>("sites"),
+              allRows<AnyRow>("findings"),
+              allRows<AnyRow>("corrective_actions"),
+              allRows<AnyRow>("incidents"),
+              allRows<AnyRow>("environmental_observations"),
+            ]);
+          const sites = sitesRaw.map(mapSite).filter((s) => canAccessSite(user, s));
+          const byId: Record<
+            string,
+            { score: number; factors: RiskFactor[] }
+          > = {};
+          for (const site of sites) {
+            const { score, factors } = computeRiskFactors(site, {
+              findings: findingsRaw.map(mapFinding),
+              correctiveActions: casRaw.map(mapCA),
+              incidents: incRaw.map(mapIncident),
+              observations: envRaw.map(mapObservation),
+            }, now);
+            byId[site._id] = { score, factors };
+          }
+          return byId;
+        },
+        ["sites", "findings", "corrective_actions", "incidents", "environmental_observations"],
+      ),
+  },
+
+  // ---------------------------------------------------------------- ai
+  // §18 AI assistance — FIRST capability only: risk-score explanation.
+  // The fixed, user-visible assistance label (doc 08: "output is labeled as
+  // assistance").
+  // Governed by docs/08_AI_GOVERNANCE.MD. Implementation of the four
+  // constraints, as stated:
+  //
+  // 1. SERVER-SIDE SCOPING — the inputs to the explanation are assembled
+  //    by this data layer from the same scoped queries as riskScores; the
+  //    caller's identity is re-derived server-side (requireAuthed), and the
+  //    site access check is the authorization core's canAccessSite. There
+  //    is no prompt-time privilege and no client-supplied content.
+  // 2. CITE-OR-ABSTAIN — every explanation sentence is grounded in the
+  //    factor's record IDs (computeRiskFactors attaches them). With no
+  //    contributing factors the explainer abstains: the output states the
+  //    site has no recorded risk inputs rather than inventing narrative.
+  //    Nothing is ever synthesized beyond the weight arithmetic.
+  // 3. HUMAN CONFIRMATION — the explanation is a read-only walkthrough.
+  //    There is NO write path: no mutation, no draft, no state change —
+  //    the authoritative record cannot be touched by this surface, so no
+  //    confirmation flow is even reachable.
+  // 4. PROVIDER KEYS SERVER-SIDE ONLY — satisfied structurally: this
+  //    capability needs no provider model at all. It is a deterministic
+  //    walkthrough of the existing weighted computation, so there is no
+  //    key, no SDK, and no network call anywhere in the path (asserted by
+  //    the test suite's source contract).
+  //
+  // AI output is LABELLED in the UI (never merged into any record), and
+  // the hard prohibitions hold: no fabrication (cite-or-abstain), no
+  // guilt/violation language (the model counts records, it does not judge),
+  // no autonomous decisions (nothing to decide), no authorization bypass
+  // (same core), no out-of-scope leakage (same core).
+  ai: {
+    explainRiskScore: (args: { siteId: string }) =>
+      live<{
+        siteId: string;
+        generatedAt: number;
+        abstained: boolean;
+        summary: string | null;
+        citations: string[];
+        sentences: { factor: string; points: number; recordIds: string[]; text: string }[];
+        disclaimer: string;
+      } | null>(async () => {
+        const user = await requireAuthed();
+        if (!user.role) return null; // no AI narrative for role-less accounts
+        // SEC-4 v2 — the explanation's inputs are assembled IN THE DATABASE:
+        // mg_risk_explanation (SECURITY INVOKER, migration 0014) returns the
+        // one site's count aggregates PLUS the record-id arrays the
+        // cite-or-abstain contract anchors to. Scope is never re-derived
+        // client-side: a site the caller cannot see yields no row — the same
+        // null-mask as before ("not found OR out of scope → same null").
+        const { data, error } = await supabase.rpc("mg_risk_explanation", {
+          p_site_id: args.siteId,
+        });
+        if (!error && data && typeof data === "object") {
+          return explanationFromRow(data as AnyRow);
+        }
+        // Fallback (lineage without migration 0014): the original path —
+        // same scoped reads as the old riskScores; re-derive server-side.
+        console.warn(
+          "[backend] mg_risk_explanation unavailable — client-side fallback:",
+          error ? error.message ?? String(error) : "unexpected payload",
+        );
+        const site = await getSite(args.siteId);
+        if (!site) return null; // null-masked: not found OR out of scope
+        if (!canAccessSite(user, site)) return null;
+        const [findingsRaw, casRaw, incRaw, envRaw] = await Promise.all([
+          allRows<AnyRow>("findings"),
+          allRows<AnyRow>("corrective_actions"),
+          allRows<AnyRow>("incidents"),
+          allRows<AnyRow>("environmental_observations"),
+        ]);
+        const { score, factors } = computeRiskFactors(
           site,
           {
-            findings: findingsMapped,
-            correctiveActions: casMapped,
-            incidents: incidentsMapped,
-            observations: observationsMapped,
+            findings: findingsRaw.map(mapFinding),
+            correctiveActions: casRaw.map(mapCA),
+            incidents: incRaw.map(mapIncident),
+            observations: envRaw.map(mapObservation),
           },
-          now,
+          Date.now(),
         );
-        scores[site._id] = { siteId: site._id, score: built.score, factors: built.factors };
+
+        const citations = [...new Set(factors.flatMap((f) => f.recordIds))].sort();
+        // Cite-or-abstain: with no factors there is nothing to explain —
+        // abstain rather than invent a narrative.
+        if (factors.length === 0) {
+          return {
+            siteId: args.siteId,
+            generatedAt: Date.now(),
+            abstained: true,
+            summary: null,
+            citations: [],
+            sentences: [],
+            disclaimer: AI_DISCLAIMER,
+          };
+        }
+        return {
+          siteId: args.siteId,
+          generatedAt: Date.now(),
+          abstained: false,
+          summary: `The risk indicator of ${score} for ${site.name} (${site.code}) is the sum of ${factors.length} recorded factor${factors.length === 1 ? "" : "s"}; each sentence below names the record it is grounded in.`,
+          citations,
+          sentences: explanationSentences(factors),
+          disclaimer: AI_DISCLAIMER,
+        };
+      }, ["sites", "findings", "corrective_actions", "incidents", "environmental_observations"]),
+  },
+
+  // ----------------------------------------------------------- inspections
+  inspections: {
+    listTemplates: () =>
+      live<InspectionTemplate[]>(async () => {
+        await requireAuthed();
+        // SEC-4: paged read — no unranged select anywhere (the active filter
+        // narrows the set; the ordered Range keeps correctness independent of
+        // the server's row cap at any table size).
+        const rows = await pagedRows<AnyRow>((from, to) =>
+          supabase
+            .from("inspection_templates")
+            .select("*")
+            .eq("active", true)
+            .order("id", { ascending: true })
+            .range(from, to),
+        );
+        // 0009: archived templates (soft-deleted) leave every surface.
+        return rows.filter((r) => !r.archived_at).map(mapTemplate);
+      }, ["inspection_templates"]),
+
+    /** ALL templates regardless of active flag — the template editor's list
+     *  (§11: inspection design configurable without a code change). */
+    listTemplatesAll: () =>
+      live<InspectionTemplate[]>(async () => {
+        const user = await requireStaffUser();
+        void user; // inspectors/supervisors may READ templates too — admin surface only for writes
+        // SEC-4: paged read ordered by the primary key (stable windows), then
+        // displayed newest-first — the same order the SQL ORDER BY produced.
+        const rows = await allRows<AnyRow>("inspection_templates");
+        // 0009: archived templates are gone from the editor list too —
+        // archive is this app's delete (row stays for history/audit).
+        return rows
+          .filter((r) => !r.archived_at)
+          .map(mapTemplate)
+          .sort((a, b) => b.createdAt - a.createdAt);
+      }, ["inspection_templates"]),
+
+    /** Create or update a template. The sections JSON is validated here —
+     *  the client editor enforces shape, but the data layer is the boundary
+     *  that must never persist a malformed template into the field flow
+     *  (draft answers key on `si:qi`, so shape IS a contract). */
+    saveTemplate: async (args: {
+      templateId?: string;
+      name: string;
+      description?: string;
+      active: boolean;
+      sections: InspectionTemplate["sections"];
+    }) => {
+      const user = await requireAdminUser();
+      const name = args.name.trim();
+      if (!name) throw new Error("TEMPLATE_NAME_REQUIRED");
+      if (name.length > 120) throw new Error("TEMPLATE_NAME_TOO_LONG");
+      const validation = validateTemplateSections(args.sections);
+      if (validation) throw new Error(validation);
+
+      const row: Record<string, unknown> = {
+        name,
+        description: args.description?.trim() || null,
+        active: args.active === true,
+        sections: args.sections,
+      };
+      if (args.templateId) {
+        const { error } = await supabase
+          .from("inspection_templates")
+          .update(row)
+          .eq("id", args.templateId);
+        if (error) throw backendError(error);
+        await logAudit({
+          actorId: user.uid,
+          actorLabel: await actorLabel(user),
+          action: "template.update",
+          entityType: "inspection_templates",
+          entityId: args.templateId,
+          summary: `Template “${name}” updated (${args.sections.length} section(s))`,
+        });
+        return args.templateId;
       }
-      return scores;
-    }, { authBound: true }),
-};
+      const id = await insertReturningId("inspection_templates", {
+        ...row,
+        created_by: user.uid,
+      });
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "template.create",
+        entityType: "inspection_templates",
+        entityId: id,
+        summary: `Template “${name}” created (${args.sections.length} section(s))`,
+      });
+      return id;
+    },
 
-// ------------------------------------------------------ inspections
-
-export const inspections = {
-  listTemplates: () =>
-    live<InspectionTemplate[]>(async () => {
-      await requireAuthed();
-      const rows = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("inspection_templates").select("*").eq("active", true).order("name"),
-      );
-      return rows.map(mapTemplate);
-    }, { authBound: true }),
-
-  listTemplatesAll: (args?: { templateId?: string }) =>
-    live<InspectionTemplate[]>(async () => {
-      await requireAdmin();
-      const rows = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("inspection_templates").select("*").order("name"),
-      );
-      const mapped = rows.map(mapTemplate);
-      if (args?.templateId) return mapped.filter((t) => t._id === args.templateId);
-      return mapped;
-    }, { authBound: true }),
-
-  saveTemplate: async (args: {
-    templateId?: string;
-    name: string;
-    description?: string;
-    active: boolean;
-    sections: unknown;
-  }): Promise<string> => {
-    const { uid } = await requireAdmin();
-    if (!args.name || !args.name.trim()) throw new Error("INVALID_NAME");
-    const sections = validateTemplateSections(args.sections);
-    if (args.templateId) {
-      const existing = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("inspection_templates").select("id, name, active, sections, description, created_by, created_at").eq("id", args.templateId),
-      );
-      if (existing.length === 0) throw new Error("NOT_FOUND");
+    /** Set the active flag (the publish/unpublish switch). */
+    setTemplateActive: async (args: { templateId: string; active: boolean }) => {
+      const user = await requireAdminUser();
       const { error } = await supabase
         .from("inspection_templates")
-        .update({
-          name: args.name.trim(),
-          description: args.description ?? null,
-          active: args.active,
-          sections: sections as unknown,
-        })
+        .update({ active: args.active })
         .eq("id", args.templateId);
       if (error) throw backendError(error);
-      return args.templateId;
-    }
-    const { data, error } = await supabase
-      .from("inspection_templates")
-      .insert({
-        name: args.name.trim(),
-        description: args.description ?? null,
-        active: args.active,
-        sections: sections as unknown,
-        created_by: uid,
-      })
-      .select("id")
-      .single();
-    if (error) throw backendError(error);
-    return String((data as { id: string }).id);
-  },
-
-  setTemplateActive: async (args: { templateId: string; active: boolean }): Promise<void> => {
-    await requireAdmin();
-    const { error } = await supabase
-      .from("inspection_templates")
-      .update({ active: args.active })
-      .eq("id", args.templateId);
-    if (error) throw backendError(error);
-  },
-
-  archiveTemplate: async (args: { templateId: string }): Promise<void> => {
-    await requireAdmin();
-    // Refuse while inspections still reference the template.
-    const use = await pagedRows<Record<string, unknown>>((q) =>
-      supabase.from("inspections").select("id").eq("template_id", args.templateId).limit(1),
-    );
-    if (use.length > 0) throw new Error("TEMPLATE_IN_USE");
-    const { error } = await supabase
-      .from("inspection_templates")
-      .delete()
-      .eq("id", args.templateId);
-    if (error) throw backendError(error);
-  },
-
-  list: () =>
-    live<
-      (Inspection & { siteCode?: string; siteName?: string; county?: string })[]
-    >(async () => {
-      const profile = (await getProfile()) ?? undefined;
-      // RLS enforces the inspector-owns-row rule AND site scope; unassigned
-      // callers get a well-defined empty list instead of a denied read.
-      if (!profile) return [];
-      let rows = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("inspections").select("*").order("created_at", { ascending: false }),
-      );
-      let siteBy: Map<string, Record<string, unknown>> | null = null;
-      if (profile.role !== ROLES.ADMIN) {
-        // The mirror keeps exactly what RLS could return for this profile
-        // shape (membership-level filters only).
-        const siteRows = await pagedRows<Record<string, unknown>>((q) =>
-          supabase.from("sites").select("*"),
-        );
-        const visible = new Set(siteRows.filter((s) => canAccessSite(profile, mapSite(s))).map((s) => String(s.id)));
-        siteBy = new Map(siteRows.map((s) => [String(s.id), s]));
-        rows = rows.filter((i) => visible.has(String(i.site_id)));
-      }
-      return rows.map((r) => {
-        const s = siteBy?.get(String(r.site_id));
-        return {
-          ...mapInspection(r),
-          siteCode: (s?.code as string) ?? undefined,
-          siteName: (s?.name as string) ?? undefined,
-          county: (s?.county as string) ?? undefined,
-        };
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "template.active",
+        entityType: "inspection_templates",
+        entityId: args.templateId,
+        summary: `Template ${args.active ? "published" : "unpublished"}`,
       });
-    }, { authBound: true }),
+    },
 
-  get: (args: { inspectionId: string }) =>
-    live<Inspection | null>(async () => {
-      const profile = (await getProfile()) ?? null;
-      if (!profile || !args?.inspectionId) return null;
-      const { data, error } = await supabase
+    /** Archive a template — the soft-delete lifecycle (SEC-2, migration
+     *  0009): client DELETE is revoked outright and the guard trigger
+     *  refuses hard DELETE for everyone, so archiving (archived_at stamp,
+     *  server-audited) is how templates are retired. Refused while
+     *  inspections reference the template so history keeps its shape. */
+    archiveTemplate: async (args: { templateId: string }) => {
+      const user = await requireAdminUser();
+      const used = await supabase
+        .from("inspections")
+        .select("id")
+        .eq("template_id", args.templateId)
+        .limit(1);
+      if (used.error) throw backendError(used.error);
+      if ((used.data ?? []).length > 0) throw new Error("TEMPLATE_IN_USE");
+      // archived_at is the only client-supplied piece (wall clock); the
+      // attribution (updated_by) and the audit row are stamped server-side.
+      const { error } = await supabase
+        .from("inspection_templates")
+        .update({ archived_at: new Date().toISOString() })
+        .eq("id", args.templateId);
+      if (error) throw backendError(error);
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "template.archive",
+        entityType: "inspection_templates",
+        entityId: args.templateId,
+        summary: "Template archived",
+      });
+    },
+
+    list: () =>
+      live<InspectionListRow[]>(async () => {
+        const user = await requireAuthed(true);
+        if (!user.role) return [];
+        return fetchInspections(user);
+      }, ["inspections", "sites"]),
+
+    /** SEC-4 v2 — the inspections list page's keyset page (migration 0014's
+     *  SECURITY INVOKER mg_inspections_page): (created_at, id) DESC windows.
+     *  The inspector-owns-row rule is already an RLS predicate on the table,
+     *  so the page reproduces the client list's visible set without
+     *  re-deriving scope. Fallback on a pre-0014 lineage: the complete
+     *  authorized feed in one page (exact, just not incremental); a load-more
+     *  request returns an empty page rather than repeating rows. */
+    inspectionsPage: async (args: {
+      before?: KeysetCursor | null;
+      limit?: number;
+    }): Promise<KeysetPage<InspectionListRow>> => {
+      const user = await requireAuthed(true);
+      if (!user.role) return { rows: [], nextCursor: null, source: "fallback" };
+      const limit = Math.min(
+        Math.max(1, Math.trunc(args.limit ?? KEYSET_PAGE_SIZE)),
+        POSTGREST_MAX_ROWS,
+      );
+      const viaRpc = await keysetPageRpc(
+        "mg_inspections_page",
+        args.before ?? null,
+        limit,
+        mapInspectionPageRow,
+      );
+      if (viaRpc) return viaRpc;
+      if (args.before) return { rows: [], nextCursor: null, source: "fallback" };
+      console.warn(
+        "[backend] mg_inspections_page unavailable — full authorized feed in one page (migration 0014 not applied); list stays exact, paging inactive",
+      );
+      return { rows: await fetchInspections(user), nextCursor: null, source: "fallback" };
+    },
+
+    /** The §9 compliance export's row source (see api.exports): the same
+     *  keyset-page contract over corrective actions + finding + site, joined
+     *  in SQL. No UI page consumes it — the live feed keeps its richer
+     *  openest-first ordering. */
+    compliancePage: async (args: {
+      before?: KeysetCursor | null;
+      limit?: number;
+    }): Promise<KeysetPage<CompliancePageRow>> => {
+      const user = await requireAuthed(true);
+      if (!user.role) return { rows: [], nextCursor: null, source: "fallback" };
+      const limit = Math.min(
+        Math.max(1, Math.trunc(args.limit ?? KEYSET_PAGE_SIZE)),
+        POSTGREST_MAX_ROWS,
+      );
+      const viaRpc = await keysetPageRpc(
+        "mg_compliance_page",
+        args.before ?? null,
+        limit,
+        mapCompliancePageRow,
+      );
+      if (viaRpc) return viaRpc;
+      if (args.before) return { rows: [], nextCursor: null, source: "fallback" };
+      console.warn(
+        "[backend] mg_compliance_page unavailable — full authorized feed in one page (migration 0014 not applied); export stays exact, streaming inactive",
+      );
+      return { rows: await fetchCompliance(user), nextCursor: null, source: "fallback" };
+    },
+
+    get: (args: { inspectionId: string }) =>
+      live<Inspection | null>(async () => {
+        const user = await requireAuthed();
+        const { data, error } = await supabase
+          .from("inspections")
+          .select("*")
+          .eq("id", args.inspectionId)
+          .maybeSingle();
+        if (error) throw backendError(error);
+        if (!data) return null;
+        const insp = mapInspection(data);
+        const site = await getSite(insp.siteId);
+        if (!site || !canAccessSite(user, site)) return null;
+        return insp;
+      }, ["inspections"]),
+
+    createDraft: async (args: {
+      siteId: string;
+      templateId: string;
+      clientRef?: string;
+    }) => {
+      const user = await requireStaffUser();
+      const site = await getSite(args.siteId);
+      if (!site) throw new Error("NOT_FOUND");
+      if (user.scope === "county" && user.county !== site.county)
+        throw new Error("FORBIDDEN");
+
+      // Offline dedupe: same clientRef returns the existing record.
+      if (args.clientRef) {
+        const { data } = await supabase
+          .from("inspections")
+          .select("id")
+          .eq("client_ref", args.clientRef)
+          .limit(1);
+        if (data && data.length > 0) return data[0].id as string;
+      }
+
+      const id = await insertReturningId("inspections", {
+        site_id: args.siteId,
+        template_id: args.templateId,
+        inspector_id: user.uid,
+        status: "draft",
+        client_ref: args.clientRef ?? null,
+      });
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "inspection.draft",
+        entityType: "inspections",
+        entityId: id,
+        summary: `Draft inspection created at ${site.code}`,
+      });
+      return id;
+    },
+
+    updateDraft: async (args: {
+      inspectionId: string;
+      answers?: Record<string, unknown>;
+      notes?: string;
+      latitude?: number;
+      longitude?: number;
+      gpsAccuracyM?: number;
+    }) => {
+      const user = await requireAuthed();
+      const { data, error: e1 } = await supabase
         .from("inspections")
         .select("*")
         .eq("id", args.inspectionId)
         .maybeSingle();
+      if (e1) throw backendError(e1);
+      if (!data) throw new Error("NOT_FOUND");
+      const insp = mapInspection(data);
+      if (insp.inspectorId !== user.uid) throw new Error("FORBIDDEN");
+      if (insp.status !== "draft") throw new Error("NOT_EDITABLE");
+      const patch: AnyRow = {};
+      if (args.answers !== undefined) patch.answers = args.answers;
+      if (args.notes !== undefined) patch.notes = args.notes;
+      if (args.latitude !== undefined) patch.latitude = args.latitude;
+      if (args.longitude !== undefined) patch.longitude = args.longitude;
+      if (args.gpsAccuracyM !== undefined) patch.gps_accuracy_m = args.gpsAccuracyM;
+      const { error } = await supabase
+        .from("inspections")
+        .update(patch)
+        .eq("id", args.inspectionId);
       if (error) throw backendError(error);
-      if (!data) return null;
-      const site = String(data.site_id);
-      const { data: siteRow } = await supabase
-        .from("sites")
-        .select("operator_name, county")
-        .eq("id", site)
+    },
+
+    submit: async (args: { inspectionId: string }) => {
+      const user = await requireAuthed();
+      const { data, error: e1 } = await supabase
+        .from("inspections")
+        .select("*")
+        .eq("id", args.inspectionId)
         .maybeSingle();
-      // Operators see only their own tenants' rows.
-      if (profile.role === ROLES.OPERATOR) {
-        if (!siteRow || siteRow.operator_name !== profile.operatorName) return null;
-      }
-      return mapInspection(data);
-    }, { authBound: true }),
+      if (e1) throw backendError(e1);
+      if (!data) throw new Error("NOT_FOUND");
+      const insp = mapInspection(data);
+      if (insp.inspectorId !== user.uid) throw new Error("FORBIDDEN");
+      if (insp.status !== "draft") throw new Error("NOT_EDITABLE");
+      const { error } = await supabase
+        .from("inspections")
+        .update({ status: "under_review", submitted_at: iso(Date.now()) })
+        .eq("id", args.inspectionId);
+      if (error) throw backendError(error);
+      const site = await getSite(insp.siteId);
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "inspection.submit",
+        entityType: "inspections",
+        entityId: args.inspectionId,
+        summary: `Inspection submitted for review at ${site?.code ?? insp.siteId}`,
+      });
+      await refreshPublicStats();
+    },
 
-  createDraft: async (args: {
-    siteId: string;
-    templateId: string;
-    clientRef?: string;
-    latitude?: number;
-    longitude?: number;
-    gpsAccuracyM?: number;
-  }): Promise<string> => {
-    const { uid } = await requireStaff();
-    assertValidLatitude(args.latitude);
-    assertValidLongitude(args.longitude);
-    // Idempotent on clientRef (offline replay).
-    if (args.clientRef) {
-      const dup = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("inspections").select("id").eq("client_ref", args.clientRef).limit(1),
-      );
-      if (dup.length > 0) return String(dup[0].id);
-    }
-    const { data, error } = await supabase
-      .from("inspections")
-      .insert({
-        site_id: args.siteId,
-        template_id: args.templateId,
-        inspector_id: uid,
-        status: "draft",
-        answers: [],
-        latitude: args.latitude ?? null,
-        longitude: args.longitude ?? null,
-        gps_accuracy_m: args.gpsAccuracyM ?? null,
-        client_ref: args.clientRef ?? null,
-      })
-      .select("id")
-      .single();
-    if (error) throw backendError(error);
-    return String((data as { id: string }).id);
-  },
+    review: async (args: {
+      inspectionId: string;
+      decision: "approved" | "rejected";
+      note?: string;
+    }) => {
+      const user = await requireReviewerUser();
+      const { data, error: e1 } = await supabase
+        .from("inspections")
+        .select("*")
+        .eq("id", args.inspectionId)
+        .maybeSingle();
+      if (e1) throw backendError(e1);
+      if (!data) throw new Error("NOT_FOUND");
+      if (data.status !== "under_review") throw new Error("NOT_REVIEWABLE");
+      const { error } = await supabase
+        .from("inspections")
+        .update({
+          status: args.decision,
+          reviewed_at: iso(Date.now()),
+          reviewer_id: user.uid,
+          review_note: args.note ?? null,
+        })
+        .eq("id", args.inspectionId);
+      if (error) throw backendError(error);
+      const site = await getSite((data as AnyRow).site_id as string);
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: `inspection.${args.decision}`,
+        entityType: "inspections",
+        entityId: args.inspectionId,
+        summary: `Inspection at ${site?.code ?? (data as AnyRow).site_id} ${args.decision} by reviewer`,
+      });
+    },
 
-  updateDraft: async (args: {
-    inspectionId: string;
-    answers?: Record<string, unknown>;
-    notes?: string;
-    latitude?: number;
-    longitude?: number;
-    gpsAccuracyM?: number;
-  }): Promise<void> => {
-    const { uid } = await requireStaff();
-    assertValidLatitude(args.latitude);
-    assertValidLongitude(args.longitude);
-    const { data, error } = await supabase
-      .from("inspections")
-      .select("id, status, inspector_id")
-      .eq("id", args.inspectionId)
-      .maybeSingle();
-    if (error) throw backendError(error);
-    const row = (data ?? null) as Record<string, unknown> | null;
-    if (!row) throw new Error("NOT_FOUND");
-    if (row.status !== "draft") throw new Error("NOT_EDITABLE");
-    if (row.inspector_id !== uid) throw new Error("FORBIDDEN");
-    const patch: Record<string, unknown> = {};
-    if (args.answers !== undefined) patch.answers = args.answers;
-    if (args.notes !== undefined) patch.notes = args.notes;
-    if (args.latitude !== undefined) patch.latitude = args.latitude;
-    if (args.longitude !== undefined) patch.longitude = args.longitude;
-    if (args.gpsAccuracyM !== undefined) patch.gps_accuracy_m = args.gpsAccuracyM;
-    const { error: upErr } = await supabase
-      .from("inspections")
-      .update(patch)
-      .eq("id", args.inspectionId);
-    if (upErr) throw backendError(upErr);
-  },
+    listFindingsForInspection: (args: { inspectionId: string }) =>
+      live<Finding[]>(async () => {
+        const user = await requireAuthed();
+        const { data: inspRow, error: e1 } = await supabase
+          .from("inspections")
+          .select("*")
+          .eq("id", args.inspectionId)
+          .maybeSingle();
+        if (e1) throw backendError(e1);
+        if (!inspRow) throw new Error("NOT_FOUND");
+        const insp = mapInspection(inspRow);
+        const site = await getSite(insp.siteId);
+        if (!site || !canAccessSite(user, site)) throw new Error("FORBIDDEN");
+        // SEC-4: the same paged read as every whole-table scan — a parent's
+        // findings are bounded by that parent's volume, but the read must
+        // never depend on the server's row cap.
+        const rows = await pagedEqRows<AnyRow>("findings", "inspection_id", args.inspectionId);
+        return rows.map(mapFinding);
+      }, ["findings"]),
 
-  submit: async (args: { inspectionId: string }): Promise<void> => {
-    const { uid } = await requireStaff();
-    const { data, error } = await supabase
-      .from("inspections")
-      .select("id, status, inspector_id")
-      .eq("id", args.inspectionId)
-      .maybeSingle();
-    if (error) throw backendError(error);
-    const row = (data ?? null) as Record<string, unknown> | null;
-    if (!row) throw new Error("NOT_FOUND");
-    if (row.inspector_id !== uid) throw new Error("FORBIDDEN");
-    if (row.status !== "draft") throw new Error("NOT_EDITABLE");
-    const { error: upErr } = await supabase
-      .from("inspections")
-      .update({
-        status: "under_review",
-        submitted_at: new Date().toISOString(),
-      })
-      .eq("id", args.inspectionId);
-    if (upErr) throw backendError(upErr);
-  },
+    /** Findings feed for the operator portal (§20): every finding on sites
+     *  the caller can access, joined with site identity. Operators are
+     *  strictly tenant-scoped (RLS + mirror); staff get their own scope. */
+    listMyFindings: () =>
+      live<
+        (Finding & { siteCode: string; siteName: string; county: string })[]
+      >(async () => {
+        const user = await requireAuthed(true);
+        if (!user.role) return [];
+        const [findingRaw, siteRaw] = await Promise.all([
+          allRows<AnyRow>("findings"),
+          allRows<AnyRow>("sites"),
+        ]);
+        const sites = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
+        const out = [];
+        for (const r of findingRaw) {
+          const f = mapFinding(r);
+          const site = sites.get(f.siteId);
+          if (!site || !canAccessSite(user, site)) continue;
+          out.push({
+            ...f,
+            siteCode: site.code,
+            siteName: site.name,
+            county: site.county,
+          });
+        }
+        // Openest findings first, then newest.
+        const openRank = (s: Finding["status"]) =>
+          s === "open" ? 0 : s === "acknowledged" ? 1 : s === "resolved" ? 2 : 3;
+        out.sort(
+          (a, b) =>
+            openRank(a.status) - openRank(b.status) || b.createdAt - a.createdAt,
+        );
+        return out;
+      }, ["findings", "sites"]),
 
-  review: async (args: {
-    inspectionId: string;
-    decision: "approved" | "rejected";
-    note?: string;
-  }): Promise<void> => {
-    const { uid } = await requireReviewer();
-    const { data, error } = await supabase
-      .from("inspections")
-      .select("id, status")
-      .eq("id", args.inspectionId)
-      .maybeSingle();
-    if (error) throw backendError(error);
-    const row = (data ?? null) as Record<string, unknown> | null;
-    if (!row) throw new Error("NOT_FOUND");
-    if (row.status !== "under_review") throw new Error("NOT_REVIEWABLE");
-    const { error: upErr } = await supabase
-      .from("inspections")
-      .update({
-        status: args.decision,
-        reviewed_at: new Date().toISOString(),
-        reviewer_id: uid,
-        review_note: args.note ?? null,
-      })
-      .eq("id", args.inspectionId);
-    if (upErr) throw backendError(upErr);
-  },
-
-  listFindingsForInspection: (args: { inspectionId: string }) =>
-    live<Finding[]>(async () => {
-      await requireAuthed();
-      if (!args?.inspectionId) return [];
-      const rows = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("findings").select("*").eq("inspection_id", args.inspectionId).order("created_at", { ascending: false }),
-      );
-      return rows.map(mapFinding);
-    }, { authBound: true }),
-
-  addFinding: async (args: {
-    inspectionId: string;
-    title: string;
-    description?: string;
-    severity: string;
-  }): Promise<string> => {
-    const { uid } = await requireStaff();
-    if (!args.title || !args.title.trim()) throw new Error("INVALID_NAME");
-    const { data, error } = await supabase
-      .from("findings")
-      .insert({
+    addFinding: async (args: {
+      inspectionId: string;
+      title: string;
+      description?: string;
+      severity: Finding["severity"];
+    }) => {
+      const user = await requireStaffUser();
+      const { data: inspRow, error: e1 } = await supabase
+        .from("inspections")
+        .select("*")
+        .eq("id", args.inspectionId)
+        .maybeSingle();
+      if (e1) throw backendError(e1);
+      if (!inspRow) throw new Error("NOT_FOUND");
+      const insp = mapInspection(inspRow);
+      const site = await getSite(insp.siteId);
+      if (!site) throw new Error("NOT_FOUND");
+      const id = await insertReturningId("findings", {
         inspection_id: args.inspectionId,
-        title: args.title.trim(),
+        site_id: insp.siteId,
+        title: args.title,
         description: args.description ?? null,
         severity: args.severity,
         status: "open",
-        created_by_id: uid,
-      })
-      .select("id")
-      .single();
-    if (error) throw backendError(error);
-    const fid = String((data as { id: string }).id);
-    // site_id backfill (the mirror stamps scope so list rules can join).
-    const { data: insp } = await supabase
-      .from("inspections")
-      .select("site_id")
-      .eq("id", args.inspectionId)
-      .maybeSingle();
-    const sid = insp ? String((insp as Record<string, unknown>).site_id) : null;
-    if (sid) await supabase.from("findings").update({ site_id: sid }).eq("id", fid);
-    return fid;
-  },
+        created_by_id: user.uid,
+      });
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "finding.create",
+        entityType: "findings",
+        entityId: id,
+        summary: `${args.severity.toUpperCase()} finding recorded: ${args.title}`,
+      });
+      return id;
+    },
 
-  /** listCorrectiveActions — staff, by finding. */
-  listCorrectiveActions: (args: { findingId: string }) =>
-    live<CorrectiveAction[]>(async () => {
-      await requireAuthed();
-      if (!args?.findingId) return [];
-      const rows = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("corrective_actions").select("*").eq("finding_id", args.findingId).order("created_at", { ascending: false }),
-      );
-      return rows.map(mapCorrectiveAction);
-    }, { authBound: true }),
-
-  listSiteCorrectiveActions: (args: { siteId: string }) =>
-    live<CorrectiveAction[]>(async () => {
-      await requireAuthed();
-      if (!args?.siteId) return [];
-      const site = await canAccessSiteNow(args.siteId);
-      if (!site) throw new Error("NOT_FOUND");
-      const rows = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("corrective_actions").select("*").eq("site_id", args.siteId).order("created_at", { ascending: false }),
-      );
-      return rows.map(mapCorrectiveAction);
-    }, { authBound: true }),
-
-  listMyFindings: () =>
-    live<(Finding & { siteCode?: string; siteName?: string; county?: string })[]>(async () => {
-      const profile = (await getProfile()) ?? null;
-      if (!profile) return [];
-      const rows = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("findings").select("*").order("created_at", { ascending: false }),
-      );
-      const siteRows = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("sites").select("*"),
-      );
-      const siteBy = new Map(siteRows.map((s) => [String(s.id), s]));
-      return rows
-        .filter((f) => {
-          const site = siteBy.get(String(f.site_id));
-          if (!site) return false;
-          if (profile.role === ROLES.OPERATOR)
-            return site.operator_name === profile.operatorName;
-          return canAccessSite(profile, mapSite(site));
-        })
-        .map((f) => {
-          const s = siteBy.get(String(f.site_id));
-          return {
-            ...mapFinding(f),
-            siteCode: (s?.code as string) ?? undefined,
-            siteName: (s?.name as string) ?? undefined,
-            county: (s?.county as string) ?? undefined,
-          };
-        });
-    }, { authBound: true }),
-
-  listMyCorrectiveActions: () =>
-    live<
-      (CorrectiveAction & {
-        findingTitle?: string;
-        findingSeverity?: string;
-        siteCode?: string;
-        siteName?: string;
-        county?: string;
-      })[]
-    >(async () => {
-      const profile = (await getProfile()) ?? null;
-      if (!profile) return [];
-      const rows = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("corrective_actions").select("*").order("created_at", { ascending: false }),
-      );
-      const [findingRows, siteRows] = await Promise.all([
-        pagedRows<Record<string, unknown>>((q) =>
-          supabase.from("findings").select("id, title, severity"),
-        ),
-        pagedRows<Record<string, unknown>>((q) =>
-          supabase.from("sites").select("*"),
-        ),
-      ]);
-      const findingBy = new Map(findingRows.map((f) => [String(f.id), f]));
-      const siteBy = new Map(siteRows.map((s) => [String(s.id), s]));
-      return rows
-        .filter((ca) => {
-          const site = siteBy.get(String(ca.site_id));
-          if (!site) return false;
-          if (profile.role === ROLES.OPERATOR) return site.operator_name === profile.operatorName;
-          return canAccessSite(profile, mapSite(site));
-        })
-        .map((ca) => {
-          const f = findingBy.get(String(ca.finding_id));
-          const s = siteBy.get(String(ca.site_id));
-          return {
-            ...mapCorrectiveAction(ca),
-            findingTitle: f ? String(f.title) : undefined,
-            findingSeverity: f ? String(f.severity) : undefined,
-            siteCode: (s?.code as string) ?? undefined,
-            siteName: (s?.name as string) ?? undefined,
-            county: (s?.county as string) ?? undefined,
-          };
-        });
-    }, { authBound: true }),
-
-  openCorrectiveAction: async (args: {
-    findingId: string;
-    description: string;
-    dueAt: number;
-  }): Promise<string> => {
-    const { uid } = await requireStaff();
-    if (!args.description || !args.description.trim()) throw new Error("INVALID_DESCRIPTION");
-    const { data, error } = await supabase
-      .from("corrective_actions")
-      .insert({
-        finding_id: args.findingId,
-        description: args.description,
-        due_at: new Date(args.dueAt).toISOString(),
-        opened_by_id: uid,
-        status: "open",
-      })
-      .select("id")
-      .single();
-    if (error) throw backendError(error);
-    const caId = String((data as { id: string }).id);
-    const { data: finding } = await supabase
-      .from("findings")
-      .select("site_id")
-      .eq("id", args.findingId)
-      .maybeSingle();
-    const sid = finding ? String((finding as Record<string, unknown>).site_id) : null;
-    if (sid) await supabase.from("corrective_actions").update({ site_id: sid }).eq("id", caId);
-    return caId;
-  },
-
-  respondCorrectiveAction: async (args: {
-    caId: string;
-    operatorNote: string;
-    expectedRowVersion?: number;
-  }): Promise<void> => {
-    const { profile } = await requireAuthed();
-    if (profile.role !== ROLES.OPERATOR) throw new Error("FORBIDDEN");
-    const { data, error } = await supabase
-      .from("corrective_actions")
-      .select("id, row_version, status, operator_note")
-      .eq("id", args.caId)
-      .maybeSingle();
-    if (error) throw backendError(error);
-    const row = (data ?? null) as Record<string, unknown> | null;
-    if (!row) throw new Error("NOT_FOUND"); // RLS hides cross-tenant rows
-    const serverVersion = Number(row.row_version ?? 0);
-    if (args.expectedRowVersion !== undefined && args.expectedRowVersion !== serverVersion) {
-      // OFF-4: 409-shaped optimistic concurrency failure with the server row.
-      const e = new Error(
-        `CONFLICT:${JSON.stringify({
-          server: {
-            rowVersion: serverVersion,
-            status: row.status,
-            operatorNote: (row.operator_note as string) ?? undefined,
-          },
-        })}`,
-      ) as Error & { code?: string };
-      e.code = "409";
-      throw e;
-    }
-    // Open → submitted is the only operator transition (guard re-check).
-    if (row.status !== "open") {
-      // An idempotent replay: same note, already submitted → no-op success.
-      if (row.status === "submitted" && args.operatorNote === row.operator_note) return;
-      throw new Error("FORBIDDEN");
-    }
-    const { error: upErr } = await supabase
-      .from("corrective_actions")
-      .update({ operator_note: args.operatorNote, status: "submitted" })
-      .eq("id", args.caId);
-    if (upErr) throw backendError(upErr);
-  },
-
-  decideCorrectiveAction: async (args: {
-    caId: string;
-    decision: "in_progress" | "submitted" | "verified" | "closed" | "escalated";
-  }): Promise<void> => {
-    await requireReviewer();
-    const { data, error } = await supabase
-      .from("corrective_actions")
-      .select("id, status")
-      .eq("id", args.caId)
-      .maybeSingle();
-    if (error) throw backendError(error);
-    const row = (data ?? null) as Record<string, unknown> | null;
-    if (!row) throw new Error("NOT_FOUND");
-    const patch: Record<string, unknown> = { status: args.decision };
-    if (args.decision === "closed") patch.closed_at = new Date().toISOString();
-    if (args.decision === "verified" || args.decision === "closed" || args.decision === "escalated")
-      patch.verified_by_id = authUserId();
-    const { error: upErr } = await supabase
-      .from("corrective_actions")
-      .update(patch)
-      .eq("id", args.caId);
-    if (upErr) throw backendError(upErr);
-  },
-
-  updateFindingStatus: async (args: {
-    findingId: string;
-    status: "open" | "acknowledged" | "resolved" | "verified";
-  }): Promise<void> => {
-    const { profile } = await requireAuthed();
-    const { data, error } = await supabase
-      .from("findings")
-      .select("id, status, site_id")
-      .eq("id", args.findingId)
-      .maybeSingle();
-    if (error) throw backendError(error);
-    const row = (data ?? null) as Record<string, unknown> | null;
-    if (!row) throw new Error("NOT_FOUND");
-    if (profile.role === ROLES.OPERATOR) {
-      // Operators may ONLY acknowledge a finding on their own tenant's site.
-      if (args.status !== "acknowledged") throw new Error("FORBIDDEN");
-      const { data: site } = await supabase
-        .from("sites")
-        .select("operator_name")
-        .eq("id", String(row.site_id))
+    updateFindingStatus: async (args: {
+      findingId: string;
+      status: Finding["status"];
+    }) => {
+      const user = await requireAuthed();
+      const { data, error: e1 } = await supabase
+        .from("findings")
+        .select("*")
+        .eq("id", args.findingId)
         .maybeSingle();
-      if (!site || (site as Record<string, unknown>).operator_name !== profile.operatorName)
+      if (e1) throw backendError(e1);
+      if (!data) throw new Error("NOT_FOUND");
+      const finding = mapFinding(data);
+      const site = await getSite(finding.siteId);
+      if (!site) throw new Error("NOT_FOUND");
+      const isOwner = finding.createdById === user.uid;
+      const isReviewer =
+        user.role === ROLES.ADMIN || user.role === ROLES.SUPERVISOR;
+      const isSiteOperator =
+        user.role === ROLES.OPERATOR && user.operatorName === site.operatorName;
+      // Operators may only acknowledge; staff/reviewers may resolve/verify.
+      if (isSiteOperator) {
+        if (args.status !== "acknowledged") throw new Error("FORBIDDEN");
+      } else if (!isOwner && !isReviewer) {
         throw new Error("FORBIDDEN");
-    }
-    const { error: upErr } = await supabase
-      .from("findings")
-      .update({ status: args.status })
-      .eq("id", args.findingId);
-    if (upErr) throw backendError(upErr);
+      }
+      const { error } = await supabase
+        .from("findings")
+        .update({ status: args.status })
+        .eq("id", args.findingId);
+      if (error) throw backendError(error);
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "finding.status",
+        entityType: "findings",
+        entityId: args.findingId,
+        summary: `Finding "${finding.title}" set to ${args.status}`,
+      });
+    },
+
+    listCorrectiveActions: (args: { findingId: string }) =>
+      live<CorrectiveAction[]>(async () => {
+        const user = await requireAuthed();
+        const { data, error: e1 } = await supabase
+          .from("findings")
+          .select("*")
+          .eq("id", args.findingId)
+          .maybeSingle();
+        if (e1) throw backendError(e1);
+        if (!data) throw new Error("NOT_FOUND");
+        const finding = mapFinding(data);
+        const site = await getSite(finding.siteId);
+        if (!site || !canAccessSite(user, site)) throw new Error("FORBIDDEN");
+        // SEC-4: paged read (see listFindingsForInspection).
+        const rows = await pagedEqRows<AnyRow>("corrective_actions", "finding_id", args.findingId);
+        return rows.map(mapCA);
+      }, ["corrective_actions"]),
+
+    listSiteCorrectiveActions: (args: { siteId: string }) =>
+      live<CorrectiveAction[]>(async () => {
+        const user = await requireAuthed();
+        const site = await getSite(args.siteId);
+        if (!site || !canAccessSite(user, site)) return [];
+        // SEC-4: paged read (see listFindingsForInspection).
+        const rows = await pagedEqRows<AnyRow>("corrective_actions", "site_id", args.siteId);
+        return rows.map(mapCA);
+      }, ["corrective_actions"]),
+
+    /** Compliance obligations for the operator portal (§20): every corrective
+     *  action on sites the caller can access, joined with the finding title
+     *  and site identity. Operators are strictly tenant-scoped by RLS + the
+     *  client mirror; staff get the same feed over their own scope. */
+    listMyCorrectiveActions: () =>
+      live<ComplianceListRow[]>(async () => {
+        const user = await requireAuthed(true);
+        if (!user.role) return [];
+        return fetchCompliance(user);
+      }, ["corrective_actions", "findings", "sites"]),
+
+    openCorrectiveAction: async (args: {
+      findingId: string;
+      description: string;
+      dueAt: number;
+    }) => {
+      const user = await requireStaffUser();
+      const { data, error: e1 } = await supabase
+        .from("findings")
+        .select("*")
+        .eq("id", args.findingId)
+        .maybeSingle();
+      if (e1) throw backendError(e1);
+      if (!data) throw new Error("NOT_FOUND");
+      const finding = mapFinding(data);
+      const site = await getSite(finding.siteId);
+      if (!site) throw new Error("NOT_FOUND");
+      const id = await insertReturningId("corrective_actions", {
+        finding_id: args.findingId,
+        site_id: finding.siteId,
+        description: args.description,
+        status: "open",
+        due_at: iso(args.dueAt),
+        opened_by_id: user.uid,
+      });
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "ca.open",
+        entityType: "corrective_actions",
+        entityId: id,
+        summary: `Corrective action opened (due ${new Date(args.dueAt).toISOString().slice(0, 10)}): ${args.description.slice(0, 80)}`,
+      });
+      return id;
+    },
+
+    respondCorrectiveAction: async (args: {
+      caId: string;
+      operatorNote: string;
+      /** row_version the operator was looking at (OFF-4). When present the
+       *  update is conditional on it — a row someone else changed first
+       *  answers CONFLICT (HTTP 409) with a snapshot for the resolution
+       *  screen instead of silently overwriting their work. */
+      expectedRowVersion?: number;
+    }) => {
+      const user = await requireAuthed();
+      const { data, error: e1 } = await supabase
+        .from("corrective_actions")
+        .select("*")
+        .eq("id", args.caId)
+        .maybeSingle();
+      if (e1) throw backendError(e1);
+      if (!data) throw new Error("NOT_FOUND");
+      const ca = mapCA(data);
+      const site = await getSite(ca.siteId);
+      if (!site) throw new Error("NOT_FOUND");
+      if (user.role !== ROLES.OPERATOR || user.operatorName !== site.operatorName)
+        throw new Error("FORBIDDEN");
+      // Idempotent replay (OFF: mid-sync crash): the server applied this
+      // response but the local queue removal was interrupted. Same note on
+      // an already-submitted action IS the desired end state — report
+      // success so the queue drains instead of dead-ending on the guard.
+      if (ca.status === "submitted" && (ca.operatorNote ?? "") === args.operatorNote) {
+        return;
+      }
+      let query = supabase
+        .from("corrective_actions")
+        .update({ operator_note: args.operatorNote, status: "submitted" })
+        .eq("id", args.caId);
+      if (args.expectedRowVersion != null) {
+        query = query.eq("row_version", args.expectedRowVersion);
+      }
+      const { data: updated, error } = await query.select("id");
+      if (error) throw backendError(error);
+      if (args.expectedRowVersion != null && (!updated || updated.length === 0)) {
+        // Zero rows matched: someone bumped row_version first. Fetch the
+        // current row so the human resolution screen can show both sides.
+        const { data: cur } = await supabase
+          .from("corrective_actions")
+          .select("*")
+          .eq("id", args.caId)
+          .maybeSingle();
+        if (!cur) throw new Error("NOT_FOUND");
+        const curCa = mapCA(cur);
+        const conflict = new Error(
+          `CONFLICT:${JSON.stringify({
+            server: {
+              status: curCa.status,
+              operatorNote: curCa.operatorNote ?? null,
+              rowVersion: curCa.rowVersion ?? null,
+              closedAt: curCa.closedAt ?? null,
+              verifiedById: curCa.verifiedById ?? null,
+            },
+          })}`,
+        ) as Error & { code?: string };
+        conflict.code = "409";
+        throw conflict;
+      }
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "ca.respond",
+        entityType: "corrective_actions",
+        entityId: args.caId,
+        summary: "Operator response submitted for corrective action",
+      });
+    },
+
+    decideCorrectiveAction: async (args: {
+      caId: string;
+      decision: CorrectiveAction["status"];
+    }) => {
+      const user = await requireReviewerUser();
+      const { data, error: e1 } = await supabase
+        .from("corrective_actions")
+        .select("*")
+        .eq("id", args.caId)
+        .maybeSingle();
+      if (e1) throw backendError(e1);
+      if (!data) throw new Error("NOT_FOUND");
+      const ca = mapCA(data);
+      const { error } = await supabase
+        .from("corrective_actions")
+        .update({
+          status: args.decision,
+          verified_by_id: user.uid,
+          closed_at:
+            args.decision === "closed"
+              ? iso(Date.now())
+              : ca.closedAt
+                ? iso(ca.closedAt)
+                : null,
+        })
+        .eq("id", args.caId);
+      if (error) throw backendError(error);
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: `ca.${args.decision}`,
+        entityType: "corrective_actions",
+        entityId: args.caId,
+        summary: `Corrective action ${args.decision}`,
+      });
+    },
   },
 
-  // -------------------------------------------------------------------
-  // SEC-4 v2 keyset page — served by mg_inspections_page (0014); the
-  // form here is the shape the export stream/feeds consume.
-  // -------------------------------------------------------------------
-  inspectionsPage: (args: {
-    before?: KeysetCursor | null;
-    limit?: number;
-  }): Promise<KeysetPage<{
-    _id: string;
-    siteId: string;
-    siteCode?: string;
-    siteName?: string;
-    county?: string;
-    status: string;
-    submittedAt?: number;
-    createdAt: number;
-    inspectorId: string;
-  }>> =>
-    keysetWrapper(
-      "mg_inspections_page",
-      async (cursor) =>
-        callPageRpc("mg_inspections_page", cursor, args.limit ?? 500),
-      async () => clientInspectionsPage(args),
-    ),
+  // --------------------------------------------------------------- records
+  records: {
+    listIncidents: () =>
+      live<(Incident & { siteCode: string; siteName: string; county: string })[]>(
+        async () => {
+          const user = await requireAuthed(true);
+          if (!user.role) return [];
+          return fetchIncidents(user);
+        },
+        ["incidents", "sites"],
+      ),
 
-  compliancePage: (args: {
-    before?: KeysetCursor | null;
-    limit?: number;
-  }): Promise<KeysetPage<{
-    _id: string;
-    siteId: string;
-    description: string;
-    status: string;
-    dueAt: number;
-    operatorNote?: string;
-    createdAt: number;
-    findingTitle?: string;
-    findingSeverity?: string;
-    siteCode?: string;
-    siteName?: string;
-    county?: string;
-  }>> =>
-    keysetWrapper(
-      "mg_compliance_page",
-      async (cursor) =>
-        callPageRpc("mg_compliance_page", cursor, args.limit ?? 500),
-      async () => clientCompliancePage(args),
-    ),
-};
-
-// ---------------------------------------------------------------------
-// Keyset helpers: RPC-first with a paged client fallback, and the console
-// warn the scale tests pin (no silent fallback).
-// ---------------------------------------------------------------------
-
-async function callPageRpc(
-  fn: "mg_incidents_page" | "mg_inspections_page" | "mg_compliance_page",
-  cursor: { at: number; id: string } | null | undefined,
-  limit: number,
-): Promise<{ rows: Record<string, unknown>[]; source: string }> {
-  const args = {
-    p_limit: Math.max(1, limit),
-    ...(cursor ? { p_before: new Date(cursor.at).toISOString(), p_before_id: cursor.id } : {}),
-  };
-  const { data, error } = await supabase.rpc(fn, args as unknown as Record<string, unknown>);
-  if (error || data === null) {
-    const e = new Error(`${fn} failed: ${error?.message ?? "no data"}`);
-    throw e;
-  }
-  return { rows: data as Record<string, unknown>[], source: "rpc" };
-}
-
-function cursorFromRow(row: Record<string, unknown>): { at: number; id: string } {
-  return {
-    at: Number(row.cursorAt ?? 0),
-    id: String(row.cursorId ?? ""),
-  };
-}
-
-async function keysetWrapper<T>(
-  rpcName: string,
-  rpcCall: (cursor: KeysetCursor | null) => Promise<{ rows: Record<string, unknown>[]; source: string }>,
-  fallback: () => Promise<KeysetPage<T>>,
-): Promise<KeysetPage<T>> {
-  let cursor: KeysetCursor | null = (arguments.length && void 0, null);
-  void rpcName;
-  try {
-    const { rows, source } = await rpcCall(cursor);
-    const mapped = rows.map((r) => r as unknown as T);
-    const last = rows[rows.length - 1];
-    const next = last && Number(last.cursorAt) > 0 ? cursorFromRow(last) : null;
-    // Page completeness: the page is final when it returned fewer rows than
-    // the requested limit (the SQL clamps to the limit).
-    return { rows: mapped, nextCursor: next, source };
-  } catch (e) {
-    console.warn(`[${rpcName}] fell back to client paging:`, backendError(e));
-    return fallback();
-  }
-}
-
-/** Client-side keyset page (the fallback the tests force). Pulls the whole
- *  authorized feed via paged reads and slices by cursor. */
-async function clientInspectionsPage(args: {
-  before?: KeysetCursor | null;
-  limit?: number;
-}) {
-  const rows = await allRows<Record<string, unknown>>("inspections", "id");
-  const siteRows = await allRows<Record<string, unknown>>("sites", "id");
-  const siteBy = new Map(siteRows.map((s) => [String(s.id), s]));
-  const rich = rows.map((r) => {
-    const s = siteBy.get(String(r.site_id));
-    const created = tsMs(r.created_at) ?? 0;
-    return {
-      _id: String(r.id),
-      siteId: String(r.site_id),
-      siteCode: (s?.code as string) ?? undefined,
-      siteName: (s?.name as string) ?? undefined,
-      county: (s?.county as string) ?? undefined,
-      status: String(r.status),
-      submittedAt: tsMs(r.submitted_at),
-      createdAt: created,
-      inspectorId: String(r.inspector_id ?? ""),
-      cursorAt: created,
-      cursorId: String(r.id),
-    };
-  });
-  return sliceCursor(rich, args.before, args.limit ?? 500);
-}
-
-async function clientCompliancePage(args: {
-  before?: KeysetCursor | null;
-  limit?: number;
-}) {
-  const [rows, findingRows, siteRows] = await Promise.all([
-    allRows<Record<string, unknown>>("corrective_actions", "id"),
-    allRows<Record<string, unknown>>("findings", "id"),
-    allRows<Record<string, unknown>>("sites", "id"),
-  ]);
-  const findingBy = new Map(findingRows.map((f) => [String(f.id), f]));
-  const siteBy = new Map(siteRows.map((s) => [String(s.id), s]));
-  const rich = rows.map((r) => {
-    const f = findingBy.get(String(r.finding_id));
-    const s = siteBy.get(String(r.site_id));
-    const created = tsMs(r.created_at) ?? 0;
-    return {
-      _id: String(r.id),
-      siteId: String(r.site_id),
-      description: String(r.description),
-      status: String(r.status),
-      dueAt: tsMs(r.due_at) ?? 0,
-      operatorNote: (r.operator_note as string) ?? undefined,
-      createdAt: created,
-      findingTitle: f ? String(f.title) : undefined,
-      findingSeverity: f ? String(f.severity) : undefined,
-      siteCode: (s?.code as string) ?? undefined,
-      siteName: (s?.name as string) ?? undefined,
-      county: (s?.county as string) ?? undefined,
-      cursorAt: created,
-      cursorId: String(r.id),
-    };
-  });
-  return sliceCursor(rich, args.before, args.limit ?? 500);
-}
-
-async function clientIncidentsPage(args: {
-  before?: KeysetCursor | null;
-  limit?: number;
-}) {
-  const rows = await allRows<Record<string, unknown>>("incidents", "id");
-  const siteRows = await allRows<Record<string, unknown>>("sites", "id");
-  const siteBy = new Map(siteRows.map((s) => [String(s.id), s]));
-  const rich = rows.map((r) => {
-    const s = siteBy.get(String(r.site_id));
-    const occurred = tsMs(r.occurred_at) ?? tsMs(r.created_at) ?? 0;
-    return {
-      _id: String(r.id),
-      siteId: String(r.site_id),
-      type: String(r.type),
-      severity: String(r.severity),
-      description: String(r.description),
-      occurredAt: occurred,
-      fatalities: optionalNumber(r.fatalities),
-      injured: optionalNumber(r.injured),
-      status: String(r.status),
-      reportedById: String(r.reported_by_id ?? ""),
-      reportSource: String(r.report_source ?? "inspector"),
-      createdAt: tsMs(r.created_at) ?? 0,
-      siteCode: (s?.code as string) ?? undefined,
-      siteName: (s?.name as string) ?? undefined,
-      county: (s?.county as string) ?? undefined,
-      cursorAt: occurred,
-      cursorId: String(r.id),
-    };
-  });
-  // Newest-first (the SQL contract) before the cursor slice.
-  rich.sort((a, b) => b.cursorAt - a.cursorAt || (a._id < b._id ? 1 : -1));
-  return sliceCursor(rich, args.before, args.limit ?? 500);
-}
-
-function sliceCursor<T extends { cursorAt: number; cursorId: string }>(
-  rowsAll: T[],
-  before: KeysetCursor | null | undefined,
-  limit: number,
-): KeysetPage<T> {
-  void rowsAll;
-  return rowsAll as unknown as KeysetPage<T>;
-}
-
-// -------------------------------------------------------- records
-
-export const records = {
-  listIncidents: () =>
-    live<Incident[]>(async () => {
-      const profile = (await getProfile()) ?? null;
-      if (!profile) return [];
-      const rows = await allRows<Record<string, unknown>>(
-        "incidents",
-        "id",
+    /** SEC-4 v2 — the incidents list page's keyset page (migration 0014's
+     *  SECURITY INVOKER mg_incidents_page): (occurred_at, id) DESC windows
+     *  resumable by cursor, immune to offset skew from concurrent inserts.
+     *  On a lineage without 0014 the FIRST page falls back to the complete
+     *  authorized feed in one page (hasMore=false — exact either way), and a
+     *  load-more request returns an EMPTY page rather than repeating rows
+     *  that fallback already carried. */
+    incidentsPage: async (args: {
+      before?: KeysetCursor | null;
+      limit?: number;
+    }): Promise<
+      KeysetPage<Incident & { siteCode: string; siteName: string; county: string }>
+    > => {
+      const user = await requireAuthed(true);
+      if (!user.role) return { rows: [], nextCursor: null, source: "fallback" };
+      const limit = Math.min(
+        Math.max(1, Math.trunc(args.limit ?? KEYSET_PAGE_SIZE)),
+        POSTGREST_MAX_ROWS,
       );
-      const siteRows = await allRows<Record<string, unknown>>("sites", "id");
-      const siteBy = new Map(siteRows.map((s) => [String(s.id), s]));
-      return rows
-        .filter((r) => {
-          const site = siteBy.get(String(r.site_id));
-          if (!site) return false;
-          if (profile.role === ROLES.OPERATOR) return site.operator_name === profile.operatorName;
-          return canAccessSite(profile, mapSite(site));
-        })
-        .map((r) => {
-          const s = siteBy.get(String(r.site_id));
-          return {
-            ...mapIncident(r),
-            siteCode: (s?.code as string) ?? undefined,
-            siteName: (s?.name as string) ?? undefined,
-            county: (s?.county as string) ?? undefined,
-          };
-        })
-        .sort((a, b) => b.occurredAt - a.occurredAt);
-    }, { authBound: true }),
-
-  reportIncident: async (args: {
-    siteId: string;
-    type: Incident["type"];
-    severity: Severity;
-    description: string;
-    occurredAt: number;
-    fatalities?: number;
-    injured?: number;
-    clientRef?: string;
-  }): Promise<string> => {
-    const { uid, profile } = await requireAuthed();
-    if (!args.description || !args.description.trim()) throw new Error("INVALID_DESCRIPTION");
-    // Existence masking: an out-of-scope site reads as not-found (RLS), not
-    // as a permission error.
-    const site = await canAccessSiteNow(args.siteId) ??
-      (await supabase.from("incidents").select("id").limit(0), null);
-    if (!site) throw new Error("NOT_FOUND");
-    // clientRef dedupe (offline replay): one row per reference.
-    if (args.clientRef) {
-      const dup = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("incidents").select("id").eq("client_ref", args.clientRef).limit(1),
+      const viaRpc = await keysetPageRpc(
+        "mg_incidents_page",
+        args.before ?? null,
+        limit,
+        mapIncidentPageRow,
       );
-      if (dup.length > 0) return String(dup[0].id);
-    }
-    const reportSource: Incident["reportSource"] =
-      profile.role === ROLES.OPERATOR ? "operator" : "inspector";
-    const { data, error } = await supabase
-      .from("incidents")
-      .insert({
+      if (viaRpc) return viaRpc;
+      if (args.before) return { rows: [], nextCursor: null, source: "fallback" };
+      console.warn(
+        "[backend] mg_incidents_page unavailable — full authorized feed in one page (migration 0014 not applied); list stays exact, paging inactive",
+      );
+      return { rows: await fetchIncidents(user), nextCursor: null, source: "fallback" };
+    },
+
+    getIncident: (args: { incidentId: string }) =>
+      live<Incident | null>(async () => {
+        const user = await requireAuthed();
+        const { data, error } = await supabase
+          .from("incidents")
+          .select("*")
+          .eq("id", args.incidentId)
+          .maybeSingle();
+        if (error) throw backendError(error);
+        if (!data) return null;
+        const inc = mapIncident(data);
+        const site = await getSite(inc.siteId);
+        if (!site || !canAccessSite(user, site)) return null;
+        return { ...inc, siteCode: site.code, siteName: site.name, county: site.county };
+      }, ["incidents", "sites"]),
+
+    reportIncident: async (args: {
+      siteId: string;
+      type: Incident["type"];
+      severity: Incident["severity"];
+      description: string;
+      occurredAt: number;
+      fatalities?: number;
+      injured?: number;
+      clientRef?: string;
+    }) => {
+      const user = await requireAuthed();
+      // Offline dedupe: the same queued submission replayed after reconnect
+      // must not create a second incident record.
+      if (args.clientRef) {
+        const { data } = await supabase
+          .from("incidents")
+          .select("id")
+          .eq("client_ref", args.clientRef)
+          .limit(1);
+        if (data && data.length > 0) return data[0].id as string;
+      }
+      const site = await getSite(args.siteId);
+      if (!site) throw new Error("NOT_FOUND");
+      if (!canAccessSite(user, site)) throw new Error("FORBIDDEN");
+      const id = await insertReturningId("incidents", {
         site_id: args.siteId,
         type: args.type,
         severity: args.severity,
-        description: args.description.trim(),
-        occurred_at: new Date(args.occurredAt).toISOString(),
+        description: args.description,
+        occurred_at: iso(args.occurredAt),
         fatalities: args.fatalities ?? null,
         injured: args.injured ?? null,
-        reported_by_id: uid,
-        report_source: reportSource,
         status: "reported",
         client_ref: args.clientRef ?? null,
-        ...siteScopeStamp(site),
-      })
-      .select("id")
-      .single();
-    if (error) throw backendError(error);
-    return String((data as { id: string }).id);
-  },
+        reported_by_id: user.uid,
+        report_source: user.role === ROLES.OPERATOR ? "operator" : "inspector",
+      });
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "incident.report",
+        entityType: "incidents",
+        entityId: id,
+        summary: `${args.type.replace("_", " ")} reported at ${site.code}`,
+      });
+      await refreshPublicStats();
+      return id;
+    },
 
-  setIncidentStatus: async (args: {
-    incidentId: string;
-    status: "reported" | "investigating" | "closed";
-  }): Promise<void> => {
-    await requireStaff();
-    const { error } = await supabase
-      .from("incidents")
-      .update({ status: args.status })
-      .eq("id", args.incidentId);
-    if (error) throw backendError(error);
-  },
-
-  getIncident: (args: { incidentId: string }) =>
-    live<Incident | null>(async () => {
-      const profile = (await getProfile()) ?? null;
-      if (!profile || !args?.incidentId) return null;
-      const { data, error } = await supabase
+    setIncidentStatus: async (args: {
+      incidentId: string;
+      status: "investigating" | "closed";
+    }) => {
+      const user = await requireStaffUser();
+      const { error } = await supabase
         .from("incidents")
-        .select("*")
-        .eq("id", args.incidentId)
-        .maybeSingle();
+        .update({ status: args.status })
+        .eq("id", args.incidentId);
       if (error) throw backendError(error);
-      if (!data) return null;
-      const { data: siteRow } = await supabase
-        .from("sites")
-        .select("*")
-        .eq("id", String((data as Record<string, unknown>).site_id))
-        .maybeSingle();
-      if (!siteRow) return null;
-      const site = mapSite(siteRow);
-      if (profile.role === ROLES.OPERATOR && site.operatorName !== profile.operatorName)
-        return null;
-      return {
-        ...mapIncident(data),
-        siteCode: site.code,
-        siteName: site.name,
-        county: site.county,
-      };
-    }, { authBound: true }),
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "incident.status",
+        entityType: "incidents",
+        entityId: args.incidentId,
+        summary: `Incident status set to ${args.status}`,
+      });
+    },
 
-  listObservations: () =>
-    live<EnvironmentalObservation[]>(async () => {
-      const profile = (await getProfile()) ?? null;
-      if (!profile) return [];
-      const rows = await allRows<Record<string, unknown>>(
-        "environmental_observations",
-        "id",
-      );
-      const siteRows = await allRows<Record<string, unknown>>("sites", "id");
-      const siteBy = new Map(siteRows.map((s) => [String(s.id), s]));
-      return rows
-        .filter((r) => {
-          const site = siteBy.get(String(r.site_id));
-          if (!site) return false;
-          if (profile.role === ROLES.OPERATOR) return site.operator_name === profile.operatorName;
-          return canAccessSite(profile, mapSite(site));
-        })
-        .map((r) => {
-          const s = siteBy.get(String(r.site_id));
-          return {
-            ...mapObservation(r),
-            siteCode: (s?.code as string) ?? undefined,
-            siteName: (s?.name as string) ?? undefined,
-            county: (s?.county as string) ?? undefined,
-          };
-        })
-        .sort((a, b) => b.observedAt - a.observedAt);
-    }, { authBound: true }),
+    listObservations: () =>
+      live<EnvironmentalObservation[]>(async () => {
+        const user = await requireAuthed(true);
+        if (!user.role) return [];
+        const [obsRaw, siteRaw] = await Promise.all([
+          allRows<AnyRow>("environmental_observations"),
+          allRows<AnyRow>("sites"),
+        ]);
+        const byId = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
+        const out: EnvironmentalObservation[] = [];
+        for (const r of obsRaw) {
+          const o = mapObservation(r);
+          const site = byId.get(o.siteId);
+          if (!site) continue;
+          if (!canAccessSite(user, site)) continue;
+          out.push({ ...o, siteCode: site.code, siteName: site.name, county: site.county });
+        }
+        out.sort((a, b) => b.observedAt - a.observedAt);
+        return out;
+      }, ["environmental_observations", "sites"]),
 
-  getObservation: (args: { observationId: string }) =>
-    live<EnvironmentalObservation | null>(async () => {
-      const profile = (await getProfile()) ?? null;
-      if (!profile || !args?.observationId) return null;
-      const { data, error } = await supabase
-        .from("environmental_observations")
-        .select("*")
-        .eq("id", args.observationId)
-        .maybeSingle();
-      if (error) throw backendError(error);
-      if (!data) return null;
-      const { data: siteRow } = await supabase
-        .from("sites")
-        .select("*")
-        .eq("id", String((data as Record<string, unknown>).site_id))
-        .maybeSingle();
-      if (!siteRow) return null;
-      const site = mapSite(siteRow);
-      if (profile.role === ROLES.OPERATOR && site.operatorName !== profile.operatorName)
-        return null;
-      return {
-        ...mapObservation(data),
-        siteCode: site.code,
-        siteName: site.name,
-        county: site.county,
-      };
-    }, { authBound: true }),
+    getObservation: (args: { observationId: string }) =>
+      live<EnvironmentalObservation | null>(async () => {
+        const user = await requireAuthed();
+        const { data, error } = await supabase
+          .from("environmental_observations")
+          .select("*")
+          .eq("id", args.observationId)
+          .maybeSingle();
+        if (error) throw backendError(error);
+        if (!data) return null;
+        const obs = mapObservation(data);
+        const site = await getSite(obs.siteId);
+        if (!site || !canAccessSite(user, site)) return null;
+        return { ...obs, siteCode: site.code, siteName: site.name, county: site.county };
+      }, ["environmental_observations", "sites"]),
 
-  reportObservation: async (args: {
-    siteId: string;
-    category: EnvironmentalObservation["category"];
-    verification: EnvironmentalObservation["verification"];
-    description: string;
-    observedAt: number;
-    latitude?: number;
-    longitude?: number;
-    clientRef?: string;
-  }): Promise<string> => {
-    const { uid } = await requireAuthed();
-    if (!args.description || !args.description.trim()) throw new Error("INVALID_DESCRIPTION");
-    const site = await canAccessSiteNow(args.siteId);
-    if (!site) throw new Error("NOT_FOUND");
-    if (args.clientRef) {
-      const dup = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("environmental_observations").select("id").eq("client_ref", args.clientRef).limit(1),
-      );
-      if (dup.length > 0) return String(dup[0].id);
-    }
-    assertValidLatitude(args.latitude);
-    assertValidLongitude(args.longitude);
-    const { data, error } = await supabase
-      .from("environmental_observations")
-      .insert({
+    reportObservation: async (args: {
+      siteId: string;
+      category: EnvironmentalObservation["category"];
+      verification: EnvironmentalObservation["verification"];
+      description: string;
+      observedAt: number;
+      latitude?: number;
+      longitude?: number;
+      clientRef?: string;
+    }) => {
+      const user = await requireAuthed();
+      // Offline dedupe (same contract as createDraft/reportIncident).
+      if (args.clientRef) {
+        const { data } = await supabase
+          .from("environmental_observations")
+          .select("id")
+          .eq("client_ref", args.clientRef)
+          .limit(1);
+        if (data && data.length > 0) return data[0].id as string;
+      }
+      const site = await getSite(args.siteId);
+      if (!site) throw new Error("NOT_FOUND");
+      if (!canAccessSite(user, site)) throw new Error("FORBIDDEN");
+      const id = await insertReturningId("environmental_observations", {
         site_id: args.siteId,
         category: args.category,
         verification: args.verification,
-        description: args.description.trim(),
-        observed_at: new Date(args.observedAt).toISOString(),
+        description: args.description,
+        observed_at: iso(args.observedAt),
         latitude: args.latitude ?? null,
         longitude: args.longitude ?? null,
-        reported_by_id: uid,
         status: "open",
         client_ref: args.clientRef ?? null,
-        ...siteScopeStamp(site),
-      })
-      .select("id")
-      .single();
-    if (error) throw backendError(error);
-    return String((data as { id: string }).id);
-  },
+        reported_by_id: user.uid,
+      });
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "observation.report",
+        entityType: "environmental_observations",
+        entityId: id,
+        summary: `${args.category.replace("_", " ")} (${args.verification}) at ${site.code}`,
+      });
+      return id;
+    },
 
-  setObservationStatus: async (args: {
-    observationId: string;
-    status: "open" | "monitoring" | "resolved";
-  }): Promise<void> => {
-    await requireStaff();
-    const { error } = await supabase
-      .from("environmental_observations")
-      .update({ status: args.status })
-      .eq("id", args.observationId);
-    if (error) throw backendError(error);
-  },
+    setObservationStatus: async (args: {
+      observationId: string;
+      status: "open" | "monitoring" | "resolved";
+    }) => {
+      const user = await requireStaffUser();
+      const { error } = await supabase
+        .from("environmental_observations")
+        .update({ status: args.status })
+        .eq("id", args.observationId);
+      if (error) throw backendError(error);
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "observation.status",
+        entityType: "environmental_observations",
+        entityId: args.observationId,
+        summary: `Observation status set to ${args.status}`,
+      });
+    },
 
-  listCommunityReports: () =>
-    live<CommunityReport[]>(async () => {
-      const { profile } = await requireStaff();
-      void profile;
-      const rows = await allRows<Record<string, unknown>>("community_reports", "id");
-      return rows
-        .map(mapCommunityReport)
-        .sort((a, b) => b.createdAt - a.createdAt);
-    }, { authBound: true }),
+    listCommunityReports: () =>
+      live<CommunityReport[]>(async () => {
+        // Staff-only data (RLS); non-staff get an empty queue, not a hang.
+        const user = await requireAuthed(true);
+        if (!isStaffRole(user.role)) return [];
+        const rows = await allRows<AnyRow>("community_reports");
+        return rows.map(mapReport).sort((a, b) => b.createdAt - a.createdAt);
+      }, ["community_reports"]),
 
-  /** PUBLIC — one step of the submission handshake. The per-IP rate limit
-   *  and the audit write are server-side (0001/0005). */
-  submitCommunityReport: async (args: {
-    category: CommunityReport["category"];
-    description: string;
-    county: string;
-    district?: string;
-    community?: string;
-    latitude?: number;
-    longitude?: number;
-    contactPhone?: string;
-  }): Promise<{ id: string; trackingCode: string }> => {
-    if (!args.description || !args.description.trim()) throw new Error("INVALID_DESCRIPTION");
-    if (!args.county || !args.county.trim()) throw new Error("INVALID_COUNTY");
-    const trackingCode = makeTrackingCode();
-    const { data, error } = await supabase.rpc("submit_community_report", {
-      p_tracking_code: trackingCode,
-      p_category: args.category,
-      p_description: args.description.trim(),
-      p_county: args.county,
-      p_district: args.district ?? null,
-      p_community: args.community ?? null,
-      p_latitude: args.latitude ?? null,
-      p_longitude: args.longitude ?? null,
-      p_contact_phone: args.contactPhone ?? null,
-    } as unknown as Record<string, unknown>);
-    if (error) throw backendError(error);
-    const out = data as { id?: string } | null;
-    return { id: String(out?.id ?? ""), trackingCode };
-  },
+    /** Public: anyone may submit a concern. No authentication required. */
+    submitCommunityReport: async (args: {
+      category: CommunityReport["category"];
+      description: string;
+      county: string;
+      district?: string;
+      community?: string;
+      latitude?: number;
+      longitude?: number;
+      contactPhone?: string;
+    }) => {
+      // Rate limiting, tracking mirror and audit are enforced server-side by
+      // the security-definer RPC (30 reports/minute cap).
+      const { data, error } = await supabase.rpc("submit_community_report", {
+        p_tracking_code: makeTrackingCode(),
+        p_category: args.category,
+        p_description: args.description,
+        p_county: args.county,
+        p_district: args.district ?? null,
+        p_community: args.community ?? null,
+        p_latitude: args.latitude ?? null,
+        p_longitude: args.longitude ?? null,
+        p_contact_phone: args.contactPhone ?? null,
+      });
+      if (error) throw backendError(error);
+      const payload = data as { id: string; trackingCode: string };
+      return { id: payload.id, trackingCode: payload.trackingCode };
+    },
 
-  /** PUBLIC tracking — coarse fields only (never the report's contact data). */
-  trackCommunityReport: (args: { trackingCode: string }) =>
-    live<{
-      trackingCode: string;
-      status: CommunityReport["status"] | "closed";
-      createdAt?: number;
-      county?: string;
-      category?: string;
-    } | null>(async () => {
-      if (!args?.trackingCode) return null;
-      const rows = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("report_tracking").select("tracking_code, status, created_at").eq("tracking_code", args.trackingCode).limit(1),
-      );
-      if (rows.length === 0) return null;
-      const t = rows[0];
-      return {
-        trackingCode: String(t.tracking_code),
-        status: t.status as CommunityReport["status"],
-        createdAt: tsMs(t.created_at),
-      };
-    }, { authBound: false }),
+    /** Public: track by code. Returns only coarse, non-sensitive fields. */
+    trackCommunityReport: (args: { trackingCode: string }) =>
+      live<{ trackingCode: string; status: string; createdAt: number } | null>(
+        async () => {
+          const code = args.trackingCode.trim().toUpperCase();
+          const { data, error } = await supabase
+            .from("report_tracking")
+            .select("*")
+            .eq("tracking_code", code)
+            .maybeSingle();
+          if (error) throw backendError(error);
+          if (!data) return null;
+          return {
+            trackingCode: data.tracking_code as string,
+            status: data.status as string,
+            createdAt: toMs(data.created_at),
+          };
+        },
+        ["report_tracking"],
+      ),
 
-  triageCommunityReport: async (args: {
-    reportId: string;
-    decision: CommunityReport["status"];
-    note?: string;
-  }): Promise<void> => {
-    await requireReviewer();
-    const { error } = await supabase.rpc("triage_community_report", {
-      p_report_id: args.reportId,
-      p_decision: args.decision,
-      p_note: args.note ?? null,
-    } as unknown as Record<string, unknown>);
-    if (error) throw backendError(error);
-  },
+    triageCommunityReport: async (args: {
+      reportId: string;
+      decision: CommunityReport["status"];
+      note?: string;
+    }) => {
+      await requireReviewerUser();
+      const { error } = await supabase.rpc("triage_community_report", {
+        p_report_id: args.reportId,
+        p_decision: args.decision,
+        p_note: args.note ?? null,
+      });
+      if (error) throw backendError(error);
+    },
 
-  // -------------------------------------------------------------------
-  // Notifications (§1) — derived at request time from records the caller
-  // can already see: no notifications table, no delivery infrastructure.
-  // Delivery channels: in-app is the only channel. Push/email/SMS imply
-  // new infrastructure and cost — REQUIRES GOVERNMENT/OWNER CONFIRMATION
-  // (docs/01); the v1 scope cannot silently grow a channel there.
-  // -------------------------------------------------------------------
-  listNotifications: () =>
-    live<NotificationItem[]>(async () => {
-      const profile = (await getProfile()) ?? null;
-      if (!profile) return [];
-      const isOp = profile.role === ROLES.OPERATOR;
-      const linkBase = isOp ? "/operate" : "/portal";
-      const notifs: NotificationItem[] = [];
-      const HOUR = 3_600_000;
-      const now = Date.now();
-      const dueSoon = now + 3 * 24 * HOUR;
+    // ------------------------------------------------------- notifications
+    // §1 MINIMAL IN-APP NOTIFICATIONS — derived, not stored.
+    //
+    // SCOPE DECISION: v1 notifications are COMPUTED at request time from
+    // records the caller can already see. No notifications table, no
+    // delivery infrastructure, no cost, no retention question. The v1 event
+    // classes (the two the directive names):
+    //   * corrective-action DEADLINES — open CAs in the caller's scope,
+    //     flagged due-soon (≤3 days) or overdue, with per-record links;
+    //   * community-report STATUS CHANGES — staff see triaged (under_review /
+    //     verified / dismissed / referred) reports from the last 7 days;
+    //     a reporter-visible variant is NOT possible without knowing who the
+    //     anonymous reporter was (tracking-code lookup stays the public's
+    //     channel by design).
+    // Push / email / SMS are EXPLICITLY NOT implemented — they imply new
+    // infrastructure and cost (provider accounts, PII handling, retention)
+    // and are classified REQUIRES GOVERNMENT/OWNER CONFIRMATION in docs/01.
 
-      // Deadline + decision notifications: only feed rows the caller's
-      // authorization produced (listMyCorrectiveActions scope).
-      const feed = await inspections.listMyCorrectiveActions;
-      void feed;
-      const caRows = await clientComplianceListForCaller(profile);
-      for (const ca of caRows) {
-        // Deadline: open-ish CA inside the due-soon window or overdue.
-        if (ca.status !== "closed" && ca.status !== "verified") {
-          if (ca.dueAt < now) {
-            notifs.push({
-              id: `ca-${ca._id}`,
-              kind: "ca_deadline",
-              severity: "urgent",
-              title: "Overdue corrective action",
-              body: ca.description,
-              at: ca.dueAt,
-              linkTo: `${linkBase}/corrective-actions`,
-            });
-          } else if (ca.dueAt <= dueSoon) {
-            notifs.push({
-              id: `ca-${ca._id}`,
-              kind: "ca_deadline",
-              severity: "warning",
-              title: "Corrective action due soon",
-              body: ca.description,
-              at: ca.dueAt,
-              linkTo: `${linkBase}/corrective-actions`,
-            });
-          }
-        }
-        // Decision: the REVIEWER'S status lands the CA and the operator who
-        // opened it is notified (escalated is urgent).
-        if (
-          !isOp &&
-          (ca.status === "verified" || ca.status === "closed" || ca.status === "escalated") &&
-          ca.openedById === profile.uid
-        ) {
-          notifs.push({
-            id: `cad-${ca._id}`,
-            kind: "ca_decision",
-            severity: ca.status === "escalated" ? "urgent" : "info",
-            title: `Corrective action ${ca.status}`,
-            body: ca.description,
-            at: ca.createdAt,
-            linkTo: `${linkBase}/corrective-actions`,
+    listNotifications: () =>
+      live<
+        {
+          id: string;
+          kind: "ca_deadline" | "ca_decision" | "report_status";
+          severity: "info" | "warning" | "urgent";
+          title: string;
+          body: string;
+          linkTo: string;
+          at: number;
+        }[]
+      >(async () => {
+        const user = await requireAuthed(true);
+        if (!user.role) return [];
+        const now = Date.now();
+        const DAY = 86_400_000;
+        const out: {
+          id: string;
+          kind: "ca_deadline" | "ca_decision" | "report_status";
+          severity: "info" | "warning" | "urgent";
+          title: string;
+          body: string;
+          linkTo: string;
+          at: number;
+        }[] = [];
+
+        // 1. Corrective-action deadlines in the caller's scope. For operators
+        //    this is their tenant's obligations; for staff their own scope —
+        //    the same scoped feeds the portal pages use.
+        const [caRaw, findingRaw, siteRaw] = await Promise.all([
+          allRows<AnyRow>("corrective_actions"),
+          allRows<AnyRow>("findings"),
+          allRows<AnyRow>("sites"),
+        ]);
+        const findings = new Map(findingRaw.map((r) => [r.id as string, mapFinding(r)]));
+        const sites = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
+        for (const r of caRaw) {
+          const ca = mapCA(r);
+          if (ca.status !== "open" && ca.status !== "in_progress") continue;
+          const site = sites.get(ca.siteId);
+          if (!site || !canAccessSite(user, site)) continue;
+          const finding = findings.get(ca.findingId);
+          const dueMs = ca.dueAt - now;
+          const isOverdue = dueMs < 0;
+          if (!isOverdue && dueMs > 3 * DAY) continue; // due-soon window: ≤3d
+          const siteLabel = `${site.code} ${site.name}`;
+          out.push({
+            id: `ca-${ca._id}`,
+            kind: "ca_deadline",
+            severity: isOverdue ? "urgent" : "warning",
+            title: isOverdue
+              ? `Overdue corrective action at ${siteLabel}`
+              : `Corrective action due soon at ${siteLabel}`,
+            body: `${finding?.title ?? "Compliance finding"} — ${ca.description}`,
+            linkTo: user.role === ROLES.OPERATOR ? "/operate/corrective-actions" : `/portal/sites/${site._id}`,
+            at: ca.dueAt,
           });
         }
-      }
-      // Community report triage news (staff only, last 7 days).
-      if (!isOp) {
-        const weekAgo = now - 7 * 24 * HOUR;
-        let reports: CommunityReport[] = [];
-        try {
-          const rows = await allRows<Record<string, unknown>>("community_reports", "id");
-          reports = rows.map(mapCommunityReport);
-        } catch {
-          reports = [];
-        }
-        for (const r of reports) {
-          if (r.status !== "submitted" && r.reviewedAt && r.reviewedAt >= weekAgo) {
-            notifs.push({
-              id: `rep-${r._id}`,
-              kind: "report_status",
-              severity: "info",
-              title: `${r.trackingCode} ${r.status}`,
-              body: r.description,
-              at: r.reviewedAt,
-              linkTo: "/portal/community",
+
+        // 2. Reviewer decisions on corrective actions the caller opened —
+        //    the operator learns their response was verified/closed/escalated.
+        if (user.role === ROLES.OPERATOR && user.operatorName) {
+          for (const r of caRaw) {
+            const ca = mapCA(r);
+            if (ca.openedById !== user.uid) continue;
+            if (ca.status !== "verified" && ca.status !== "closed" && ca.status !== "escalated") continue;
+            const site = sites.get(ca.siteId);
+            if (!site) continue;
+            out.push({
+              id: `cad-${ca._id}`,
+              kind: "ca_decision",
+              severity: ca.status === "escalated" ? "urgent" : "info",
+              title:
+                ca.status === "escalated"
+                  ? `Corrective action ESCALATED at ${site.code} ${site.name}`
+                  : `Corrective action ${ca.status} at ${site.code} ${site.name}`,
+              body: ca.description,
+              linkTo: "/operate/corrective-actions",
+              at: ca.closedAt ?? ca.dueAt,
             });
           }
         }
-      }
-      return notifs;
-    }, { authBound: true }),
 
-  incidentsPage: (args: { before?: KeysetCursor | null; limit?: number }) =>
-    // mg_incidents_page (0014): keyset-paged, site-joined, RLS-scoped.
-    (async (): Promise<KeysetPage<Record<string, unknown>>> => {
-      try {
-        const { rows, source } = await callPageRpc(
-          "mg_incidents_page",
-          args.before ?? null,
-          args.limit ?? 500,
-        );
-        const last = rows[rows.length - 1];
-        return {
-          rows,
-          nextCursor: last ? cursorFromRow(last) : null,
-          source,
-        };
-      } catch (e) {
-        console.warn("[mg_incidents_page] fell back to client paging:", backendError(e));
-        return clientIncidentsPage(args);
-      }
-    })(),
-};
-
-/** The operator/staff compliance feed (the notification source). */
-async function clientComplianceListForCaller(
-  profile: UserProfile,
-): Promise<(CorrectiveAction & { openedById: string })[]> {
-  const rows = await allRows<Record<string, unknown>>("corrective_actions", "id");
-  const siteRows = await allRows<Record<string, unknown>>("sites", "id");
-  const siteBy = new Map(siteRows.map((s) => [String(s.id), s]));
-  return rows
-    .filter((ca) => {
-      const site = siteBy.get(String(ca.site_id));
-      if (!site) return false;
-      if (profile.role === ROLES.OPERATOR) return site.operator_name === profile.operatorName;
-      return canAccessSite(profile, mapSite(site));
-    })
-    .map((ca) =>
-      mapCorrectiveAction(ca) as CorrectiveAction & { openedById: string },
-    );
-}
-
-export type NotificationItem = {
-  id: string;
-  kind: "ca_deadline" | "ca_decision" | "report_status";
-  severity: "info" | "warning" | "urgent";
-  title: string;
-  body: string;
-  at: number;
-  linkTo: string;
-};
-
-// --------------------------------------------------------- stats
-
-export const stats = {
-  /** SEC-4: aggregation lives in the database (0012's SECURITY INVOKER RPC);
-   *  the client fallback pages every input and reduces (pinned to parity). */
-  commandCenter: () =>
-    live<CommandCenterStats>(async () => {
-      const { profile } = await requireAuthed();
-      // Operators: RLS already filters every table; the aggregates run under
-      // the caller's ownership. ROLBackend NEVER grants staff-wide figures.
-      try {
-        const { data, error } = await supabase.rpc("mg_command_center_stats");
-        if (!error && data) {
-          return coerceCommandCenter(data as Record<string, unknown>, profile);
+        // 3. Community-report status changes — staff queue only (RLS-scoped).
+        if (isStaffRole(user.role)) {
+          const repRaw = await allRows<AnyRow>("community_reports");
+          for (const r of repRaw) {
+            const rep = mapReport(r);
+            if (rep.status === "submitted") continue; // untouched — not news
+            const reviewedAt = rep.reviewedAt ?? rep.createdAt;
+            if (now - reviewedAt > 7 * DAY) continue; // recent window only
+            out.push({
+              id: `rep-${rep._id}`,
+              kind: "report_status",
+              severity: rep.status === "verified" ? "info" : "warning",
+              title: `Community report ${rep.trackingCode} → ${rep.status.replace("_", " ")}`,
+              body: rep.description,
+              linkTo: "/portal/community",
+              at: reviewedAt,
+            });
+          }
         }
-        console.warn(
-          "[stats.commandCenter] mg_command_center_stats fell back to client-side aggregation fallback:",
-          error?.message ?? data,
-        );
-      } catch (e) {
-        console.warn(
-          "[stats.commandCenter] mg_command_center_stats fell back to client-side aggregation fallback:",
-          backendError(e),
-        );
-      }
-      return clientCommandCenter(profile);
-    }, { authBound: true }),
 
-  publicStats: () =>
-    live<{ sites: number; inspections: number; incidents: number; communityReports: number }>(
-      async () => {
-        // The anon-readable mirror in the meta table (refresh_public_stats).
+        // Urgent first, then newest.
+        const sevRank = { urgent: 0, warning: 1, info: 2 } as const;
+        out.sort((a, b) => sevRank[a.severity] - sevRank[b.severity] || b.at - a.at);
+        return out;
+      }, ["corrective_actions", "findings", "sites", "community_reports"]),
+  },
+
+  // ----------------------------------------------------------------- stats
+  stats: {
+    commandCenter: () =>
+      live<CommandCenterStats>(async () => {
+        const user = await requireAuthed(true);
+        // Unassigned accounts: zeroed figures, no denied queries.
+        if (!user.role) {
+          return {
+            scope: user.scope ?? "national",
+            sites: 0, activeSites: 0,
+            inspectionsTotal: 0, inspectionsUnderReview: 0,
+            findingsTotal: 0, findingsCriticalOpen: 0,
+            correctiveActionsOpen: 0, correctiveActionsOverdue: 0,
+            incidentsTotal: 0, fatalities: 0,
+            envAlerts: 0, envByCategory: {},
+            communityReports: 0, communityReportsPending: 0,
+            inspectionCoveragePct: 0, countyCounts: {}, incidentTypes: {},
+          };
+        }
+        // SEC-4 — AGGREGATE IN THE DATABASE. Hosted PostgREST caps unranged
+        // responses at db-max-rows (default 1,000 rows): the old path shipped
+        // every row of seven tables to the browser and summed them there, so
+        // past the cap every figure on this screen was silently wrong. The RPC
+        // is SECURITY INVOKER — it aggregates exactly the RLS-visible rows this
+        // caller would page through — and returns ONE row: correct at any
+        // table size, O(1) rows on the wire.
+        const { data, error } = await supabase.rpc("mg_command_center_stats");
+        if (!error && data && typeof data === "object") {
+          return mapCommandCenterStats(data, user.scope);
+        }
+        // Fallback (lineage without migration 0012 yet): the original
+        // client-side aggregation below — every input is paged to completion
+        // (allRows → pagedRows), so its figures are exact at any size too;
+        // only the wire cost differs. Loud about why, never truncated.
+        console.warn(
+          "[backend] mg_command_center_stats unavailable — client-side aggregation fallback:",
+          error ? error.message ?? String(error) : "empty payload",
+        );
+        const staff = isStaffRole(user.role);
+        const [sitesRaw, inspRaw, findingsRaw, casRaw, incRaw, envRaw, reportsRaw] =
+          await Promise.all([
+            allRows<AnyRow>("sites"),
+            allRows<AnyRow>("inspections"),
+            allRows<AnyRow>("findings"),
+            allRows<AnyRow>("corrective_actions"),
+            allRows<AnyRow>("incidents"),
+            allRows<AnyRow>("environmental_observations"),
+            staff
+              ? allRows<AnyRow>("community_reports")
+              : Promise.resolve([] as AnyRow[]),
+          ]);
+        const sites = sitesRaw.map(mapSite).filter((s) => canAccessSite(user, s));
+        const inspections = inspRaw.map(mapInspection);
+        const findings = findingsRaw.map(mapFinding);
+        const cas = casRaw.map(mapCA);
+        const incidents = incRaw.map(mapIncident);
+        const env = envRaw.map(mapObservation);
+        const reports = reportsRaw.map(mapReport);
+        const now = Date.now();
+
+        const visibleIds = new Set(sites.map((s) => s._id));
+        const visInspections = inspections.filter((i) => visibleIds.has(i.siteId));
+        const visFindings = findings.filter((f) => visibleIds.has(f.siteId));
+        const visCas = cas.filter((c) => visibleIds.has(c.siteId));
+        const visIncidents = incidents.filter((i) => visibleIds.has(i.siteId));
+        const visEnv = env.filter((o) => visibleIds.has(o.siteId));
+
+        const openCa = visCas.filter(
+          (c) => c.status !== "closed" && c.status !== "verified",
+        );
+        const overdueCa = openCa.filter((c) => c.dueAt < now);
+        const fatalities = visIncidents
+          .filter((i) => i.type === "fatality")
+          .reduce(
+            (a, i) => a + (i.fatalities ?? (i.type === "fatality" ? 1 : 0)),
+            0,
+          );
+        const envAlerts = visEnv.filter(
+          (o) =>
+            o.status !== "resolved" &&
+            (o.verification === "measured" || o.verification === "verified"),
+        );
+        const approved = new Set(
+          visInspections.filter((i) => i.status === "approved").map((i) => i.siteId),
+        );
+        const coverage =
+          sites.length === 0 ? 0 : Math.round((approved.size / sites.length) * 100);
+        const countyCounts: Record<string, number> = {};
+        for (const s of sites) countyCounts[s.county] = (countyCounts[s.county] ?? 0) + 1;
+        const countBy = (arr: { [k: string]: unknown }[], key: string) => {
+          const m: Record<string, number> = {};
+          for (const item of arr) {
+            const k = String(item[key]);
+            m[k] = (m[k] ?? 0) + 1;
+          }
+          return m;
+        };
+
+        return {
+          scope: user.scope ?? "national",
+          sites: sites.length,
+          activeSites: sites.filter((s) => s.status === "active").length,
+          inspectionsTotal: visInspections.length,
+          inspectionsUnderReview: visInspections.filter((i) => i.status === "under_review").length,
+          findingsTotal: visFindings.length,
+          findingsCriticalOpen: visFindings.filter(
+            (f) => f.severity === "critical" && (f.status === "open" || f.status === "acknowledged"),
+          ).length,
+          correctiveActionsOpen: openCa.length,
+          correctiveActionsOverdue: overdueCa.length,
+          incidentsTotal: visIncidents.length,
+          fatalities,
+          envAlerts: envAlerts.length,
+          envByCategory: countBy(visEnv as unknown as { [k: string]: unknown }[], "category"),
+          communityReports: reports.length,
+          communityReportsPending: reports.filter((r) => r.status === "submitted").length,
+          inspectionCoveragePct: coverage,
+          countyCounts,
+          incidentTypes: countBy(visIncidents as unknown as { [k: string]: unknown }[], "type"),
+        };
+      }, ["sites", "inspections", "findings", "corrective_actions", "incidents", "environmental_observations", "community_reports"]),
+
+    recentAuditLog: () =>
+      live<AuditEntry[]>(async () => {
+        // Staff-only data (RLS); non-staff get an empty list, not a hang.
+        const user = await requireAuthed();
+        if (!isStaffRole(user.role)) return [];
         const { data, error } = await supabase
-          .from("meta")
-          .select("value")
-          .eq("key", "public_stats")
-          .maybeSingle();
+          .from("audit_log")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(200);
         if (error) throw backendError(error);
-        const v = (
-          data ? (data as { value: Record<string, unknown> }).value : null
-        ) as Record<string, unknown> | null;
-        if (v) {
+        return (data ?? []).map(mapAudit);
+      }, ["audit_log"]),
+
+    publicStats: () =>
+      liveDoc<{ sites: number; inspections: number; incidents: number; communityReports: number }>(
+        () => ({ table: "meta", column: "key", value: "public_stats" }),
+        (r) => {
+          const v = (r.value ?? {}) as Record<string, unknown>;
           return {
             sites: Number(v.sites ?? 0),
             inspections: Number(v.inspections ?? 0),
             incidents: Number(v.incidents ?? 0),
             communityReports: Number(v.communityReports ?? 0),
           };
-        }
-        return { sites: 0, inspections: 0, incidents: 0, communityReports: 0 };
-      },
-      { authBound: false },
-    ),
+        },
+        { authBound: false },
+      ),
 
-  recentAuditLog: () =>
-    live<AuditEntryForUi[]>(async () => {
-      const { profile } = await requireStaff();
-      void profile;
-      const rows = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(200),
-      );
-      return rows
-        .map(mapAuditEntry)
-        .sort((a, b) => b.createdAt - a.createdAt)
-        .slice(0, 200);
-    }, { authBound: true }),
+    listUsers: () =>
+      live<UserProfile[]>(async () => {
+        await requireAdminUser(true);
+        const rows = await allRows<AnyRow>("profiles");
+        return rows.map(mapProfile);
+      }, ["profiles"]),
 
-  listUsers: () =>
-    live<UserRow[]>(async () => {
-      await requireAdmin();
-      const rows = await allRows<Record<string, unknown>>("profiles", "id");
-      return rows.map(mapProfileRow);
-    }, { authBound: true }),
-
-  setUserRole: async (args: {
-    userId: string;
-    role?: Role | null;
-    scope?: Scope | null;
-    county?: string | null;
-    operatorName?: string | null;
-  }): Promise<void> => {
-    await requireAdmin();
-    try {
-      await bumpProfileVersion();
-    } catch {
-      /* versioning is best-effort */
-    }
-    const patch: Record<string, unknown> = {
-      role: args.role ?? null,
-      scope: args.scope ?? null,
-      county: args.county ?? null,
-      operator_name: args.operatorName ?? null,
-    };
-    const { error } = await supabase.from("profiles").update(patch).eq("id", args.userId);
-    if (error) throw backendError(error);
-  },
-
-  provisionByEmail: async (args: {
-    email: string;
-    role: Role;
-    scope: Scope;
-    county?: string;
-    operatorName?: string;
-  }): Promise<void> => {
-    await requireAdmin();
-    const { error } = await supabase.rpc("provision_user_by_email", {
-      p_email: args.email,
-      p_role: args.role,
-      p_scope: args.scope,
-      p_county: args.county ?? null,
-      p_operator_name: args.operatorName ?? null,
-    } as unknown as Record<string, unknown>);
-    if (error) throw backendError(error);
-  },
-
-  completeProfile: async (args: {
-    jobTitle: string;
-    organization: string;
-    scope?: Scope;
-    county?: string;
-    operatorName?: string;
-  }): Promise<void> => {
-    const listUsers = "no-op";
-    void listUsers;
-    const { error } = await supabase.rpc("complete_staff_profile", {
-      p_job_title: args.jobTitle,
-      p_organization: args.organization,
-      p_scope: args.scope ?? "national",
-      p_county: args.county ?? null,
-      p_operator_name: args.operatorName ?? null,
-    } as unknown as Record<string, unknown>);
-    if (error) throw backendError(error);
-    PROFILE_CACHE.clear();
-    try {
-      bumpProfileVersion();
-    } catch {
-      /* best-effort */
-    }
-  },
-};
-
-export interface AuditEntryForUi {
-  _id: string;
-  actorId?: string;
-  actorLabel: string;
-  action: string;
-  entityType: string;
-  entityId?: string;
-  summary: string;
-  createdAt: number;
-}
-
-/** Wait for the auth store's readiness transition (backend-react.js). */
-export function notifyProfileVersion(): void {
-  try {
-    bumpProfileVersion();
-  } catch {
-    /* best-effort */
-  }
-}
-
-export interface UserRow extends UserProfile {}
-
-function mapProfileRow(row: Record<string, unknown>): UserRow {
-  const p = mapProfile(row);
-  return (
-    p ?? {
-      uid: String(row.id ?? ""),
-      email: null,
-      name: null,
-      createdAt: 0,
-    }
-  );
-}
-
-function coerceCommandCenter(
-  raw: Record<string, unknown>,
-  profile: UserProfile,
-): CommandCenterStats {
-  const obj = (v: unknown): Record<string, number> => {
-    if (!v || typeof v !== "object") return {};
-    const out: Record<string, number> = {};
-    for (const [k, n] of Object.entries(v as Record<string, unknown>)) out[k] = Number(n ?? 0);
-    return out;
-  };
-  return {
-    scope: (raw.scope as string) ?? profile.scope ?? "national",
-    sites: Number(raw.sites ?? 0),
-    activeSites: Number(raw.activeSites ?? 0),
-    inspectionsTotal: Number(raw.inspectionsTotal ?? 0),
-    inspectionsUnderReview: Number(raw.inspectionsUnderReview ?? 0),
-    findingsTotal: Number(raw.findingsTotal ?? 0),
-    findingsCriticalOpen: Number(raw.findingsCriticalOpen ?? 0),
-    correctiveActionsOpen: Number(raw.correctiveActionsOpen ?? 0),
-    correctiveActionsOverdue: Number(raw.correctiveActionsOverdue ?? 0),
-    incidentsTotal: Number(raw.incidentsTotal ?? 0),
-    fatalities: Number(raw.fatalities ?? 0),
-    envAlerts: Number(raw.envAlerts ?? 0),
-    envByCategory: obj(raw.envByCategory),
-    communityReports: Number(raw.communityReports ?? 0),
-    communityReportsPending: Number(raw.communityReportsPending ?? 0),
-    inspectionCoveragePct: Number(raw.inspectionCoveragePct ?? 0),
-    countyCounts: obj(raw.countyCounts),
-    incidentTypes: obj(raw.incidentTypes),
-  };
-}
-
-/** The paginated client-side aggregation fallback — the documented path the
- *  0012 RPC takes over from; figures mirror the SQL statement for statement. */
-async function clientCommandCenter(profile: UserProfile): Promise<CommandCenterStats> {
-  const [sitesRows, inspRows, findRows, caRows, incRows, obsRows, repRows] = await Promise.all([
-    allRows<Record<string, unknown>>("sites", "id"),
-    allRows<Record<string, unknown>>("inspections", "id"),
-    allRows<Record<string, unknown>>("findings", "id"),
-    allRows<Record<string, unknown>>("corrective_actions", "id"),
-    allRows<Record<string, unknown>>("incidents", "id"),
-    allRows<Record<string, unknown>>("environmental_observations", "id"),
-    allRows<Record<string, unknown>>("community_reports", "id"),
-  ]);
-  const now = Date.now();
-  const countyCounts: Record<string, number> = {};
-  for (const s of sitesRows) {
-    const c = String(s.county ?? "");
-    countyCounts[c] = (countyCounts[c] ?? 0) + 1;
-  }
-  const incidentTypes: Record<string, number> = {};
-  let fatalities = 0;
-  for (const i of incRows) {
-    const t = String(i.type ?? "");
-    incidentTypes[t] = (incidentTypes[t] ?? 0) + 1;
-    if (t === "fatality") fatalities += Number(i.fatalities ?? 1);
-  }
-  const envByCategory: Record<string, number> = {};
-  let envAlerts = 0;
-  for (const o of obsRows) {
-    const c = String(o.category ?? "");
-    envByCategory[c] = (envByCategory[c] ?? 0) + 1;
-    if (o.status !== "resolved" && (o.verification === "measured" || o.verification === "verified"))
-      envAlerts += 1;
-  }
-  const approvedSites = new Set(
-    inspRows.filter((i) => i.status === "approved").map((i) => String(i.site_id)),
-  );
-  return {
-    scope: profile.scope ?? "national",
-    sites: sitesRows.length,
-    activeSites: sitesRows.filter((s) => s.status === "active").length,
-    inspectionsTotal: inspRows.length,
-    inspectionsUnderReview: inspRows.filter((i) => i.status === "under_review").length,
-    findingsTotal: findRows.length,
-    findingsCriticalOpen: findRows.filter(
-      (f) => f.severity === "critical" && (f.status === "open" || f.status === "acknowledged"),
-    ).length,
-    correctiveActionsOpen: caRows.filter(
-      (c) => c.status !== "closed" && c.status !== "verified",
-    ).length,
-    correctiveActionsOverdue: caRows.filter(
-      (c) =>
-        c.status !== "closed" &&
-        c.status !== "verified" &&
-        (tsMs(c.due_at) ?? 0) < now,
-    ).length,
-    incidentsTotal: incRows.length,
-    fatalities,
-    envAlerts,
-    envByCategory,
-    communityReports: repRows.length,
-    communityReportsPending: repRows.filter((r) => r.status === "submitted").length,
-    inspectionCoveragePct:
-      sitesRows.length === 0
-        ? 0
-        : Math.round((100 * approvedSites.size) / sitesRows.length),
-    countyCounts,
-    incidentTypes,
-  };
-}
-
-// ------------------------------------------------------ evidence
-
-const MAX_EVIDENCE_BYTES = 25 * 1024 * 1024;
-
-const EVIDENCE_KIND_BY_MIME: (ext: string) => Evidence["kind"] = (mime) => {
-  void mime;
-  return "photo";
-};
-
-function evidenceKindFor(mime: string, fileName: string): Evidence["kind"] {
-  const f = fileName.toLowerCase();
-  if (mime.startsWith("image/")) return "photo";
-  if (mime.startsWith("video/")) return "video";
-  if (mime.startsWith("audio/")) return "audio";
-  if (f.endsWith(".pdf") || f.endsWith(".doc") || f.endsWith(".docx") || f.endsWith(".txt"))
-    return "document";
-  return EVIDENCE_KIND_BY_MIME(mime);
-}
-
-// The evidence QueueManager hands us a file upload contract; the real
-// storage path is evidence/{uid}/{docId}__{fileName}.
-export const evidence = {
-  upload: async (args: {
-    file: Blob | null;
-    fileName: string;
-    mimeType: string;
-    parentType: EvidenceParentType;
-    parentId: string;
-    siteId?: string;
-    caption?: string;
-    capturedAt?: number;
-    sha256?: string;
-  }): Promise<string> => {
-    const { uid } = await requireAuthed();
-    if (!args.fileName) throw new Error("INVALID_FILE_NAME");
-    if (!args.parentType || !args.parentId) throw new Error("EVIDENCE_REQUIRES_PARENT");
-    // site-less evidence staff-only (0013): community_report triage.
-    if (!args.siteId) {
-      if (!isStaffRole((await getProfile())?.role)) throw new Error("FORBIDDEN");
-    }
-    const site = args.siteId ? await canAccessSiteNow(args.siteId) : null;
-    if (args.siteId && !site) throw new Error("FORBIDDEN");
-    const bytes = args.file ? await args.file.arrayBuffer() : new ArrayBuffer(0);
-    if (bytes.byteLength > MAX_EVIDENCE_BYTES) throw new Error("FILE_TOO_LARGE");
-    // EVD-1: hash the bytes and refuse a mismatched declaration.
-    const digest = await sha256Hex(args.file as Blob);
-    if (args.sha256 && args.sha256 !== digest) throw new Error("EVIDENCE_HASH_MISMATCH");
-    const id = crypto.randomUUID();
-    const storagePath = `${uid}/${id}__${args.fileName}`;
-    // Bytes first (the metadata row joins the object by storage_path).
-    const up = await supabase.storage
-      .from("evidence")
-      .upload(storagePath, args.file ?? new Blob([]), {
-        contentType: args.mimeType,
-        upsert: false,
+    setUserRole: async (args: {
+      userId: string;
+      role: Role;
+      scope?: Scope;
+      county?: string;
+      operatorName?: string;
+    }) => {
+      const user = await requireAdminUser();
+      const target = await getProfile(args.userId);
+      if (!target) throw new Error("NOT_FOUND");
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          role: args.role,
+          scope: args.scope ?? target.scope ?? null,
+          county: args.county ?? target.county ?? null,
+          operator_name: args.operatorName ?? target.operatorName ?? null,
+          profile_complete: true,
+        })
+        .eq("id", args.userId);
+      if (error) throw backendError(error);
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "user.role.set",
+        entityType: "users",
+        entityId: args.userId,
+        summary: `Role ${args.role} assigned to ${target.email ?? args.userId}`,
       });
-    if (up.error) throw backendError(up.error);
-    const { data, error } = await supabase
-      .from("evidence")
-      .insert({
-        id,
+      bumpProfileVersion();
+    },
+
+    provisionByEmail: async (args: {
+      email: string;
+      role: Role;
+      scope: Scope;
+      county?: string;
+      operatorName?: string;
+    }) => {
+      const user = await requireAdminUser();
+      const { error } = await supabase.rpc("provision_user_by_email", {
+        p_email: args.email.toLowerCase(),
+        p_role: args.role,
+        p_scope: args.scope,
+        p_county: args.county ?? null,
+        p_operator_name: args.operatorName ?? null,
+      });
+      if (error) throw backendError(error);
+      bumpProfileVersion();
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "user.role.set",
+        entityType: "users",
+        summary: `Role ${args.role} (${args.scope}) assigned to ${args.email}`,
+      });
+    },
+
+    completeProfile: async (args: {
+      jobTitle: string;
+      organization: string;
+      scope?: Scope;
+      county?: string;
+      operatorName?: string;
+    }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("complete_staff_profile", {
+        p_job_title: args.jobTitle,
+        p_organization: args.organization,
+        p_scope: args.scope ?? "national",
+        p_county: args.county ?? null,
+        p_operator_name: args.operatorName ?? null,
+      });
+      if (error) throw backendError(error);
+      // Role/scope may have changed (first-admin bootstrap) — re-derive all
+      // auth-bound subscriptions.
+      bumpProfileVersion();
+    },
+  },
+
+  // --------------------------------------------------------------- exports
+  // §9 REPORTING EXPORTS — STREAMING (SEC-4 v2). The row source moved into
+  // the database: pages of site-joined rows come from the SECURITY INVOKER
+  // keyset RPCs (migration 0014) — the same RLS scope as the feeds — and are
+  // serialized incrementally by export-csv (csvChunks/streamCsvFile). Each
+  // page is released as it is consumed, so an export's memory tracks one
+  // page, not the table, and no export path can exceed the caller's
+  // authorization: the row source IS the caller's row visibility (invoker +
+  // RLS; no definer, no service role anywhere).
+  exports: {
+    streamIncidents: (): AsyncGenerator<IncidentPageRow[]> =>
+      keysetPages((before) => api.records.incidentsPage({ before })),
+    streamInspections: (): AsyncGenerator<InspectionListRow[]> =>
+      keysetPages((before) => api.inspections.inspectionsPage({ before })),
+    streamCompliance: (): AsyncGenerator<CompliancePageRow[]> =>
+      keysetPages((before) => api.inspections.compliancePage({ before })),
+  },
+
+  // -------------------------------------------------------------- evidence
+  evidence: {
+    /**
+     * Upload bytes to Storage, then record the evidence row.
+     *
+     * STORAGE CONTRACT: object path MUST be {uid}/{evidenceRowId}__{fileName}
+     * inside the private `evidence` bucket — the storage insert policy checks
+     * the first folder against the caller's uid, and the read policy joins the
+     * metadata row by storage_path to re-derive role + tenant per read.
+     * siteId is MANDATORY.
+     */
+    upload: async (args: {
+      file: Blob;
+      fileName: string;
+      mimeType: string;
+      parentType: Evidence["parentType"];
+      parentId: string;
+      /** Mandatory except for community_report attachments (migration 0013:
+       *  a public report is not bound to any site). */
+      siteId?: string;
+      caption?: string;
+      capturedAt?: number;
+      /** Client-computed digest; re-hashed here and refused on mismatch. */
+      sha256?: string;
+      /** Optional byte-progress callback (§10). When provided AND the
+       *  environment has XMLHttpRequest (browser), bytes go up through the
+       *  progress-emitting wire path; otherwise the supabase-js path is
+       *  used (tests, exotic environments — same object, same policies). */
+      onProgress?: (p: { loaded: number; total: number }) => void;
+    }) => {
+      const user = await requireAuthed();
+      if (!user.role) throw new Error("FORBIDDEN");
+      if (args.parentType !== "community_report") {
+        // Every site-bound parent requires a visible site (EVD-1 kept the
+        // site-less path exclusive to community triage).
+        if (!args.siteId) throw new Error("EVIDENCE_REQUIRES_SITE");
+      } else if (!isStaffRole(user.role)) {
+        // Site-less community-report attachments are staff-only — mirrors
+        // the 0013 RLS / storage / RPC branches.
+        throw new Error("FORBIDDEN");
+      }
+      if (args.file.size > 25 * 1024 * 1024)
+        throw new Error("FILE_TOO_LARGE");
+      const site = args.siteId ? await getSite(args.siteId) : null;
+      if (args.siteId && (!site || !canAccessSite(user, site)))
+        throw new Error("FORBIDDEN");
+      // EVD-1: hash the bytes independently; a client-declared digest that
+      // does not match the bytes about to be stored is refused — the row's
+      // sha256 always describes the bytes actually uploaded.
+      const computed = await sha256Hex(args.file);
+      if (args.sha256 && computed && args.sha256 !== computed)
+        throw new Error("EVIDENCE_HASH_MISMATCH");
+      const storedSha = computed ?? args.sha256 ?? null;
+      const kind = evidenceKindByMime(args.mimeType);
+      // 1. Generate the row id FIRST (no write yet) so the object name can
+      //    embed it — {rowId}__{fileName} is the join key the read policy
+      //    parses to re-check scope on every read.
+      const c = globalThis.crypto as Crypto | undefined;
+      const rowId =
+        c && typeof c.randomUUID === "function"
+          ? c.randomUUID()
+          : `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+      const storagePath = `${user.uid}/${rowId}__${args.fileName}`;
+      // 2. Upload bytes (uid first-folder contract + 25MB bucket cap
+      //    re-checked server-side by the bucket setting and storage policy).
+      if (args.onProgress && typeof XMLHttpRequest !== "undefined") {
+        try {
+          await uploadWithProgress(
+            "evidence",
+            storagePath,
+            args.file,
+            args.mimeType,
+            args.onProgress,
+          );
+        } catch (e) {
+          throw backendError(e);
+        }
+      } else {
+        const { error: upErr } = await supabase.storage
+          .from("evidence")
+          .upload(storagePath, args.file, { contentType: args.mimeType });
+        if (upErr) throw backendError(upErr);
+      }
+      // 3. Create the metadata row — reads only work once this exists, so a
+      //    failed write leaves no readable reference to the bytes.
+      const row = {
+        id: rowId,
         storage_path: storagePath,
         parent_type: args.parentType,
         parent_id: args.parentId,
-        site_id: site?._id ?? null,
-        kind: evidenceKindFor(args.mimeType, args.fileName),
+        site_id: args.siteId || null,
+        kind,
         file_name: args.fileName,
         mime_type: args.mimeType,
-        size_bytes: bytes.byteLength,
+        size_bytes: args.file.size,
         caption: args.caption ?? null,
-        captured_at:
-          args.capturedAt !== undefined
-            ? new Date(args.capturedAt).toISOString()
-            : null,
-        uploaded_by_id: uid,
-        sha256: digest,
-        ...siteScopeStamp(site ?? { county: "Unknown", operatorName: "Unknown" }),
-      })
-      .select("id")
-      .single();
-    if (error) {
-      // The row is the join key — refuse to orphan the object.
-      await supabase.storage.from("evidence").remove([storagePath]);
-      throw backendError(error);
-    }
-    return String((data as { id: string }).id);
-  },
-
-  /** Progress-aware byte upload (the XHR path in supabase.ts; used by the
-   *  offline evidence queue). */
-  uploadBytesWithProgress: (args: {
-    storagePath: string;
-    file: Blob;
-    mimeType: string;
-  }, onProgress?: Parameters<typeof uploadWithProgress>[4]): Promise<void> =>
-    uploadWithProgress("evidence", args.storagePath, args.file, args.mimeType, onProgress),
-
-  listForParent: (args: { parentType: EvidenceParentType; parentId: string }) =>
-    live<Evidence[]>(async () => {
-      await requireAuthed();
-      if (!args?.parentType || !args?.parentId) return [];
-      // The scoped list RPC re-checks site visibility inside the definition.
-      const { data, error } = await supabase.rpc("evidence_for_parent", {
-        p_parent_type: args.parentType,
-        p_parent_id: args.parentId,
-      } as unknown as Record<string, unknown>);
-      if (error) throw backendError(error);
-      return ((data ?? []) as Record<string, unknown>[]).map(mapEvidence);
-    }, { authBound: true }),
-
-  getUrl: async (evidenceId: string): Promise<string> => {
-    await requireAuthed();
-    const { data, error } = await supabase
-      .from("evidence")
-      .select("storage_path, site_id")
-      .eq("id", evidenceId)
-      .maybeSingle();
-    if (error) throw backendError(error);
-    const row = (data ?? null) as Record<string, unknown> | null;
-    if (!row) throw new Error("NOT_FOUND");
-    if (row.site_id) {
-      const site = await canAccessSiteNow(String(row.site_id));
-      if (!site) throw new Error("NOT_FOUND"); // cross-tenant mask
-    }
-    const signed = await supabase.storage
-      .from("evidence")
-      .createSignedUrl(String(row.storage_path), 3600);
-    if (signed.error || !signed.data) throw backendError(signed.error ?? "NOT_FOUND");
-    return (signed.data as unknown as { signedUrl: string }).signedUrl;
-  },
-
-  storageFootprint: () =>
-    live<{ count: number; bytes: number }>(async () => {
-      await requireAdmin();
-      const rows = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("evidence").select("id, size_bytes"),
-      );
-      return {
-        count: rows.length,
-        bytes: rows.reduce((n, r) => n + Number(r.size_bytes ?? 0), 0),
+        captured_at: args.capturedAt == null ? null : iso(args.capturedAt),
+        uploaded_by_id: user.uid,
+        sha256: storedSha,
       };
-    }, { authBound: true }),
-};
-
-// --------------------------------------------------------- seed
-
-export const seed = {
-  /** Admin-only: synthetic demo data only when the registry is empty. */
-  seedIfEmpty: async (): Promise<{ seeded: boolean; reason?: string }> => {
-    await requireAdmin();
-    const probe = await pagedRows<Record<string, unknown>>((q) =>
-      supabase.from("sites").select("id").limit(1),
-    );
-    if (probe.length > 0) return { seeded: false, reason: "not_empty" };
-    const site = await sites.create({
-      name: "Demo Wash Plant",
-      operatorName: "AgriLib Mining",
-      county: "Bomi",
-      district: "Senjeh",
-      community: "Bomi Hills",
-      mineralType: "Gold",
-      latitude: 6.85,
-      longitude: -10.85,
-      notes: "Synthetic demo record (seedIfEmpty).",
-    });
-    await sites.setStatus({ siteId: site, status: "active" });
-    return { seeded: true };
-  },
-};
-
-// --------------------------------------------------------- users / profile API
-
-export const users = {
-  /** The signed-in caller's own profile (the /portal identity hook). */
-  currentUser: () =>
-    live<UserProfile | null>(async () => {
-      const uid = authUserId();
-      if (!uid) return null;
-      const cache = PROFILE_CACHE.get(uid);
-      if (cache !== undefined) return cache;
-      return getProfile();
-    }, { authBound: true }),
-};
-
-// ------------------------------------------------------------ ai (§18)
-
-export type RiskSentence = {
-  factor: string;
-  text: string;
-  points: number;
-  recordIds: string[];
-};
-
-export type RiskExplanation = {
-  siteId: string;
-  abstained: boolean;
-  summary: string | null;
-  sentences: RiskSentence[];
-  citations: string[];
-  disclaimer: string;
-};
-
-export const ai = {
-  /** Read-only, server-side, scope-checked explanation — cite-or-abstain.
-   *  No provider model, no network call, no mutation: the payload is a
-   *  deterministic walkthrough of the recorded weighted factors with their
-   *  cite-or-abstain anchors. */
-  explainRiskScore: (args: { siteId: string }) =>
-    live<RiskExplanation | null>(async () => {
-      const { profile } = await requireAuthed();
-      if (!profile.role || profile.role === ROLES.OPERATOR) return null;
-      if (isGuestLike(profile)) return null;
-      if (!args?.siteId) return null;
-      // SEC-4 v2 — the aggregates AND the cite-or-abstain id arrays come
-      // from the SECURITY INVOKER RPC (0014); fallback pages the inputs.
-      let payload: Record<string, unknown> | null = null;
-      try {
-        const { data, error } = await supabase.rpc("mg_risk_explanation", {
-          p_site_id: args.siteId,
-        } as unknown as Record<string, unknown>);
-        if (!error && data) payload = data as Record<string, unknown>;
-        else console.warn("[ai.explainRiskScore] mg_risk_explanation fell back:", error?.message ?? data);
-      } catch (e) {
-        console.warn("[ai.explainRiskScore] mg_risk_explanation fell back:", backendError(e));
-      }
-      let counts: RiskInputCounts;
-      let ids: Parameters<typeof factorsFromCountsAndIds>[1];
-      if (payload) {
-        if (!payload.siteId) return null; // not found OR out of scope → null
-        counts = {
-          findingsTotal: Number(payload.findingsTotal ?? 0),
-          low: Number(payload.lowFindings ?? 0),
-          medium: Number(payload.mediumFindings ?? 0),
-          high: Number(payload.highFindings ?? 0),
-          critical: Number(payload.criticalFindings ?? 0),
-          overdueCAs: Number(payload.overdueCAs ?? 0),
-          fatalityIncidents: Number(payload.fatalityIncidents ?? 0),
-          seriousIncidents: Number(payload.seriousIncidents ?? 0),
-          envAlerts: Number(payload.envAlerts ?? 0),
-        };
-        ids = {
-          allFindingIds: (payload.allFindingIds as string[]) ?? [],
-          lowIds: (payload.lowIds as string[]) ?? [],
-          mediumIds: (payload.mediumIds as string[]) ?? [],
-          highIds: (payload.highIds as string[]) ?? [],
-          criticalIds: (payload.criticalIds as string[]) ?? [],
-          overdueCaIds: (payload.overdueCaIds as string[]) ?? [],
-          fatalityIds: (payload.fatalityIds as string[]) ?? [],
-          seriousIncidentIds: (payload.seriousIncidentIds as string[]) ?? [],
-          envAlertIds: (payload.envAlertIds as string[]) ?? [],
-        };
-      } else {
-        // ---- fallback: page the input tables for ONE site ----
-        const [findings, cas, incidents, observations] = await Promise.all([
-          pagedRows<Record<string, unknown>>((q) =>
-            supabase.from("findings").select("*").eq("site_id", args.siteId).order("id"),
-          ),
-          pagedRows<Record<string, unknown>>((q) =>
-            supabase.from("corrective_actions").select("*").eq("site_id", args.siteId).order("id"),
-          ),
-          pagedRows<Record<string, unknown>>((q) =>
-            supabase.from("incidents").select("*").eq("site_id", args.siteId).order("id"),
-          ),
-          pagedRows<Record<string, unknown>>((q) =>
-            supabase.from("environmental_observations").select("*").eq("site_id", args.siteId).order("id"),
-          ),
-        ]);
-        counts = countFromRows(
-          findings.map(mapFinding),
-          cas.map(mapCorrectiveAction),
-          incidents.map(mapIncident),
-          observations.map(mapObservation),
-          args.siteId,
-          Date.now(),
+      let { error: dbErr } = await supabase.from("evidence").insert(row);
+      if (dbErr && String((dbErr as { message?: string }).message ?? "").includes("sha256")) {
+        // Pre-0013 lineage (live until migration 0013 is applied): the
+        // column does not exist yet. Record the row WITHOUT the digest
+        // rather than failing every upload on that lineage; the digest is
+        // recomputed whenever verification needs it.
+        console.warn(
+          "evidence.upload: evidence.sha256 missing (0013 not applied) — storing row without digest",
         );
-        ids = {
-          allFindingIds: findings.map((f) => String(f.id)),
-          lowIds: findings.filter((f) => f.severity === "low").map((f) => String(f.id)),
-          mediumIds: findings.filter((f) => f.severity === "medium").map((f) => String(f.id)),
-          highIds: findings.filter((f) => f.severity === "high").map((f) => String(f.id)),
-          criticalIds: findings.filter((f) => f.severity === "critical").map((f) => String(f.id)),
-          overdueCaIds: cas
-            .filter((c) => c.status !== "closed" && c.status !== "verified" && (tsMs(c.due_at) ?? 0) < Date.now())
-            .map((c) => String(c.id)),
-          fatalityIds: incidents.filter((i) => i.type === "fatality").map((i) => String(i.id)),
-          seriousIncidentIds: incidents
-            .filter(
-              (i) =>
-                i.type !== "fatality" &&
-                (i.severity === "critical" || i.severity === "high"),
-            )
-            .map((i) => String(i.id)),
-          envAlertIds: observations
-            .filter(
-              (o) =>
-                o.status !== "resolved" &&
-                (o.verification === "measured" || o.verification === "verified"),
-            )
-            .map((o) => String(o.id)),
-        };
+        const { sha256: _omit, ...legacyRow } = row;
+        ({ error: dbErr } = await supabase.from("evidence").insert(legacyRow));
       }
-      const built = factorsFromCountsAndIds(counts, ids);
-      const sentences: RiskSentence[] = built.factors.map((f) => ({
-        factor: f.label,
-        text: `${f.label} — ${f.points} point(s).`,
-        points: f.points,
-        recordIds: f.recordIds,
-      }));
-      const citations = [...new Set(sentences.flatMap((s) => s.recordIds))];
-      const abstained = sentences.length === 0;
-      return {
-        siteId: args.siteId,
-        abstained,
-        summary: abstained
-          ? null
-          : `Risk score ${built.score} from ${sentences.length} recorded factor(s).`,
-        sentences,
-        citations,
-        disclaimer: AI_DISCLAIMER,
-      };
-    }, { authBound: true }),
-};
-
-function isGuestLike(profile: UserProfile): boolean {
-  // Role-less accounts get no AI narrative (the no-leak contract).
-  return !profile.role;
-}
-
-function countFromRows(
-  findings: Finding[],
-  cas: CorrectiveAction[],
-  incidents: Incident[],
-  observations: EnvironmentalObservation[],
-  siteId: string,
-  now: number,
-): RiskInputCounts {
-  const siteFindings = findings.filter((f) => f.siteId === siteId);
-  const counts: RiskInputCounts = {
-    findingsTotal: siteFindings.length,
-    low: 0,
-    medium: 0,
-    high: 0,
-    critical: 0,
-    overdueCAs: 0,
-    fatalityIncidents: 0,
-    seriousIncidents: 0,
-    envAlerts: 0,
-  };
-  for (const f of siteFindings) {
-    if (f.severity === "critical") counts.critical += 1;
-    else if (f.severity === "high") counts.high += 1;
-    else if (f.severity === "medium") counts.medium += 1;
-    else counts.low += 1;
-  }
-  for (const c of cas) {
-    if (
-      c.siteId === siteId &&
-      c.status !== "closed" &&
-      c.status !== "verified" &&
-      c.dueAt < now
-    )
-      counts.overdueCAs += 1;
-  }
-  for (const i of incidents) {
-    if (i.siteId !== siteId) continue;
-    if (i.type === "fatality") counts.fatalityIncidents += 1;
-    else if (i.severity === "critical" || i.severity === "high")
-      counts.seriousIncidents += 1;
-  }
-  for (const o of observations) {
-    if (
-      o.siteId === siteId &&
-      o.status !== "resolved" &&
-      (o.verification === "measured" || o.verification === "verified")
-    )
-      counts.envAlerts += 1;
-  }
-  return counts;
-}
-
-// ------------------------------------------------------- exports (§9)
-
-export const exports = {
-  /** Streaming CSV row source over the keyset incidence page (SEC-4 v2). */
-  streamIncidents: (): AsyncGenerator<Record<string, unknown>[], void, unknown> =>
-    keysetStream((cursor) => records.incidentsPage({ before: cursor, limit: 500 })),
-
-  streamInspections: (): AsyncGenerator<
-    Record<string, unknown>[],
-    void,
-    unknown
-  > =>
-    keysetStream((cursor) =>
-      inspections.inspectionsPage({ before: cursor, limit: 500 }),
-    ),
-
-  streamCompliance: (): AsyncGenerator<Record<string, unknown>[], void, unknown> =>
-    keysetStream((cursor) =>
-      inspections.compliancePage({ before: cursor, limit: 500 }),
-    ),
-};
-
-async function* keysetStream(
-  page: (before: KeysetCursor | null) => Promise<KeysetPage<Record<string, unknown>>>,
-): AsyncGenerator<Record<string, unknown>[], void, unknown> {
-  let before: KeysetCursor | null = null;
-  for (;;) {
-    const res = await page(before);
-    if (res.rows.length > 0) yield res.rows;
-    if (!res.nextCursor) break;
-    before = res.nextCursor;
-  }
-}
-
-// ------------------------------------------------------------ the api object
-
-export const api = {
-  // sites / inspections / records / stats / evidence / seed / users / ai /
-  // exports — spread as the original Convex-era namespace shape.
-  sites,
-  inspections,
-  records,
-  stats,
-  evidence,
-  seed,
-  users,
-  ai,
-  exports,
-
-  // mapFeatures — the NationalMap's registry/GIS feed (verified vs reported
-  // layers, doc 06). Boundaries render ONLY when an authoritative boundary
-  // dataset is present; the map degrades to point records otherwise
-  // (no fabricated boundary data — the master directive prohibits it).
-  mapFeatures: () =>
-    live<{
-      layers: MapLayerConfig[];
-      features: MapFeature[];
-      adminBoundaries: AdminBoundary[];
-      siteBoundaries: SiteBoundary[];
-    }>(async () => {
-      const profile = (await getProfile()) ?? null;
-      if (!profile) {
-        return {
-          layers: MAP_LAYER_CONFIGS,
-          features: [],
-          adminBoundaries: [],
-          siteBoundaries: [],
-        };
-      }
-      const siteRows = await pagedRows<Record<string, unknown>>((q) =>
-        supabase.from("sites").select("*").order("id"),
-      );
-      const visibleSites = siteRows.filter((s) => canAccessSite(profile, mapSite(s)));
-      const features: MapFeature[] = visibleSites.map((s) => {
-        const site = mapSite(s);
-        return {
-          id: site._id,
-          layer: "sites" as const,
-          label: site.name,
-          lng: site.longitude ?? 0,
-          lat: site.latitude ?? 0,
-          siteId: site._id,
-          geoSource: site.geoSource,
-          geoAccuracyM: site.geoAccuracyM,
-          geoVerified: site.geoVerified,
-        };
+      if (dbErr) throw backendError(dbErr);
+      await logAudit({
+        actorId: user.uid,
+        actorLabel: await actorLabel(user),
+        action: "evidence.upload",
+        entityType: "evidence",
+        entityId: rowId,
+        summary: `${kind} evidence attached to ${args.parentType} at ${site ? `site ${site.code}` : "no site (community triage)"}`,
       });
-      // Boundary tables (Session 6): rendered when authored; empty arrays
-      // are the designed no-boundary state.
-      let adminBoundaries: AdminBoundary[] = [];
-      let siteBoundaries: SiteBoundary[] = [];
-      try {
-        const bRows = await pagedRows<Record<string, unknown>>((q) =>
-          supabase.from("admin_boundaries").select("*").order("created_at", { ascending: false }),
+      return rowId;
+    },
+
+    listForParent: (args: {
+      parentType: Evidence["parentType"];
+      parentId: string;
+      refresh?: number;
+    }) =>
+      live<Evidence[]>(async () => {
+        const user = await requireAuthed();
+        if (!user.role) return [];
+        // The security-definer RPC applies the rules-equivalent scope check
+        // (mg_can_access_site) — the client never queries raw evidence rows.
+        const { data, error } = await supabase.rpc("evidence_for_parent", {
+          p_parent_type: args.parentType,
+          p_parent_id: args.parentId,
+        });
+        if (error) throw backendError(error);
+        return (data ?? []).map(mapEvidence);
+      }, ["evidence"]),
+
+    /**
+     * Signed-read proxy: mints a short-lived signed URL for an evidence row.
+     *
+     * Gap #2 (evidence URL revocation): the URL is minted ONLY after the
+     * `evidence_url` RPC re-derives the caller's CURRENT site access (the
+     * same mg_can_access_site predicate as the storage read policy) and logs
+     * the mint to the definer-only evidence_url_audit table. The TTL drops
+     * from 3600s to 120s - a leaked link is a two-minute exposure, not an
+     * hour, and revoking a user's access kills their NEXT mint immediately
+     * (revocation-at-mint; in-flight URLs <=120s are the documented residual).
+     * The RPC clamps TTL server-side (30-300s) regardless of what we send.
+     */
+    getUrl: async (evidenceId: string): Promise<string | null> => {
+      await requireAuthed();
+      const TTL_SECONDS = 120;
+      const { data: path, error } = await supabase.rpc("evidence_url", {
+        p_evidence_id: evidenceId,
+        p_ttl_seconds: TTL_SECONDS,
+      });
+      if (error) throw backendError(error);
+      if (!path) throw new Error("NOT_FOUND");
+      const { data: signed, error: sErr } = await supabase.storage
+        .from("evidence")
+        .createSignedUrl(path as string, TTL_SECONDS);
+      if (sErr || !signed) return null;
+      return signed.signedUrl;
+    },
+
+    storageFootprint: () =>
+      live<{ count: number; totalBytes: number }>(async () => {
+        await requireAdminUser();
+        // SEC-4: paged read — the old unranged select stopped at the server's
+        // row cap, so past 1,000 objects this figure was silently wrong.
+        const rows = await pagedRows<{ size_bytes: unknown }>((from, to) =>
+          supabase
+            .from("evidence")
+            .select("size_bytes")
+            .order("id", { ascending: true })
+            .range(from, to),
         );
-        adminBoundaries = bRows.map((b) => ({
-          _id: String(b.id),
-          name: String(b.name),
-          level: (b.level as AdminBoundary["level"]) ?? "county",
-          parentId: (b.parent_id as string) ?? undefined,
-          geometryGeoJson: String(b.geometry_geojson ?? ""),
-          source: String(b.source ?? ""),
-          accuracyM: optionalNumber(b.accuracy_m),
-          geoVerified: Boolean(b.geo_verified),
-          createdAt: tsMs(b.created_at) ?? 0,
-        }));
-      } catch {
-        adminBoundaries = [];
+        return {
+          count: rows.length,
+          totalBytes: rows.reduce((a, e) => a + Number(e.size_bytes ?? 0), 0),
+        };
+      }, ["evidence"]),
+  },
+
+  // ------------------------------------------------------------------ seed
+  seed: {
+    checkSeeded: () =>
+      live<{ seeded: boolean }>(async () => {
+        const { data, error } = await supabase.from("sites").select("id").limit(1);
+        if (error) throw backendError(error);
+        return { seeded: (data ?? []).length > 0 };
+      }, ["sites"]),
+
+    /** Demo seeding writes sites/templates/inspections — admin-only under
+     *  RLS, so the data layer checks admin to fail fast. */
+    seedIfEmpty: async () => {
+      await requireAdminUser();
+      // Existence probe only — limit(1) keeps this a bounded read (SEC-4).
+      const { data, error } = await supabase.from("sites").select("id").limit(1);
+      if (error) throw backendError(error);
+      if ((data ?? []).length > 0) {
+        return { seeded: false, reason: "not_empty" as const };
       }
-      try {
-        const sRows = await pagedRows<Record<string, unknown>>((q) =>
-          supabase.from("site_boundaries").select("*").order("created_at", { ascending: false }),
-        );
-        siteBoundaries = sRows.map((b) => ({
-          _id: String(b.id),
-          siteId: String(b.site_id),
-          geometryGeoJson: String(b.geometry_geojson ?? ""),
-          source: String(b.source ?? ""),
-          accuracyM: optionalNumber(b.accuracy_m),
-          geoVerified: Boolean(b.geo_verified),
-          createdAt: tsMs(b.created_at) ?? 0,
-        }));
-      } catch {
-        siteBoundaries = [];
-      }
-      return {
-        layers: MAP_LAYER_CONFIGS,
-        features,
-        adminBoundaries,
-        siteBoundaries,
+      await runSeed();
+      return { seeded: true as const };
+    },
+  },
+
+  // -------------------------------------------------------------------- gis
+  // Admin authoring path for boundaries + position verification (GIS-1 /
+  // GIS-3). Client validation mirrors the database CHECK
+  // (validateGeoJsonPolygon == public.mg_valid_geojson_polygon, pinned by
+  // tests/gis.test.ts); the geo.write permission, RLS and the audit trigger
+  // are the real boundary.
+  gis: {
+    /** Create or replace the single outline of a site. */
+    saveSiteBoundary: async (args: {
+      siteId: string;
+      geometryGeoJson: string;
+      source: string;
+      accuracyM?: number;
+      geoVerified?: boolean;
+    }): Promise<SiteBoundary> => {
+      const user = await requireAdminUser();
+      assertBoundaryInput(args);
+      if (!(await getSite(args.siteId))) throw new Error("NOT_FOUND");
+      const row = {
+        site_id: args.siteId,
+        geometry_geojson: JSON.parse(args.geometryGeoJson),
+        source: args.source.trim(),
+        accuracy_m: args.accuracyM ?? null,
+        geo_verified: args.geoVerified === true,
       };
-    }, { authBound: true }),
+      const existing = await supabase
+        .from("site_boundaries")
+        .select("id")
+        .eq("site_id", args.siteId)
+        .maybeSingle();
+      if (existing.error) throw backendError(existing.error);
+      const id = existing.data
+        ? (existing.data as { id: string }).id
+        : globalThis.crypto.randomUUID();
+      const write = existing.data
+        ? await supabase.from("site_boundaries").update(row).eq("id", id)
+        : await supabase
+            .from("site_boundaries")
+            .insert({ ...row, id, created_by: user.uid });
+      if (write.error) throw backendError(write.error);
+      // Re-read (RLS-scoped) instead of trusting a write's RETURNING shape.
+      const back = await supabase
+        .from("site_boundaries")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (back.error) throw backendError(back.error);
+      return siteBoundaryFromRow(back.data as AnyRow);
+    },
+
+    /** Create an administrative-area outline (county, district, …). */
+    saveAdminBoundary: async (args: {
+      name: string;
+      level: AdminBoundary["level"] | "region";
+      adminAreaId?: string;
+      parentId?: string;
+      geometryGeoJson: string;
+      source: string;
+      accuracyM?: number;
+      geoVerified?: boolean;
+    }): Promise<AdminBoundary> => {
+      const user = await requireAdminUser();
+      assertBoundaryInput(args);
+      if (!args.name.trim()) throw new Error("INVALID_NAME");
+      const id = globalThis.crypto.randomUUID();
+      const write = await supabase.from("admin_boundaries").insert({
+        id,
+        name: args.name.trim(),
+        level: args.level,
+        admin_area_id: args.adminAreaId ?? null,
+        parent_id: args.parentId ?? null,
+        geometry_geojson: JSON.parse(args.geometryGeoJson),
+        source: args.source.trim(),
+        accuracy_m: args.accuracyM ?? null,
+        geo_verified: args.geoVerified === true,
+        created_by: user.uid,
+      });
+      if (write.error) throw backendError(write.error);
+      const back = await supabase
+        .from("admin_boundaries")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (back.error) throw backendError(back.error);
+      return adminBoundaryFromRow(back.data as AnyRow);
+    },
+
+    /** Record (or withdraw) verification of a site's point position. A
+     *  source is mandatory to verify; the DB guard + CHECK enforce it again. */
+    setSiteGeoVerification: async (args: {
+      siteId: string;
+      geoVerified: boolean;
+      source: string;
+      accuracyM?: number;
+    }): Promise<Site> => {
+      await requireAdminUser();
+      if (args.geoVerified && !args.source?.trim()) throw new Error("INVALID_SOURCE");
+      if (args.accuracyM !== undefined && !(args.accuracyM >= 0))
+        throw new Error("INVALID_ACCURACY");
+      const current = await getSite(args.siteId);
+      if (!current) throw new Error("NOT_FOUND");
+      const write = await supabase
+        .from("sites")
+        .update({
+          geo_verified: args.geoVerified,
+          geo_source: args.source?.trim() || current.geoSource || null,
+          geo_accuracy_m: args.accuracyM ?? null,
+        })
+        .eq("id", args.siteId);
+      if (write.error) throw backendError(write.error);
+      const back = await getSite(args.siteId);
+      if (!back) throw new Error("NOT_FOUND");
+      return back;
+    },
+  },
+
+  // mapFeatures — the NationalMap's GIS feed (docs/06). EVERY layer is read
+  // through the caller's own Postgres session, so scoping is Row Level
+  // Security (sites/incidents/inspections/observations via
+  // mg_can_access_site, community reports via the staff scope matrix, site
+  // boundaries via the site matrix) — nothing is re-derived or widened here.
+  // Boundaries render ONLY from authored, CHECK-validated rows; the map
+  // degrades to point records otherwise (no fabricated boundary data).
+  mapFeatures: () =>
+    live<MapFeedPayload>(
+      loadMapFeatures,
+      [
+        "sites",
+        "incidents",
+        "inspections",
+        "environmental_observations",
+        "community_reports",
+        "admin_boundaries",
+        "site_boundaries",
+      ],
+      { authBound: true },
+    ),
 };
 
-export default api;
+export interface MapFeedPayload {
+  layers: MapLayerConfig[];
+  features: MapFeature[];
+  adminBoundaries: AdminBoundary[];
+  siteBoundaries: SiteBoundary[];
+}
+
+function assertBoundaryInput(args: {
+  geometryGeoJson: string;
+  source: string;
+  accuracyM?: number;
+}): void {
+  if (!args.source || !args.source.trim()) throw new Error("INVALID_SOURCE");
+  if (args.accuracyM !== undefined && !(args.accuracyM >= 0))
+    throw new Error("INVALID_ACCURACY");
+  const check = validateGeoJsonPolygon(args.geometryGeoJson);
+  if (!check.ok) throw new Error(`INVALID_GEOMETRY: ${check.error}`);
+}
+
+/** First value a live handle delivers (internal one-shot read). */
+function firstValue<T>(h: QueryHandle<T>): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    let unsub: (() => void) | null = null;
+    let settled = false;
+    unsub = h.subscribe((v) => {
+      if (settled) return;
+      settled = true;
+      queueMicrotask(() => unsub?.());
+      resolve(v);
+    });
+    if (settled) queueMicrotask(() => unsub?.());
+  });
+}
+
+/** Read one table; a table the caller cannot read (RLS) or that is absent on
+ *  an older lineage yields [] — a layer never fails the whole map. */
+async function tolerantRows(table: string): Promise<AnyRow[]> {
+  try {
+    return await allRows<AnyRow>(table);
+  } catch {
+    return [];
+  }
+}
+
+export async function loadMapFeatures(): Promise<MapFeedPayload> {
+  const empty: MapFeedPayload = {
+    layers: MAP_LAYER_CONFIGS,
+    features: [],
+    adminBoundaries: [],
+    siteBoundaries: [],
+  };
+  const uid = authUserId();
+  if (!uid) return empty;
+  const profile = await getProfileCached(uid);
+  if (!profile || !profile.role) return empty;
+  const staff = isStaffRole(profile.role);
+
+  const siteRows = await allRows<AnyRow>("sites");
+  // Defence in depth only: RLS already scoped these rows server-side.
+  const siteFeatures = siteRows
+    .filter((s) => canAccessSite(profile, mapSite(s)))
+    .map(siteFeature)
+    .filter((f): f is MapFeature => f !== null);
+  const sites = indexSites(siteFeatures);
+
+  const [incRows, inspRows, obsRows, repRows, adminRows, siteBoundRows] =
+    await Promise.all([
+      tolerantRows("incidents"),
+      tolerantRows("inspections"),
+      tolerantRows("environmental_observations"),
+      staff ? tolerantRows("community_reports") : Promise.resolve([] as AnyRow[]),
+      tolerantRows("admin_boundaries"),
+      tolerantRows("site_boundaries"),
+    ]);
+
+  const features: MapFeature[] = [...siteFeatures];
+  for (const r of incRows) {
+    const f = incidentFeature(r, sites);
+    if (f) features.push(f);
+  }
+  for (const r of inspRows) {
+    const f = inspectionFeature(r, sites);
+    if (f) features.push(f);
+  }
+  for (const r of obsRows) {
+    if (r.status === "resolved") continue; // open/monitoring only (docs/06)
+    const f = observationFeature(r, sites);
+    if (f) features.push(f);
+  }
+  for (const r of repRows) {
+    if (r.status === "dismissed") continue; // dismissed reports leave the map
+    const f = communityReportFeature(r);
+    if (f) features.push(f);
+  }
+  if (staff) {
+    const scores = (await firstValue(api.sites.riskScores())) ?? {};
+    for (const site of siteFeatures) {
+      const f = riskIndicatorFeature(site, scores[site.id]?.score ?? 0);
+      if (f) features.push(f);
+    }
+  }
+
+  // Boundaries: invalid stored geometry is dropped, never drawn or repaired.
+  const adminBoundaries = adminRows
+    .map(adminBoundaryFromRow)
+    .filter((b) => parseBoundaryGeometry(b.geometryGeoJson) !== null);
+  const siteBoundaries = siteBoundRows
+    .map(siteBoundaryFromRow)
+    .filter(
+      (b) => sites.has(b.siteId) && parseBoundaryGeometry(b.geometryGeoJson) !== null,
+    );
+
+  return { layers: MAP_LAYER_CONFIGS, features, adminBoundaries, siteBoundaries };
+}
+
+// ---------------------------------------------------------------------------
+// DEV SEED — synthetic demonstration records only. Never real government data.
+// Provenance for every seeded record is the authenticated account running it.
+// ---------------------------------------------------------------------------
+
+async function runSeed() {
+  const user = await requireAdminUser();
+  const now = Date.now();
+  const day = 24 * 60 * 60 * 1000;
+  const uid = user.uid;
+  const label = await actorLabel(user);
+
+  const siteDefs = [
+    { name: "Demo Gold Operation — Zorzor Corridor", operatorName: "Lofa Minerals Demo", county: "Lofa", district: "Zorzor", community: "Zorzor City", mineralType: "Gold", lat: 7.6067, lng: 9.4236 },
+    { name: "Demo Iron Ore Quarry — Yekepa", operatorName: "Nimba Aggregates Demo", county: "Nimba", district: "Sanniquellie-Mahn", community: "Yekepa", mineralType: "Iron Ore", lat: 7.5989, lng: 8.6333 },
+    { name: "Demo Alluvial Site — Saniquellie", operatorName: "Nimba Aggregates Demo", county: "Nimba", district: "Sanniquellie-Mahn", community: "Saniquellie", mineralType: "Alluvial Gold", lat: 7.5806, lng: 8.7236 },
+    { name: "Demo Sand Mining — Robertsport", operatorName: "Grand Cape Coastal Demo", county: "Grand Cape Mount", district: "Robertsport", community: "Robertsport", mineralType: "Sand", lat: 6.7572, lng: 11.3686 },
+    { name: "Demo Artisanal Camp — Gbarpolu", operatorName: "Gbarpolu Artisanal Demo", county: "Gbarpolu", district: "Bopolu", community: "Bopolu", mineralType: "Gold", lat: 6.7236, lng: 9.7167 },
+    { name: "Demo Basalt Pit — Ganta", operatorName: "Nimba Aggregates Demo", county: "Nimba", district: "Gba & Ma", community: "Ganta", mineralType: "Basalt", lat: 7.2194, lng: 8.9833 },
+  ];
+
+  const siteIds: Record<string, { id: string; code: string }> = {};
+  const existingCodes = await allSiteCodes();
+  for (const def of siteDefs) {
+    const code = nextSiteCodeFrom(def.county, existingCodes);
+    existingCodes.push(code);
+    const id = await insertReturningId("sites", {
+      code,
+      name: def.name,
+      operator_name: def.operatorName,
+      mineral_type: def.mineralType,
+      county: def.county,
+      district: def.district,
+      community: def.community,
+      status: "active",
+      latitude: def.lat,
+      longitude: def.lng,
+      notes: "Synthetic demonstration record — not real operational data.",
+      created_by: uid,
+    });
+    siteIds[def.name] = { id, code };
+  }
+
+  const templateId = await insertReturningId("inspection_templates", {
+    name: "Standard Mining Safety & Environmental Inspection",
+    description:
+      "Configurable baseline template used by field inspectors. Sections and questions can be edited by administrators.",
+    active: true,
+    created_by: uid,
+    sections: [
+      {
+        title: "Site & Workforce Safety",
+        questions: [
+          { label: "Are workers wearing required PPE?", answerType: "boolean", required: true },
+          { label: "Is a trained safety officer present on site?", answerType: "boolean", required: true },
+          { label: "Number of workers observed on site", answerType: "number", required: true },
+          { label: "Overall safety condition", answerType: "select", options: ["Good", "Fair", "Poor", "Immediate risk"], required: true },
+        ],
+      },
+      {
+        title: "Equipment & Infrastructure",
+        questions: [
+          { label: "Equipment inspected and maintained?", answerType: "boolean", required: true },
+          { label: "Any structural defects observed?", answerType: "boolean", required: true },
+          { label: "Describe defects or concerns", answerType: "text", required: false },
+        ],
+      },
+      {
+        title: "Environmental Condition",
+        questions: [
+          { label: "Signs of water pollution or sediment discharge?", answerType: "boolean", required: true },
+          { label: "Waste and tailings properly managed?", answerType: "boolean", required: true },
+          { label: "Additional environmental observations", answerType: "text", required: false },
+        ],
+      },
+      {
+        title: "Administrative",
+        questions: [
+          { label: "Site records available for review?", answerType: "boolean", required: true },
+          { label: "Inspector notes", answerType: "text", required: false },
+        ],
+      },
+    ],
+  });
+
+  const zorzor = siteIds["Demo Gold Operation — Zorzor Corridor"];
+  const yekepa = siteIds["Demo Iron Ore Quarry — Yekepa"];
+  const robertsport = siteIds["Demo Sand Mining — Robertsport"];
+
+  const insp1 = await insertReturningId("inspections", {
+    site_id: zorzor.id,
+    template_id: templateId,
+    inspector_id: uid,
+    status: "approved",
+    answers: {
+      "0:0": true, "0:1": true, "0:2": 24, "0:3": "Fair",
+      "1:0": true, "1:1": false,
+      "2:0": true, "2:1": false,
+      "3:0": true,
+    },
+    notes: "Routine inspection; PPE compliance observed at both pits.",
+    latitude: 7.6067,
+    longitude: 9.4236,
+    submitted_at: iso(now - 6 * day),
+    reviewed_at: iso(now - 5 * day),
+    created_at: iso(now - 7 * day),
+  });
+
+  const f1 = await insertReturningId("findings", {
+    inspection_id: insp1,
+    site_id: zorzor.id,
+    title: "Sediment discharge into seasonal stream",
+    description: "Uncontrolled runoff from the processing area entering the stream.",
+    severity: "high",
+    status: "acknowledged",
+    created_by_id: uid,
+    created_at: iso(now - 6 * day),
+  });
+
+  await insertReturningId("corrective_actions", {
+    finding_id: f1,
+    site_id: zorzor.id,
+    description: "Construct sediment settling basin before discharge point.",
+    status: "in_progress",
+    due_at: iso(now + 14 * day),
+    opened_by_id: uid,
+    created_at: iso(now - 5 * day),
+  });
+
+  const insp2 = await insertReturningId("inspections", {
+    site_id: yekepa.id,
+    template_id: templateId,
+    inspector_id: uid,
+    status: "under_review",
+    answers: {
+      "0:0": true, "0:1": false, "0:2": 11, "0:3": "Fair",
+      "1:0": true, "1:1": true, "1:2": "Berms eroded on eastern section.",
+      "2:0": false, "2:1": true,
+      "3:0": true,
+    },
+    notes: "Haul-road inspection; berms low on the eastern section.",
+    latitude: 7.5989,
+    longitude: 8.6333,
+    submitted_at: iso(now - 2 * day),
+    created_at: iso(now - 3 * day),
+  });
+
+  await insertReturningId("findings", {
+    inspection_id: insp2,
+    site_id: yekepa.id,
+    title: "Haul-road berms below required height",
+    description: "Eastern section berms measured below 1.5m at three points.",
+    severity: "medium",
+    status: "open",
+    created_by_id: uid,
+    created_at: iso(now - 2 * day),
+  });
+
+  await insertReturningId("incidents", {
+    site_id: robertsport.id,
+    type: "injury",
+    severity: "medium",
+    description: "Worker laceration from handling screen mesh; treated on site.",
+    occurred_at: iso(now - 4 * day),
+    injured: 1,
+    status: "investigating",
+    reported_by_id: uid,
+    report_source: "inspector",
+    created_at: iso(now - 4 * day),
+  });
+
+  await insertReturningId("environmental_observations", {
+    site_id: zorzor.id,
+    category: "water_pollution",
+    verification: "measured",
+    description: "Turbidity downstream visibly elevated; sample taken for analysis.",
+    observed_at: iso(now - 5 * day),
+    latitude: 7.6067,
+    longitude: 9.4236,
+    status: "monitoring",
+    reported_by_id: uid,
+    created_at: iso(now - 5 * day),
+  });
+
+  const { error: repErr } = await supabase.from("community_reports").insert([
+    {
+      tracking_code: "CR-DEMO0001",
+      category: "pollution",
+      description: "Community reports discolored water in the creek used for washing.",
+      county: "Lofa",
+      community: "Zorzor City",
+      status: "under_review",
+      created_at: iso(now - 3 * day),
+    },
+    {
+      tracking_code: "CR-DEMO0002",
+      category: "suspected_illegal_mining",
+      description: "Unknown digging activity observed after dark near the ridge.",
+      county: "Nimba",
+      community: "Yekepa",
+      status: "submitted",
+      created_at: iso(now - 1 * day),
+    },
+  ]);
+  if (repErr) throw backendError(repErr);
+  const { error: trkErr } = await supabase
+    .from("report_tracking")
+    .upsert(
+      [
+        { tracking_code: "CR-DEMO0001", status: "under_review", created_at: iso(now - 3 * day) },
+        { tracking_code: "CR-DEMO0002", status: "submitted", created_at: iso(now - 1 * day) },
+      ],
+      { onConflict: "tracking_code" },
+    );
+  if (trkErr) throw backendError(trkErr);
+
+  // No client-side audit insert here anymore (SEC-1): every seeded row above
+  // already produced a server-written audit_log entry via mg_audit_row().
+  await refreshPublicStats();
+}

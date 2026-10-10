@@ -1,5 +1,25 @@
 # 11 — Implementation Status
 
+## Session 6 — GIS (GIS-1…5) [2026-10-10]
+
+**Status:** IMPLEMENTED (details in `docs/06_GIS_ARCHITECTURE.MD`).
+**Verification:** `tests/gis.test.ts` + `tests/migration-apply.test.ts` — 84 pass / 0 fail.
+Full-suite failures that remain are present on the untouched HEAD as well
+(none introduced by this session).
+
+- **GIS-1** validated-GeoJSON boundaries for sites and admin areas
+  (`0015_gis.sql`; DB CHECKs mirror the client validator; `geo.write` only;
+  no boundary data bundled).
+- **GIS-2** layers (sites, boundaries, incidents, inspections, observations,
+  community reports, risk) with toggles, filters and zoom-aware clustering.
+- **GIS-3** `geo_verified` / `geo_source` / `geo_accuracy_m`; verification needs
+  a source and `geo.write`; moving a verified site withdraws verification.
+- **GIS-4** styling by verification level; legend derived from loaded data.
+- **GIS-5** offline tiles: region/zoom-bounded runtime cache, no bulk prefetch,
+  configurable tile template, documented alternative.
+- **Gap closed:** community reports are now scoped by county/district in the
+  database (previously every staff account read them nationally).
+
 **Session:** Security roadmap Session 2 (scope completion) — admin site edit
 API + adversarial isolation suite (SEC-5 / SITE-1, §6)
 **Date:** 2026-10-06

@@ -59,15 +59,17 @@ describe("migrations apply to a clean database", () => {
           where table_schema = 'public' and table_type = 'BASE TABLE'`,
       );
       // 14 domain tables + evidence_url_audit (0006) + 0010's four
-      // (organizations, admin_areas, site_assignments, permissions).
-      expect(Number(scalar(tables))).toBe(19);
+      // (organizations, admin_areas, site_assignments, permissions) + 0015's
+      // two GIS boundary tables (admin_boundaries, site_boundaries).
+      expect(Number(scalar(tables))).toBe(21);
 
       const rls = await one(
         run,
         `select count(*) from pg_tables
           where schemaname = 'public' and rowsecurity = true`,
       );
-      expect(Number(scalar(rls))).toBe(19);
+      // every table above has RLS, including 0015's two boundary tables
+      expect(Number(scalar(rls))).toBe(21);
 
       const guards = await one(
         run,
@@ -452,8 +454,9 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
     // 10 domain tables + organizations (0010's integrity stamps).
     expect(Number(trig.rows[0]?.touch)).toBe(11);
     // …and organizations + site_assignments join the audit trail: exactly one
-    // row per mutation, one trigger per table.
-    expect(Number(trig.rows[0]?.audit)).toBe(12);
+    // row per mutation, one trigger per table. 0015 adds the two boundary
+    // tables (admin_boundaries, site_boundaries) to the trail.
+    expect(Number(trig.rows[0]?.audit)).toBe(14);
     // "audit append" (0001) stays gone; only the staff-read policy remains.
     const pol = await db.query<{ n: string }>(
       `select count(*)::text as n from pg_policies
@@ -735,6 +738,8 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_risk_explanation(uuid)",
     "mg_risk_scores()",
     "mg_role()",
+    // 0015 (GIS): pure definer validator the boundary CHECK constraints call.
+    "mg_valid_geojson_polygon(jsonb)",
     "provision_user_by_email(text, text, text, text, text)",
     "refresh_public_stats()",
     "submit_community_report(text, text, text, text, text, text, double precision, double precision, text)",
@@ -864,6 +869,7 @@ describe("GAP-0: function execute surface (0011)", () => {
       "mg_operator_name",
       "mg_profile",
       "mg_role",
+      "mg_valid_geojson_polygon",
     ]);
     const AUTH_PATTERN =
       /mg_is_admin\(|mg_is_staff\(|mg_is_reviewer\(|mg_has_permission\(|mg_profile\(\)|mg_any_profile_role\(|auth\.uid\(|mg_can_access_site\(/;

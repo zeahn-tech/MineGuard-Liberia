@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --noEmit",
-    "test": "bun test",
+    "test": "bun test --timeout 60000",
     "icons": "bun scripts/generate-icons.ts",
     "lint": "eslint .",
     "format": "prettier --write .",

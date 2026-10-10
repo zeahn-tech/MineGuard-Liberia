@@ -75,7 +75,7 @@ jobs:
       - name: Typecheck + tests must be green before a prod deploy
         run: |
           bun run typecheck
-          bun test
+          bun run test
 
       # pg_dump refuses to dump a server newer than itself; Supabase runs
       # PostgreSQL 17, while ubuntu-latest ships an older client by default.
