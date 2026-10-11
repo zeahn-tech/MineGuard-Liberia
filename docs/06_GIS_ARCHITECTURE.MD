@@ -68,6 +68,57 @@ and county, text search, zoom-aware grid clustering (cluster size shrinks per
 zoom; individual points from zoom 13; a cluster of ≥3; clusters never merge across layers). Coordinate-less or
 out-of-Liberia points are skipped, not plotted at (0,0).
 
+## Capturing a site's real position
+
+A site's map position is captured, not just typed. The shared
+`SiteLocationPicker` (site registration, and the administrator's **Set /
+Edit location** dialog on a site's page) offers three ways, all recorded with
+how the position was obtained:
+
+| Method | Recorded `geo_source` | Notes |
+|---|---|---|
+| "Use my current location" | `device_gps` | high-accuracy browser geolocation; the reported accuracy radius is stored in `geo_accuracy_m` and read back as good (≤ 20 m) / fair (≤ 100 m) / low (> 100 m, flagged as too rough). Needs HTTPS and the browser's permission. |
+| "Pick on map" | `map_pick` | click the map (restricted to Liberia) — for sites registered from an office. |
+| typed latitude/longitude | `manual_entry` | validated live (Liberia envelope; the "did you mean -9.43?" hint for a missing minus sign). |
+
+Auto-locate on opening the registration dialog happens **only if the browser
+has already granted location permission** — never a surprise prompt.
+
+A captured position is a *claim*: it is stored **unverified**. An administrator
+can tick "verified against an authoritative source" (a source is mandatory) —
+that goes through `api.gis.setSiteGeoVerification` (`geo.write`). Changing a
+position through `api.sites.update` replaces its provenance (the old accuracy
+described the old place), and withdraws any earlier verification. Latitude and
+longitude are a pair — a half position is rejected. The registry flags sites
+with no position ("Not on the map"), which is how existing sites registered
+without coordinates are found and fixed.
+
+## Loading boundaries (administrators)
+
+**Map Boundaries** (`/portal/boundaries`, admin-only nav entry; the page also
+refuses non-admins) loads outlines from GeoJSON — a file (≤ 5 MB) or pasted text.
+Flow: **choose → review → source and load**; nothing is saved before the review.
+
+- Accepted: `FeatureCollection`, `Feature`, bare `Polygon` / `MultiPolygon`
+  (island counties are fine). Canonicalised to `{type, coordinates}` with 2-D
+  positions (bbox/crs/altitude dropped); never repaired or re-projected.
+- Each shape is validated with the same rules as the database CHECK. A bad one
+  is listed with an actionable reason (missing minus sign, `[lat, lng]` order,
+  projected coordinates, unclosed ring, outside Liberia, wrong geometry type)
+  and never blocks the good ones. Shapefile/KML/TopoJSON are refused with advice.
+- **Site outlines** tab: each shape is matched to a registered site by site
+  code, then by *exact* name (ambiguous or near-miss names match nothing — a
+  wrong outline is worse than none); the administrator confirms or chooses.
+  One outline per site; two shapes aimed at one site are blocked.
+- **Administrative areas** tab: name (from `name`/`NAME_1`/… properties,
+  editable) + level. An area with the same level and name is **replaced in
+  place** (audited update), never duplicated; boundaries cannot be deleted.
+- A **source** is required; accuracy is optional; "verified" is opt-in (loaded
+  boundaries are drawn as unverified otherwise). A map preview shows what is
+  about to be loaded. Rows save one at a time and each reports its own result.
+- "Already loaded" lists what exists; until something is loaded the boundary
+  layers on the National Map are empty (the toggles show `(0)`).
+
 **Why a layer can be empty.** A point is plotted only if it has coordinates
 inside Liberia (lat 4.3…8.6, lng −11.6…−7.3). Liberia is **west** of the prime
 meridian, so longitudes are **negative** — `9.43` (no minus sign) is Nigeria and

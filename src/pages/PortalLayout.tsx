@@ -33,6 +33,7 @@ import {
   Loader2,
   Landmark,
   LayoutDashboard,
+  Layers,
   Leaf,
   LogOut,
   Map,
@@ -66,10 +67,11 @@ import {
 import { QueueManagerButton } from "@/components/QueueManager";
 import { toast } from "sonner";
 
-const NAV = [
+const NAV: { to: string; label: string; icon: typeof Map; adminOnly?: boolean }[] = [
   { to: "/portal", label: "Command Center", icon: LayoutDashboard },
   { to: "/portal/sites", label: "Mining Sites", icon: Landmark },
   { to: "/portal/map", label: "National Map", icon: Map },
+  { to: "/portal/boundaries", label: "Map Boundaries", icon: Layers, adminOnly: true },
   { to: "/portal/inspections", label: "Field Inspections", icon: FileCheck2 },
   { to: "/portal/incidents", label: "Incidents", icon: HeartPulse },
   { to: "/portal/environment", label: "Environment", icon: Leaf },
@@ -253,7 +255,7 @@ export default function PortalLayout() {
     }
   };
 
-  const navItems = NAV;
+  const navItems = NAV.filter((i) => !i.adminOnly || user?.role === "admin");
 
   return (
     <div className="min-h-screen bg-background">

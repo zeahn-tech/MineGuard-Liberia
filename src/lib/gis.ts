@@ -77,6 +77,10 @@ export function sourceLabel(source?: string): string {
       return "registry entry";
     case "device_gps":
       return "device GPS";
+    case "map_pick":
+      return "picked on the map";
+    case "manual_entry":
+      return "typed in manually";
     case "device_gps_or_manual":
       return "device GPS or manual entry";
     case "public_report":

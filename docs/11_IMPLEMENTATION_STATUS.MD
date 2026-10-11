@@ -52,6 +52,18 @@ project) / 0 fail.
   rows; the feed reports `excluded` counts and the page explains them; layer
   toggles show record counts. Boundary layers are empty until a boundary
   dataset is loaded (no authoring UI yet — `api.gis.*` only).
+- **Capturing real positions + loading boundaries (2026-10-11).**
+  `SiteLocationPicker` (device GPS with accuracy / map pick / typed, with
+  provenance) on site registration and a new admin "Set/Edit location" dialog
+  on the site page — existing sites registered without coordinates can now be
+  fixed; the registry flags them. `sites.create/update` store `geo_source` +
+  `geo_accuracy_m`, require a lat/lng pair, replace provenance when a point
+  moves and withdraw an old verification. New admin page **Map Boundaries**
+  (GeoJSON file/paste → validated review → load, with preview, per-row results,
+  replace-in-place for admin areas); `api.gis.saveAdminBoundary` accepts an
+  `id` to replace. Covered by `tests/gis-import.test.ts`,
+  `tests/site-position.test.ts`, `tests/site-location-picker.test.tsx`,
+  `tests/boundary-loader.test.tsx` and the API tests in `tests/gis.test.ts`.
 - **Test hygiene.** The scale suite's 5,000-row teardown ran minutes under
   row triggers and was silently abandoned at the default hook timeout,
   leaving its fixture in the shared per-process DB; teardown now skips row

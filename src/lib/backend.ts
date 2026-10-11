@@ -40,7 +40,6 @@ import { sha256Hex } from "./sha256";
 const AI_DISCLAIMER =
   "AI-assisted explanation — generated from the recorded risk factors only; decision support, not a determination.";
 import {
-  LIBERIA_BBOX,
   adminBoundaryFromRow,
   communityReportFeature,
   incidentFeature,
@@ -53,6 +52,12 @@ import {
   siteFeature,
   validateGeoJsonPolygon,
 } from "./gis";
+import {
+  accuracyProblem,
+  isSitePositionSource,
+  liberiaPositionProblem,
+  type SitePositionSource,
+} from "./site-position";
 import {
   MAP_LAYER_CONFIGS,
   canAccessSite,
@@ -85,30 +90,27 @@ import {
 // QUERY HANDLES — a Convex useQuery-compatible subscription surface
 // ---------------------------------------------------------------------------
 
-/** A site's point position must be inside Liberia. Liberia lies WEST of the
- *  prime meridian, so its longitudes are NEGATIVE (−11.6 … −7.3): a longitude
- *  typed without its minus sign lands in Nigeria/Cameroon and the map would
- *  (correctly) refuse to plot it — so the data layer refuses it up front with
- *  an actionable message instead of saving a site that can never be mapped. */
+/** A site's point position must be inside Liberia (the same rule the form and
+ *  the map apply — see site-position.ts). A position that could never be
+ *  mapped is refused up front, with an actionable message, instead of being
+ *  saved and then silently missing from the map. */
 function assertSitePosition(
   lat: number | null | undefined,
   lng: number | null | undefined,
 ): void {
-  const { minLat, maxLat, minLng, maxLng } = LIBERIA_BBOX;
-  if (lat !== null && lat !== undefined && !(lat >= minLat && lat <= maxLat)) {
-    throw new Error(
-      `INVALID_LATITUDE: ${lat} is outside Liberia (latitude must be between ${minLat} and ${maxLat}).`,
-    );
-  }
-  if (lng !== null && lng !== undefined && !(lng >= minLng && lng <= maxLng)) {
-    const hint =
-      lng > 0 && -lng >= minLng && -lng <= maxLng
-        ? ` Liberia is west of the prime meridian — did you mean ${-lng}?`
-        : "";
-    throw new Error(
-      `INVALID_LONGITUDE: ${lng} is outside Liberia (longitude must be between ${minLng} and ${maxLng}; west is negative).${hint}`,
-    );
-  }
+  const problem = liberiaPositionProblem(lat, lng);
+  if (problem) throw new Error(`${problem.code}: ${problem.message}`);
+}
+
+/** Provenance of a position the caller is writing. */
+function assertPositionProvenance(args: {
+  geoSource?: string;
+  geoAccuracyM?: number | null;
+}): void {
+  if (args.geoSource !== undefined && !isSitePositionSource(args.geoSource))
+    throw new Error("INVALID_SOURCE: position source must be device_gps, map_pick or manual_entry.");
+  if (accuracyProblem(args.geoAccuracyM))
+    throw new Error("INVALID_ACCURACY: accuracy must be a non-negative number of metres.");
 }
 
 export interface QueryHandle<T> {
@@ -1397,10 +1399,19 @@ export const api = {
       mineralType?: string;
       latitude?: number;
       longitude?: number;
+      /** How the position was obtained (default manual_entry). */
+      geoSource?: SitePositionSource;
+      /** Reported accuracy radius in metres (device GPS). */
+      geoAccuracyM?: number;
       notes?: string;
     }) => {
       const user = await requireAdminUser();
+      const hasLat = args.latitude !== undefined && args.latitude !== null;
+      const hasLng = args.longitude !== undefined && args.longitude !== null;
+      if (hasLat !== hasLng)
+        throw new Error("INVALID_POSITION: latitude and longitude must be set together.");
       assertSitePosition(args.latitude, args.longitude);
+      assertPositionProvenance(args);
       const existingCodes = await allSiteCodes();
       const code = nextSiteCodeFrom(args.county, existingCodes);
       const id = await insertReturningId("sites", {
@@ -1412,6 +1423,8 @@ export const api = {
         mineral_type: args.mineralType ?? null,
         latitude: args.latitude ?? null,
         longitude: args.longitude ?? null,
+        geo_source: hasLat ? (args.geoSource ?? "manual_entry") : null,
+        geo_accuracy_m: hasLat ? (args.geoAccuracyM ?? null) : null,
         notes: args.notes ?? null,
         status: "pending_verification",
         code,
@@ -1478,9 +1491,13 @@ export const api = {
       mineralType?: string;
       latitude?: number | null;
       longitude?: number | null;
+      /** Provenance of the position being written (default manual_entry). */
+      geoSource?: SitePositionSource;
+      geoAccuracyM?: number | null;
       notes?: string | null;
     }) => {
       const user = await requireAdminUser();
+      assertPositionProvenance(args);
       const site = await getSite(args.siteId);
       if (!site) throw new Error("NOT_FOUND");
 
@@ -1518,6 +1535,20 @@ export const api = {
       if (args.longitude !== undefined) {
         assertSitePosition(undefined, args.longitude);
         put("longitude", args.longitude, site.longitude);
+      }
+      // A point is a PAIR: never leave a half position that cannot be mapped.
+      const nextLat = args.latitude !== undefined ? args.latitude : (site.latitude ?? null);
+      const nextLng = args.longitude !== undefined ? args.longitude : (site.longitude ?? null);
+      if ((nextLat === null) !== (nextLng === null))
+        throw new Error("INVALID_POSITION: latitude and longitude must be set together.");
+      const moved = "latitude" in patch || "longitude" in patch;
+      if (moved || args.geoSource !== undefined || args.geoAccuracyM !== undefined) {
+        // The stored provenance describes the position it came with: a moved
+        // point gets its own source/accuracy (never the old ones), and an
+        // earlier verification no longer applies to the new place.
+        put("geo_source", nextLat === null ? null : (args.geoSource ?? (moved ? "manual_entry" : site.geoSource ?? "manual_entry")), site.geoSource);
+        put("geo_accuracy_m", nextLat === null ? null : (args.geoAccuracyM ?? null), site.geoAccuracyM);
+        if (moved && site.geoVerified) put("geo_verified", false, true);
       }
       if (args.notes !== undefined) put("notes", args.notes, site.notes);
       if (args.operatorName !== undefined) {
@@ -3360,8 +3391,12 @@ export const api = {
       return siteBoundaryFromRow(back.data as AnyRow);
     },
 
-    /** Create an administrative-area outline (county, district, …). */
+    /** Create an administrative-area outline (county, district, …), or — with
+     *  `id` — replace the geometry/provenance of an existing one in place.
+     *  (Boundaries are never deleted: correcting a wrong upload is an audited
+     *  update, see migration 0016.) */
     saveAdminBoundary: async (args: {
+      id?: string;
       name: string;
       level: AdminBoundary["level"];
       adminAreaId?: string;
@@ -3374,9 +3409,7 @@ export const api = {
       const user = await requireAdminUser();
       assertBoundaryInput(args);
       if (!args.name.trim()) throw new Error("INVALID_NAME");
-      const id = globalThis.crypto.randomUUID();
-      const write = await supabase.from("admin_boundaries").insert({
-        id,
+      const row = {
         name: args.name.trim(),
         level: args.level,
         admin_area_id: args.adminAreaId ?? null,
@@ -3385,15 +3418,21 @@ export const api = {
         source: args.source.trim(),
         accuracy_m: args.accuracyM ?? null,
         geo_verified: args.geoVerified === true,
-        created_by: user.uid,
-      });
+      };
+      const id = args.id ?? globalThis.crypto.randomUUID();
+      const write = args.id
+        ? await supabase.from("admin_boundaries").update(row).eq("id", id)
+        : await supabase
+            .from("admin_boundaries")
+            .insert({ ...row, id, created_by: user.uid });
       if (write.error) throw backendError(write.error);
       const back = await supabase
         .from("admin_boundaries")
         .select("*")
         .eq("id", id)
-        .single();
+        .maybeSingle();
       if (back.error) throw backendError(back.error);
+      if (!back.data) throw new Error("NOT_FOUND");
       return adminBoundaryFromRow(back.data as AnyRow);
     },
 

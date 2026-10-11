@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
+import { SiteLocationPicker } from "@/components/SiteLocationPicker";
+import {
+  EMPTY_POSITION_DRAFT,
+  parsePositionInput,
+  type PositionDraft,
+} from "@/lib/site-position";
 import { useMutation, useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { Button } from "@/components/ui/button";
@@ -16,7 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
-import { Plus, MapPin, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, MapPin, MapPinOff, ChevronLeft, ChevronRight } from "lucide-react";
 
 const COUNTIES = [
   "Bomi", "Bong", "Gbarpolu", "Grand Bassa", "Grand Cape Mount", "Grand Gedeh",
@@ -149,6 +155,11 @@ export default function Sites() {
                         <td className="px-4 py-3 font-mono text-xs">{s.code}</td>
                         <td className="px-4 py-3">
                           <div className="font-medium">{s.name}</div>
+                          {(s.latitude == null || s.longitude == null) && (
+                            <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                              <MapPinOff className="size-3" /> Not on the map — no position yet
+                            </div>
+                          )}
                           <div className="text-xs text-muted-foreground md:hidden">
                             {s.county} · {s.operatorName}
                           </div>
@@ -199,16 +210,6 @@ export default function Sites() {
   );
 }
 
-/** Blank → undefined; otherwise a finite number (rejects "abc" instead of
- *  sending NaN to the data layer). Range is validated by the data layer. */
-function parseCoordinate(raw: string, label: string): number | undefined {
-  const text = raw.trim();
-  if (!text) return undefined;
-  const n = Number(text);
-  if (!Number.isFinite(n)) throw new Error(`${label} must be a number (e.g. ${label === "Latitude" ? "6.43" : "-9.43"}).`);
-  return n;
-}
-
 function RegisterSiteDialog() {
   const create = useMutation(api.sites.create);
   const [open, setOpen] = useState(false);
@@ -216,8 +217,9 @@ function RegisterSiteDialog() {
   const [form, setForm] = useState({
     name: "", operatorName: "", county: "",
     district: "", community: "", mineralType: "",
-    latitude: "", longitude: "", notes: "",
+    notes: "",
   });
+  const [position, setPosition] = useState<PositionDraft>(EMPTY_POSITION_DRAFT);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -225,6 +227,13 @@ function RegisterSiteDialog() {
     if (saving) return;
     if (!form.name || !form.operatorName || !form.county) {
       toast.error("Name, operator and county are required.");
+      return;
+    }
+    // Validate the position BEFORE saving: a site that can never be mapped is
+    // worse than a slower form.
+    const pos = parsePositionInput(position.latitude, position.longitude);
+    if (pos.kind === "error") {
+      toast.error(pos.error);
       return;
     }
     setSaving(true);
@@ -236,13 +245,20 @@ function RegisterSiteDialog() {
         district: form.district || undefined,
         community: form.community || undefined,
         mineralType: form.mineralType || undefined,
-        latitude: parseCoordinate(form.latitude, "Latitude"),
-        longitude: parseCoordinate(form.longitude, "Longitude"),
+        ...(pos.kind === "ok"
+          ? {
+              latitude: pos.latitude,
+              longitude: pos.longitude,
+              geoSource: position.source,
+              geoAccuracyM: position.accuracyM,
+            }
+          : {}),
         notes: form.notes || undefined,
       });
       toast.success("Site registered");
       setOpen(false);
-      setForm({ name: "", operatorName: "", county: "", district: "", community: "", mineralType: "", latitude: "", longitude: "", notes: "" });
+      setForm({ name: "", operatorName: "", county: "", district: "", community: "", mineralType: "", notes: "" });
+      setPosition(EMPTY_POSITION_DRAFT);
     } catch (e) {
       toast.error(
         e instanceof Error ? e.message.replace(/^[A-Z_]+:\s*/, "") : "Failed to register site",
@@ -296,14 +312,8 @@ function RegisterSiteDialog() {
             <Input value={form.mineralType} onChange={set("mineralType")} placeholder="Gold, iron ore, sand…" />
           </div>
           <div className="space-y-1.5">
-            <Label>Coordinates (optional)</Label>
-            <div className="flex gap-2">
-              <Input value={form.latitude} onChange={set("latitude")} placeholder="Lat, e.g. 6.43" inputMode="decimal" />
-              <Input value={form.longitude} onChange={set("longitude")} placeholder="Lng, e.g. -9.43" inputMode="decimal" />
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              Decimal degrees. Liberia is west of the prime meridian, so longitude is negative.
-            </p>
+            <Label>Map position (optional)</Label>
+            <SiteLocationPicker value={position} onChange={setPosition} disabled={saving} autoLocate />
           </div>
           <div className="space-y-1.5 sm:col-span-2">
             <Label>Notes</Label>

@@ -33,6 +33,7 @@ const TemplateList = lazy(() =>
 const TemplateEditor = lazy(() =>
   import("./pages/Templates.tsx").then((m) => ({ default: m.TemplateEditor })),
 );
+const Boundaries = lazy(() => import("./pages/Boundaries.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 const OperatorLayout = lazy(() => import("./pages/operate/OperatorLayout.tsx"));
 const OperatorOverview = lazy(() => import("./pages/operate/OperatorOverview.tsx"));
@@ -139,6 +140,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="environment/:observationId" element={<ObservationDetail />} />
               <Route path="community" element={<Community />} />
               <Route path="audit" element={<Audit />} />
+              <Route path="boundaries" element={<Boundaries />} />
               <Route path="templates" element={<TemplateList />} />
               <Route path="templates/new" element={<TemplateEditor />} />
               <Route path="templates/:templateId" element={<TemplateEditor />} />

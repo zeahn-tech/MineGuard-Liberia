@@ -10,7 +10,7 @@
 // and the offline tile policy (region/zoom/cache bounds; sw.js == map-tiles).
 // ---------------------------------------------------------------------------
 
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { api } from "../src/lib/backend";
@@ -789,6 +789,181 @@ describe("site coordinates: nothing silently unmappable", () => {
     } finally {
       await cleanup();
     }
+  });
+});
+
+// ===========================================================================
+// Capturing a real position (GPS / map pick / typed) — API contract
+// ===========================================================================
+describe("site position capture and provenance", () => {
+  const created: string[] = [];
+  const dropSites = (...ids: string[]) =>
+    adminExec(
+      `set session_replication_role = replica;
+       delete from public.sites where id in (${ids.map((i) => `'${i}'`).join(", ")});
+       set session_replication_role = origin;`,
+    );
+  afterAll(async () => {
+    if (created.length) await dropSites(...created);
+  });
+  const mkSite = async (extra: Record<string, unknown> = {}) => {
+    setIdentity(f.admin);
+    const id = await api.sites.create({
+      name: `Position Probe ${created.length}`,
+      operatorName: "Probe Op",
+      county: "Bomi",
+      ...extra,
+    });
+    created.push(id);
+    return id;
+  };
+  const geoRow = async (id: string) =>
+    (
+      await adminSql(
+        `select latitude, longitude, geo_source, geo_accuracy_m, geo_verified from public.sites where id = '${id}'`,
+      )
+    )[0];
+  async function rejects(fn: () => Promise<unknown>, ...tokens: string[]) {
+    let msg = "";
+    try {
+      await fn();
+    } catch (e) {
+      msg = e instanceof Error ? e.message : String(e);
+    }
+    expect(msg, "expected a rejection").not.toBe("");
+    for (const t of tokens) expect(msg).toContain(t);
+  }
+
+  test("a GPS-captured site stores its source and accuracy, stays unverified, and shows its provenance on the map", async () => {
+    const id = await mkSite({ latitude: 6.31, longitude: -10.8, geoSource: "device_gps", geoAccuracyM: 8.5 });
+    expect(await geoRow(id)).toMatchObject({
+      geo_source: "device_gps",
+      geo_accuracy_m: 8.5,
+      geo_verified: false,
+    });
+    const mapped = (await feed()).features.find((x) => x.id === id);
+    expect(mapped?.verification).toBe("unverified");
+    expect(mapped?.geoSource).toBe("device_gps");
+    expect(mapped?.geoAccuracyM).toBe(8.5);
+  });
+
+  test("a position typed with no source is recorded honestly as manual entry", async () => {
+    const id = await mkSite({ latitude: 6.4, longitude: -10.7 });
+    expect(await geoRow(id)).toMatchObject({ geo_source: "manual_entry", geo_accuracy_m: null });
+  });
+
+  test("a site with no position has no provenance either", async () => {
+    const id = await mkSite();
+    expect(await geoRow(id)).toMatchObject({ latitude: null, geo_source: null, geo_accuracy_m: null });
+  });
+
+  test("a position is a PAIR; bad source and negative accuracy are refused", async () => {
+    setIdentity(f.admin);
+    const base = { name: "Pair Probe", operatorName: "Probe Op", county: "Bomi" };
+    await rejects(() => api.sites.create({ ...base, latitude: 6.4 }), "INVALID_POSITION");
+    await rejects(() => api.sites.create({ ...base, longitude: -10.7 }), "INVALID_POSITION");
+    await rejects(
+      () => api.sites.create({ ...base, latitude: 6.4, longitude: -10.7, geoSource: "satellite" as never }),
+      "INVALID_SOURCE",
+    );
+    await rejects(
+      () => api.sites.create({ ...base, latitude: 6.4, longitude: -10.7, geoAccuracyM: -1 }),
+      "INVALID_ACCURACY",
+    );
+    const id = await mkSite({ latitude: 6.4, longitude: -10.7 });
+    await rejects(() => api.sites.update({ siteId: id, latitude: null }), "INVALID_POSITION");
+    await rejects(() => api.sites.update({ siteId: id, geoAccuracyM: Number.NaN }), "INVALID_ACCURACY");
+  });
+
+  test("an EXISTING site gets its position set later (the registered-without-coordinates case)", async () => {
+    const id = await mkSite();
+    setIdentity(f.admin);
+    await api.sites.update({ siteId: id, latitude: 6.55, longitude: -10.55, geoSource: "map_pick" });
+    expect(await geoRow(id)).toMatchObject({ latitude: 6.55, longitude: -10.55, geo_source: "map_pick" });
+    expect((await feed()).features.some((x) => x.id === id)).toBe(true);
+  });
+
+  test("moving a point replaces its provenance and withdraws an earlier verification", async () => {
+    const id = await mkSite({ latitude: 6.3, longitude: -10.9, geoSource: "device_gps", geoAccuracyM: 5 });
+    setIdentity(f.admin);
+    await api.gis.setSiteGeoVerification({ siteId: id, geoVerified: true, source: "survey 2026-10", accuracyM: 3 });
+    expect((await geoRow(id)).geo_verified).toBe(true);
+
+    await api.sites.update({ siteId: id, latitude: 6.35, longitude: -10.85, geoSource: "map_pick" });
+    expect(await geoRow(id)).toMatchObject({
+      latitude: 6.35,
+      geo_source: "map_pick",
+      geo_accuracy_m: null, // the old GPS accuracy described the OLD place
+      geo_verified: false,
+    });
+  });
+
+  test("editing something else never touches the position's provenance", async () => {
+    const id = await mkSite({ latitude: 6.3, longitude: -10.9, geoSource: "device_gps", geoAccuracyM: 5 });
+    setIdentity(f.admin);
+    await api.sites.update({ siteId: id, notes: "Reviewed" });
+    expect(await geoRow(id)).toMatchObject({ geo_source: "device_gps", geo_accuracy_m: 5 });
+  });
+
+  test("clearing the position clears its provenance; the map then counts the site as unmapped", async () => {
+    const id = await mkSite({ latitude: 6.3, longitude: -10.9, geoSource: "device_gps", geoAccuracyM: 5 });
+    setIdentity(f.admin);
+    await api.sites.update({ siteId: id, latitude: null, longitude: null });
+    expect(await geoRow(id)).toMatchObject({ latitude: null, longitude: null, geo_source: null, geo_accuracy_m: null });
+    const d = await feed();
+    expect(d.features.some((x) => x.id === id)).toBe(false);
+    expect(d.excluded.sites ?? 0).toBeGreaterThanOrEqual(1);
+  });
+
+  test("only an administrator can set a site's position", async () => {
+    const id = await mkSite({ latitude: 6.3, longitude: -10.9 });
+    setIdentity(f.county); // county inspector
+    await rejects(() => api.sites.update({ siteId: id, latitude: 6.4, longitude: -10.8 }), "FORBIDDEN");
+    setIdentity(f.opA); // operator
+    await rejects(() => api.sites.update({ siteId: id, latitude: 6.4, longitude: -10.8 }), "FORBIDDEN");
+    expect(await geoRow(id)).toMatchObject({ latitude: 6.3, longitude: -10.9 });
+  });
+});
+
+describe("loading boundaries: replace in place", () => {
+  test("saveAdminBoundary with an id REPLACES the geometry — no duplicate row, provenance updated", async () => {
+    setIdentity(f.admin);
+    const first = await api.gis.saveAdminBoundary({
+      name: "Replace Probe County",
+      level: "county",
+      geometryGeoJson: POLY(-10.2, 6.2),
+      source: "first upload",
+    });
+    const second = await api.gis.saveAdminBoundary({
+      id: first._id,
+      name: "Replace Probe County",
+      level: "county",
+      geometryGeoJson: POLY(-10.3, 6.3),
+      source: "corrected upload",
+      accuracyM: 25,
+    });
+    expect(second._id).toBe(first._id);
+    const rows = await adminSql(`select source, accuracy_m, geometry_geojson from public.admin_boundaries where name = 'Replace Probe County'`);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ source: "corrected upload", accuracy_m: 25 });
+    expect(JSON.stringify(rows[0].geometry_geojson)).toContain("-10.3");
+  });
+
+  test("replacing an unknown boundary id fails with NOT_FOUND instead of silently doing nothing", async () => {
+    setIdentity(f.admin);
+    let msg = "";
+    try {
+      await api.gis.saveAdminBoundary({
+        id: "ababab06-0000-4000-8000-0000000000ff",
+        name: "Ghost",
+        level: "county",
+        geometryGeoJson: POLY(-10.2, 6.2),
+        source: "x",
+      });
+    } catch (e) {
+      msg = e instanceof Error ? e.message : String(e);
+    }
+    expect(msg).toContain("NOT_FOUND");
   });
 });
 

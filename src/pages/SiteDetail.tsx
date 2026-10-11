@@ -15,7 +15,12 @@ import {
 import { useState } from "react";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { ArrowLeft, MapPin } from "lucide-react";
+import { ArrowLeft, MapPin, MapPinOff } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { SiteLocationPicker } from "@/components/SiteLocationPicker";
+import { sourceLabel } from "@/lib/gis";
+import { draftFromSite, parsePositionInput, type PositionDraft, EMPTY_POSITION_DRAFT } from "@/lib/site-position";
 import type { Id } from "@/lib/compat-types";
 import { RiskAiPanel } from "../components/RiskAiPanel";
 import { useNow } from "@/hooks/use-now";
@@ -40,6 +45,13 @@ export default function SiteDetail() {
   const isAdmin = user?.role === "admin";
   const [statusOpen, setStatusOpen] = useState(false);
   const [newStatus, setNewStatus] = useState("");
+  const updateSite = useMutation(api.sites.update);
+  const verifyPosition = useMutation(api.gis.setSiteGeoVerification);
+  const [locOpen, setLocOpen] = useState(false);
+  const [locDraft, setLocDraft] = useState<PositionDraft>(EMPTY_POSITION_DRAFT);
+  const [verifyOn, setVerifyOn] = useState(false);
+  const [verifySource, setVerifySource] = useState("");
+  const [savingLoc, setSavingLoc] = useState(false);
 
   if (!siteId) return <p className="text-sm text-muted-foreground">No site selected.</p>;
   if (site === undefined)
@@ -62,6 +74,50 @@ export default function SiteDetail() {
     }
   };
 
+  const openLocation = () => {
+    setLocDraft(draftFromSite(site));
+    setVerifyOn(false);
+    setVerifySource("");
+    setLocOpen(true);
+  };
+
+  const saveLocation = async () => {
+    if (savingLoc) return;
+    const pos = parsePositionInput(locDraft.latitude, locDraft.longitude);
+    if (pos.kind !== "ok") {
+      toast.error(pos.kind === "error" ? pos.error : "Set a position first: use your location, pick it on the map, or type it.");
+      return;
+    }
+    if (verifyOn && !verifySource.trim()) {
+      toast.error("Say what the position was verified against (for example: surveyed with a GPS receiver).");
+      return;
+    }
+    setSavingLoc(true);
+    try {
+      await updateSite({
+        siteId: siteId as Id<"sites">,
+        latitude: pos.latitude,
+        longitude: pos.longitude,
+        geoSource: locDraft.source,
+        geoAccuracyM: locDraft.accuracyM ?? null,
+      });
+      if (verifyOn) {
+        await verifyPosition({
+          siteId,
+          geoVerified: true,
+          source: verifySource.trim(),
+          accuracyM: locDraft.accuracyM,
+        });
+      }
+      toast.success(verifyOn ? "Position saved and verified" : "Position saved — it is now on the map");
+      setLocOpen(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message.replace(/^[A-Z_]+:\s*/, "") : "Failed to save position");
+    } finally {
+      setSavingLoc(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <div>
@@ -80,9 +136,19 @@ export default function SiteDetail() {
             <span>{site.operatorName}</span>
             <span>{site.county}{site.district ? ` · ${site.district}` : ""}</span>
             {site.mineralType && <span>{site.mineralType}</span>}
-            {site.latitude != null && site.longitude != null && (
+            {site.latitude != null && site.longitude != null ? (
+              <span className="flex flex-wrap items-center gap-x-2">
+                <span className="flex items-center gap-1">
+                  <MapPin className="size-3.5" /> {site.latitude.toFixed(4)}, {site.longitude.toFixed(4)}
+                </span>
+                <span className="text-xs">
+                  {site.geoVerified ? "verified" : "unverified"} · {sourceLabel(site.geoSource)}
+                  {site.geoAccuracyM !== undefined ? ` · ±${Math.round(site.geoAccuracyM)} m` : ""}
+                </span>
+              </span>
+            ) : (
               <span className="flex items-center gap-1">
-                <MapPin className="size-3.5" /> {site.latitude.toFixed(4)}, {site.longitude.toFixed(4)}
+                <MapPinOff className="size-3.5" /> Not on the map — no position yet
               </span>
             )}
           </div>
@@ -94,15 +160,20 @@ export default function SiteDetail() {
           </div>
         </div>
         {isAdmin && (
-          <Button
-            variant="outline"
-            onClick={() => {
-              setNewStatus(site.status);
-              setStatusOpen(true);
-            }}
-          >
-            Change status
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={openLocation}>
+              {site.latitude != null ? "Edit location" : "Set location"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setNewStatus(site.status);
+                setStatusOpen(true);
+              }}
+            >
+              Change status
+            </Button>
+          </div>
         )}
       </header>
 
@@ -218,6 +289,54 @@ export default function SiteDetail() {
           )}
         </RecordSection>
       </div>
+
+      {/* Admin location dialog — capture a real position (GPS / map / typed) */}
+      <Dialog open={locOpen} onOpenChange={setLocOpen}>
+        <DialogContent className="paper max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{site.latitude != null ? "Edit site location" : "Set site location"}</DialogTitle>
+            <DialogDescription>
+              {site.name} · {site.code}. The position is what puts this site on the National Map.
+              {site.geoVerified && " Moving a verified position removes its verification."}
+            </DialogDescription>
+          </DialogHeader>
+          <SiteLocationPicker value={locDraft} onChange={setLocDraft} disabled={savingLoc} />
+          <div className="space-y-2 border-t border-border pt-3">
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="verify-position"
+                checked={verifyOn}
+                onCheckedChange={(v) => setVerifyOn(v === true)}
+                disabled={savingLoc}
+              />
+              <Label htmlFor="verify-position" className="text-sm font-normal leading-snug">
+                Mark this position as verified against an authoritative source
+              </Label>
+            </div>
+            {verifyOn && (
+              <Input
+                value={verifySource}
+                onChange={(e) => setVerifySource(e.target.value)}
+                placeholder="Verified against… e.g. surveyed with a GPS receiver, 2026-10"
+                disabled={savingLoc}
+                aria-label="What the position was verified against"
+              />
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              Leave unticked unless someone has checked it: a GPS fix or a map click is recorded as an
+              unverified claim, and the map shows it that way.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLocOpen(false)} disabled={savingLoc}>
+              Cancel
+            </Button>
+            <Button onClick={saveLocation} disabled={savingLoc}>
+              {savingLoc ? "Saving…" : "Save position"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Admin status dialog */}
       <Dialog open={statusOpen} onOpenChange={setStatusOpen}>

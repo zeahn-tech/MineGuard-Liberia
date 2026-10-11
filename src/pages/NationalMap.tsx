@@ -291,37 +291,37 @@ export default function NationalMap() {
             <MapBridge onZoom={setZoom} target={focus} />
 
             {shownAdminBoundaries.map((b) => {
-                const geom = parseBoundaryGeometry(b.geometryGeoJson);
-                if (!geom) return null;
-                return (
-                  <GeoJSON
-                    key={`${b._id}:${b.geoVerified}`}
-                    data={geom}
-                    style={boundaryStyle("admin_boundaries", b.geoVerified, b.level === "national")}
-                  >
-                    <Popup>
-                      <strong>{b.name}</strong> ({b.level})
-                      <br />
-                      {b.geoVerified ? "Verified boundary" : "Unverified boundary"} · source: {b.source}
-                    </Popup>
-                  </GeoJSON>
-                );
-              })}
+              const geom = parseBoundaryGeometry(b.geometryGeoJson);
+              if (!geom) return null;
+              return (
+                <GeoJSON
+                  key={`${b._id}:${b.geoVerified}`}
+                  data={geom}
+                  style={boundaryStyle("admin_boundaries", b.geoVerified, b.level === "national")}
+                >
+                  <Popup>
+                    <strong>{b.name}</strong> ({b.level})
+                    <br />
+                    {b.geoVerified ? "Verified boundary" : "Unverified boundary"} · source: {b.source}
+                  </Popup>
+                </GeoJSON>
+              );
+            })}
             {shownSiteBoundaries.map((b) => {
-                const geom = parseBoundaryGeometry(b.geometryGeoJson);
-                if (!geom) return null;
-                return (
-                  <GeoJSON
-                    key={`${b._id}:${b.geoVerified}`}
-                    data={geom}
-                    style={boundaryStyle("site_boundaries", b.geoVerified)}
-                  >
-                    <Popup>
-                      Site outline — {b.geoVerified ? "verified" : "unverified"} · source: {b.source}
-                    </Popup>
-                  </GeoJSON>
-                );
-              })}
+              const geom = parseBoundaryGeometry(b.geometryGeoJson);
+              if (!geom) return null;
+              return (
+                <GeoJSON
+                  key={`${b._id}:${b.geoVerified}`}
+                  data={geom}
+                  style={boundaryStyle("site_boundaries", b.geoVerified)}
+                >
+                  <Popup>
+                    Site outline — {b.geoVerified ? "verified" : "unverified"} · source: {b.source}
+                  </Popup>
+                </GeoJSON>
+              );
+            })}
 
             {items.map(({ layer, items: chunk }) => (
               <LayerGroup key={layer}>
