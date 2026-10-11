@@ -3,7 +3,7 @@
 ## Quality gate [2026-10-11]
 
 **Status:** GREEN — `tsc -b` 0 errors, `eslint .` 0 errors / 0 warnings,
-`vite build` OK, `bun test` 423 pass / 4 skip (live-DB tests, need a real
+`vite build` OK, `bun test` 428 pass / 4 skip (live-DB tests, need a real
 project) / 0 fail.
 
 - **Data layer restored.** The 2026-10-09 "Rebuild backend.ts" reconstruction
@@ -44,6 +44,14 @@ project) / 0 fail.
     users in production (detail only in dev; reload action; error logged).
   - New guard test for queued inspections that lost their site/template
     (parked as permanent NOT_FOUND instead of retried forever).
+- **"Nothing shows on the map" (2026-10-11).** Root cause in code: the demo
+  seed stored positive longitudes (Nigeria), `sites.create` accepted any
+  coordinates, and the map — correctly — refuses to plot outside Liberia, so
+  affected records vanished with no explanation. Fixed: seed corrected;
+  site create/update validate position; migration `0017` repairs seeded demo
+  rows; the feed reports `excluded` counts and the page explains them; layer
+  toggles show record counts. Boundary layers are empty until a boundary
+  dataset is loaded (no authoring UI yet — `api.gis.*` only).
 - **Test hygiene.** The scale suite's 5,000-row teardown ran minutes under
   row triggers and was silently abandoned at the default hook timeout,
   leaving its fixture in the shared per-process DB; teardown now skips row

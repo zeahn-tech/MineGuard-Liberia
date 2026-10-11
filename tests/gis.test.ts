@@ -681,6 +681,118 @@ describe("unverified data is visually distinct", () => {
 });
 
 // ===========================================================================
+// Why a map can be EMPTY: unusable coordinates (the sign of a longitude)
+// ===========================================================================
+describe("site coordinates: nothing silently unmappable", () => {
+  const SITE_BAD = "ababab06-0000-4000-8000-000000000001";
+  const SITE_DEMO = "ababab06-0000-4000-8000-000000000002";
+  const SITE_REAL = "ababab06-0000-4000-8000-000000000003";
+  const DEMO_NOTE = "Synthetic demonstration record — not real operational data.";
+  const insertSite = (id: string, code: string, name: string, lng: number, notes: string | null) =>
+    adminSql(
+      `insert into public.sites (id, code, name, operator_name, county, status, latitude, longitude, notes, created_by)
+       values ('${id}', '${code}', '${name}', 'Test Op', 'Bomi', 'active', 6.8, ${lng}, ${notes ? `'${notes}'` : "null"}, '${f.admin}')`,
+    );
+  // Sites are never deleted by the app (a guard trigger enforces it), so test
+  // teardown skips row triggers for the duration — the shared per-process DB
+  // must not keep these probe sites for other suites.
+  const dropSites = (...ids: string[]) =>
+    adminExec(
+      `set session_replication_role = replica;
+       delete from public.sites where id in (${ids.map((i) => `'${i}'`).join(", ")});
+       set session_replication_role = origin;`,
+    );
+  const cleanup = () => dropSites(SITE_BAD, SITE_DEMO, SITE_REAL);
+  async function expectApiRejects(fn: () => Promise<unknown>, ...tokens: string[]) {
+    let msg = "";
+    try {
+      await fn();
+    } catch (e) {
+      msg = e instanceof Error ? e.message : String(e);
+    }
+    expect(msg, "expected the call to be rejected").not.toBe("");
+    for (const t of tokens) expect(msg).toContain(t);
+  }
+
+  test("every seeded demo site sits inside Liberia (positive longitudes were Nigeria)", async () => {
+    const { DEMO_SITE_DEFS } = await import("../src/lib/backend");
+    expect(DEMO_SITE_DEFS.length).toBeGreaterThan(0);
+    for (const d of DEMO_SITE_DEFS) {
+      expect(inLiberia(d.lat, d.lng), `${d.name} (${d.lat}, ${d.lng})`).toBe(true);
+    }
+  });
+
+  test("registering a site with a longitude missing its minus sign is refused, with a fix hint", async () => {
+    setIdentity(f.admin);
+    const base = { name: "Coord Probe", operatorName: "Probe Op", county: "Bomi" };
+    await expectApiRejects(
+      () => api.sites.create({ ...base, latitude: 6.43, longitude: 9.43 }),
+      "INVALID_LONGITUDE",
+      "did you mean -9.43",
+    );
+    await expectApiRejects(
+      () => api.sites.create({ ...base, latitude: 60, longitude: -9.43 }),
+      "INVALID_LATITUDE",
+    );
+    // editing an existing site is held to the same rule
+    await expectApiRejects(
+      () => api.sites.update({ siteId: f.siteA, longitude: 9.43 }),
+      "INVALID_LONGITUDE",
+    );
+  });
+
+  test("a correctly signed site is accepted and appears on the map as unverified", async () => {
+    setIdentity(f.admin);
+    const id = await api.sites.create({
+      name: "Coord Probe OK",
+      operatorName: "Probe Op",
+      county: "Bomi",
+      latitude: 6.43,
+      longitude: -9.43,
+    });
+    try {
+      const d = await feed();
+      const mapped = d.features.find((x) => x.id === id);
+      expect(mapped?.layer).toBe("sites");
+      expect(mapped?.verification).toBe("unverified");
+    } finally {
+      await dropSites(id);
+    }
+  });
+
+  test("a site that already has unusable coordinates is NOT plotted but IS counted for the user", async () => {
+    await insertSite(SITE_BAD, "MGL-BOM-9901", "Positive Longitude Probe", 9.43, null);
+    try {
+      setIdentity(f.admin);
+      const d = await feed();
+      expect(d.features.find((x) => x.id === SITE_BAD)).toBeUndefined(); // never plotted in Nigeria
+      expect(d.excluded.sites ?? 0).toBeGreaterThanOrEqual(1); // …but the page can say so
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("migration 0017 repairs ONLY labelled demo rows (real data is never touched)", async () => {
+    await insertSite(SITE_DEMO, "MGL-BOM-9902", "Demo Probe — Zorzor", 9.4236, DEMO_NOTE);
+    await insertSite(SITE_REAL, "MGL-BOM-9903", "Real Operator Site", 9.4236, null);
+    try {
+      const sql = readFileSync(join(ROOT, "supabase/migrations/0017_fix_demo_site_longitudes.sql"), "utf8");
+      await adminExec(sql);
+      await adminExec(sql); // idempotent
+      const rows = await adminSql(
+        `select id, longitude from public.sites where id in ('${SITE_DEMO}', '${SITE_REAL}') order by id`,
+      );
+      expect(rows).toEqual([
+        { id: SITE_DEMO, longitude: -9.4236 },
+        { id: SITE_REAL, longitude: 9.4236 },
+      ]);
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
+// ===========================================================================
 // GIS-5 — offline tile strategy (within provider policy)
 // ===========================================================================
 describe("offline tile strategy", () => {

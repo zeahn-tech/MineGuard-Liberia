@@ -69,6 +69,7 @@ export default function NationalMap() {
   const loading = data === undefined;
   const layers = useMemo(() => data?.layers ?? [], [data]);
   const features = useMemo(() => data?.features ?? [], [data]);
+  const excluded = useMemo(() => data?.excluded ?? {}, [data]);
   const adminBoundaries = useMemo(() => data?.adminBoundaries ?? [], [data]);
   const siteBoundaries = useMemo(() => data?.siteBoundaries ?? [], [data]);
 
@@ -157,6 +158,18 @@ export default function NationalMap() {
     [layers, visibleFeatures, shownAdminBoundaries, shownSiteBoundaries, visibleLayers],
   );
 
+  // Records loaded per layer (before toggles/filters) — shown on each toggle
+  // so an empty layer is visibly empty rather than a button that "does nothing".
+  const layerCounts = useMemo(() => {
+    const counts: Partial<Record<GeoLayer, number>> = {
+      admin_boundaries: adminBoundaries.length,
+      site_boundaries: siteBoundaries.length,
+    };
+    for (const f of features) counts[f.layer] = (counts[f.layer] ?? 0) + 1;
+    return counts;
+  }, [features, adminBoundaries, siteBoundaries]);
+  const excludedTotal = Object.values(excluded).reduce((a, b) => a + (b ?? 0), 0);
+
   const unverifiedCount = visibleFeatures.filter((f) => f.verification !== "verified").length;
   const hasBoundaryData = adminBoundaries.length > 0 || siteBoundaries.length > 0;
 
@@ -189,10 +202,24 @@ export default function NationalMap() {
         </p>
       </header>
 
+      {excludedTotal > 0 && (
+        <p role="status" className="rounded-sm border border-border bg-muted/40 px-3 py-2 text-xs leading-relaxed">
+          <strong>{excludedTotal}</strong> record{excludedTotal === 1 ? "" : "s"} you can see{" "}
+          {excludedTotal === 1 ? "is" : "are"} not on the map because{" "}
+          {excludedTotal === 1 ? "it has" : "they have"} no coordinates, or coordinates outside Liberia (
+          {Object.entries(excluded)
+            .map(([layer, n]) => `${layers.find((l) => l.id === layer)?.label ?? layer}: ${n}`)
+            .join(" · ")}
+          ). Liberia is west of the prime meridian, so longitudes are negative (for example −9.43, not 9.43).
+          Correct the site&apos;s coordinates on the Sites page.
+        </p>
+      )}
+
       <div className="space-y-2 border-b border-border pb-3">
         <div className="flex flex-wrap gap-2" role="group" aria-label="Map layers">
           {layers.map((cfg) => {
             const on = visibleLayers[cfg.id];
+            const count = layerCounts[cfg.id] ?? 0;
             return (
               <button
                 key={cfg.id}
@@ -202,8 +229,10 @@ export default function NationalMap() {
                   on ? "bg-background border-border shadow-sm" : "border-border bg-transparent opacity-60 hover:opacity-100"
                 }`}
                 onClick={() => toggleLayer(cfg.id, on)}
+                title={count === 0 && !loading ? "No records loaded for this layer yet" : undefined}
               >
                 {cfg.label}
+                {!loading && <span className="ml-1.5 text-muted-foreground">({count})</span>}
               </button>
             );
           })}

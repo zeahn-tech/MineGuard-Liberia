@@ -40,6 +40,7 @@ import { sha256Hex } from "./sha256";
 const AI_DISCLAIMER =
   "AI-assisted explanation — generated from the recorded risk factors only; decision support, not a determination.";
 import {
+  LIBERIA_BBOX,
   adminBoundaryFromRow,
   communityReportFeature,
   incidentFeature,
@@ -61,6 +62,7 @@ import {
   type AdminBoundary,
   type AuditEntry,
   type CommunityReport,
+  type GeoLayer,
   type CorrectiveAction,
   type EnvironmentalObservation,
   type Evidence,
@@ -82,6 +84,32 @@ import {
 // ---------------------------------------------------------------------------
 // QUERY HANDLES — a Convex useQuery-compatible subscription surface
 // ---------------------------------------------------------------------------
+
+/** A site's point position must be inside Liberia. Liberia lies WEST of the
+ *  prime meridian, so its longitudes are NEGATIVE (−11.6 … −7.3): a longitude
+ *  typed without its minus sign lands in Nigeria/Cameroon and the map would
+ *  (correctly) refuse to plot it — so the data layer refuses it up front with
+ *  an actionable message instead of saving a site that can never be mapped. */
+function assertSitePosition(
+  lat: number | null | undefined,
+  lng: number | null | undefined,
+): void {
+  const { minLat, maxLat, minLng, maxLng } = LIBERIA_BBOX;
+  if (lat !== null && lat !== undefined && !(lat >= minLat && lat <= maxLat)) {
+    throw new Error(
+      `INVALID_LATITUDE: ${lat} is outside Liberia (latitude must be between ${minLat} and ${maxLat}).`,
+    );
+  }
+  if (lng !== null && lng !== undefined && !(lng >= minLng && lng <= maxLng)) {
+    const hint =
+      lng > 0 && -lng >= minLng && -lng <= maxLng
+        ? ` Liberia is west of the prime meridian — did you mean ${-lng}?`
+        : "";
+    throw new Error(
+      `INVALID_LONGITUDE: ${lng} is outside Liberia (longitude must be between ${minLng} and ${maxLng}; west is negative).${hint}`,
+    );
+  }
+}
 
 export interface QueryHandle<T> {
   /** True when the result depends on the signed-in user. Consumed by the
@@ -1372,6 +1400,7 @@ export const api = {
       notes?: string;
     }) => {
       const user = await requireAdminUser();
+      assertSitePosition(args.latitude, args.longitude);
       const existingCodes = await allSiteCodes();
       const code = nextSiteCodeFrom(args.county, existingCodes);
       const id = await insertReturningId("sites", {
@@ -1483,19 +1512,11 @@ export const api = {
       if (args.mineralType !== undefined)
         put("mineral_type", args.mineralType.trim() || null, site.mineralType);
       if (args.latitude !== undefined) {
-        if (
-          args.latitude !== null &&
-          (args.latitude < -90 || args.latitude > 90)
-        )
-          throw new Error("INVALID_LATITUDE");
+        assertSitePosition(args.latitude, undefined);
         put("latitude", args.latitude, site.latitude);
       }
       if (args.longitude !== undefined) {
-        if (
-          args.longitude !== null &&
-          (args.longitude < -180 || args.longitude > 180)
-        )
-          throw new Error("INVALID_LONGITUDE");
+        assertSitePosition(undefined, args.longitude);
         put("longitude", args.longitude, site.longitude);
       }
       if (args.notes !== undefined) put("notes", args.notes, site.notes);
@@ -3433,6 +3454,11 @@ export interface MapFeedPayload {
   features: MapFeature[];
   adminBoundaries: AdminBoundary[];
   siteBoundaries: SiteBoundary[];
+  /** Records the caller may see but that have NO usable map position (no
+   *  coordinates, or coordinates outside Liberia — e.g. a longitude typed
+   *  without its minus sign), by layer. They are never plotted at a guessed
+   *  location; the page tells the user how many were left off and why. */
+  excluded: Partial<Record<GeoLayer, number>>;
 }
 
 function assertBoundaryInput(args: {
@@ -3478,6 +3504,7 @@ export async function loadMapFeatures(): Promise<MapFeedPayload> {
     features: [],
     adminBoundaries: [],
     siteBoundaries: [],
+    excluded: {},
   };
   const uid = authUserId();
   if (!uid) return empty;
@@ -3504,23 +3531,33 @@ export async function loadMapFeatures(): Promise<MapFeedPayload> {
     ]);
 
   const features: MapFeature[] = [...siteFeatures];
+  const excluded: Partial<Record<GeoLayer, number>> = {};
+  const noteExcluded = (layer: GeoLayer, built: MapFeature | null) => {
+    if (!built) excluded[layer] = (excluded[layer] ?? 0) + 1;
+  };
+  const unmappedSites = siteRows.length - siteFeatures.length;
+  if (unmappedSites > 0) excluded.sites = unmappedSites;
   for (const r of incRows) {
     const f = incidentFeature(r, sites);
     if (f) features.push(f);
+    noteExcluded("incidents", f);
   }
   for (const r of inspRows) {
     const f = inspectionFeature(r, sites);
     if (f) features.push(f);
+    noteExcluded("inspections", f);
   }
   for (const r of obsRows) {
     if (r.status === "resolved") continue; // open/monitoring only (docs/06)
     const f = observationFeature(r, sites);
     if (f) features.push(f);
+    noteExcluded("observations", f);
   }
   for (const r of repRows) {
     if (r.status === "dismissed") continue; // dismissed reports leave the map
     const f = communityReportFeature(r);
     if (f) features.push(f);
+    noteExcluded("community_reports", f);
   }
   if (staff) {
     const scores = (await firstValue(api.sites.riskScores())) ?? {};
@@ -3540,7 +3577,7 @@ export async function loadMapFeatures(): Promise<MapFeedPayload> {
       (b) => sites.has(b.siteId) && parseBoundaryGeometry(b.geometryGeoJson) !== null,
     );
 
-  return { layers: MAP_LAYER_CONFIGS, features, adminBoundaries, siteBoundaries };
+  return { layers: MAP_LAYER_CONFIGS, features, adminBoundaries, siteBoundaries, excluded };
 }
 
 // ---------------------------------------------------------------------------
@@ -3548,24 +3585,27 @@ export async function loadMapFeatures(): Promise<MapFeedPayload> {
 // Provenance for every seeded record is the authenticated account running it.
 // ---------------------------------------------------------------------------
 
+/** Synthetic demo sites. Longitudes are NEGATIVE: Liberia is west of the prime
+ *  meridian (tests/gis.test.ts pins every seeded position inside Liberia). */
+export const DEMO_SITE_DEFS = [
+  { name: "Demo Gold Operation — Zorzor Corridor", operatorName: "Lofa Minerals Demo", county: "Lofa", district: "Zorzor", community: "Zorzor City", mineralType: "Gold", lat: 7.6067, lng: -9.4236 },
+  { name: "Demo Iron Ore Quarry — Yekepa", operatorName: "Nimba Aggregates Demo", county: "Nimba", district: "Sanniquellie-Mahn", community: "Yekepa", mineralType: "Iron Ore", lat: 7.5989, lng: -8.6333 },
+  { name: "Demo Alluvial Site — Saniquellie", operatorName: "Nimba Aggregates Demo", county: "Nimba", district: "Sanniquellie-Mahn", community: "Saniquellie", mineralType: "Alluvial Gold", lat: 7.5806, lng: -8.7236 },
+  { name: "Demo Sand Mining — Robertsport", operatorName: "Grand Cape Coastal Demo", county: "Grand Cape Mount", district: "Robertsport", community: "Robertsport", mineralType: "Sand", lat: 6.7572, lng: -11.3686 },
+  { name: "Demo Artisanal Camp — Gbarpolu", operatorName: "Gbarpolu Artisanal Demo", county: "Gbarpolu", district: "Bopolu", community: "Bopolu", mineralType: "Gold", lat: 6.7236, lng: -9.7167 },
+  { name: "Demo Basalt Pit — Ganta", operatorName: "Nimba Aggregates Demo", county: "Nimba", district: "Gba & Ma", community: "Ganta", mineralType: "Basalt", lat: 7.2194, lng: -8.9833 },
+] as const;
+
 async function runSeed() {
   const user = await requireAdminUser();
   const now = Date.now();
   const day = 24 * 60 * 60 * 1000;
   const uid = user.uid;
 
-  const siteDefs = [
-    { name: "Demo Gold Operation — Zorzor Corridor", operatorName: "Lofa Minerals Demo", county: "Lofa", district: "Zorzor", community: "Zorzor City", mineralType: "Gold", lat: 7.6067, lng: 9.4236 },
-    { name: "Demo Iron Ore Quarry — Yekepa", operatorName: "Nimba Aggregates Demo", county: "Nimba", district: "Sanniquellie-Mahn", community: "Yekepa", mineralType: "Iron Ore", lat: 7.5989, lng: 8.6333 },
-    { name: "Demo Alluvial Site — Saniquellie", operatorName: "Nimba Aggregates Demo", county: "Nimba", district: "Sanniquellie-Mahn", community: "Saniquellie", mineralType: "Alluvial Gold", lat: 7.5806, lng: 8.7236 },
-    { name: "Demo Sand Mining — Robertsport", operatorName: "Grand Cape Coastal Demo", county: "Grand Cape Mount", district: "Robertsport", community: "Robertsport", mineralType: "Sand", lat: 6.7572, lng: 11.3686 },
-    { name: "Demo Artisanal Camp — Gbarpolu", operatorName: "Gbarpolu Artisanal Demo", county: "Gbarpolu", district: "Bopolu", community: "Bopolu", mineralType: "Gold", lat: 6.7236, lng: 9.7167 },
-    { name: "Demo Basalt Pit — Ganta", operatorName: "Nimba Aggregates Demo", county: "Nimba", district: "Gba & Ma", community: "Ganta", mineralType: "Basalt", lat: 7.2194, lng: 8.9833 },
-  ];
 
   const siteIds: Record<string, { id: string; code: string }> = {};
   const existingCodes = await allSiteCodes();
-  for (const def of siteDefs) {
+  for (const def of DEMO_SITE_DEFS) {
     const code = nextSiteCodeFrom(def.county, existingCodes);
     existingCodes.push(code);
     const id = await insertReturningId("sites", {

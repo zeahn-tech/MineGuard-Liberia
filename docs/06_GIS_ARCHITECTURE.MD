@@ -68,6 +68,18 @@ and county, text search, zoom-aware grid clustering (cluster size shrinks per
 zoom; individual points from zoom 13; a cluster of ≥3; clusters never merge across layers). Coordinate-less or
 out-of-Liberia points are skipped, not plotted at (0,0).
 
+**Why a layer can be empty.** A point is plotted only if it has coordinates
+inside Liberia (lat 4.3…8.6, lng −11.6…−7.3). Liberia is **west** of the prime
+meridian, so longitudes are **negative** — `9.43` (no minus sign) is Nigeria and
+is never plotted at a guessed place. To keep that from being a silent failure:
+`api.sites.create/update` reject out-of-Liberia coordinates with an actionable
+message ("did you mean -9.43?"); `api.mapFeatures` returns an `excluded` count
+per layer and the page shows how many visible records were left off and why;
+each layer toggle shows how many records it holds (`(0)` = nothing loaded —
+boundary layers stay empty until an administrator loads a boundary dataset via
+`api.gis.*`). Migration `0017` corrected the six demo sites an earlier seed had
+stored with positive longitudes (labelled demo rows only).
+
 **Scale note.** `api.mapFeatures` pages through each layer's full (RLS-scoped)
 row set and builds features client-side — correct and simple at the current
 data volume. Past roughly tens of thousands of rows per layer the next step is

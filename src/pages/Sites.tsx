@@ -199,6 +199,16 @@ export default function Sites() {
   );
 }
 
+/** Blank → undefined; otherwise a finite number (rejects "abc" instead of
+ *  sending NaN to the data layer). Range is validated by the data layer. */
+function parseCoordinate(raw: string, label: string): number | undefined {
+  const text = raw.trim();
+  if (!text) return undefined;
+  const n = Number(text);
+  if (!Number.isFinite(n)) throw new Error(`${label} must be a number (e.g. ${label === "Latitude" ? "6.43" : "-9.43"}).`);
+  return n;
+}
+
 function RegisterSiteDialog() {
   const create = useMutation(api.sites.create);
   const [open, setOpen] = useState(false);
@@ -226,15 +236,17 @@ function RegisterSiteDialog() {
         district: form.district || undefined,
         community: form.community || undefined,
         mineralType: form.mineralType || undefined,
-        latitude: form.latitude ? Number(form.latitude) : undefined,
-        longitude: form.longitude ? Number(form.longitude) : undefined,
+        latitude: parseCoordinate(form.latitude, "Latitude"),
+        longitude: parseCoordinate(form.longitude, "Longitude"),
         notes: form.notes || undefined,
       });
       toast.success("Site registered");
       setOpen(false);
       setForm({ name: "", operatorName: "", county: "", district: "", community: "", mineralType: "", latitude: "", longitude: "", notes: "" });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to register site");
+      toast.error(
+        e instanceof Error ? e.message.replace(/^[A-Z_]+:\s*/, "") : "Failed to register site",
+      );
     } finally {
       setSaving(false);
     }
@@ -286,9 +298,12 @@ function RegisterSiteDialog() {
           <div className="space-y-1.5">
             <Label>Coordinates (optional)</Label>
             <div className="flex gap-2">
-              <Input value={form.latitude} onChange={set("latitude")} placeholder="Lat" />
-              <Input value={form.longitude} onChange={set("longitude")} placeholder="Lng" />
+              <Input value={form.latitude} onChange={set("latitude")} placeholder="Lat, e.g. 6.43" inputMode="decimal" />
+              <Input value={form.longitude} onChange={set("longitude")} placeholder="Lng, e.g. -9.43" inputMode="decimal" />
             </div>
+            <p className="text-[11px] text-muted-foreground">
+              Decimal degrees. Liberia is west of the prime meridian, so longitude is negative.
+            </p>
           </div>
           <div className="space-y-1.5 sm:col-span-2">
             <Label>Notes</Label>
