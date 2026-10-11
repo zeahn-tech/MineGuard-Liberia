@@ -3342,7 +3342,7 @@ export const api = {
     /** Create an administrative-area outline (county, district, …). */
     saveAdminBoundary: async (args: {
       name: string;
-      level: AdminBoundary["level"] | "region";
+      level: AdminBoundary["level"];
       adminAreaId?: string;
       parentId?: string;
       geometryGeoJson: string;

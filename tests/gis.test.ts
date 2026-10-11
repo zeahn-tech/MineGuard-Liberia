@@ -435,6 +435,20 @@ describe("boundary validation", () => {
     expect(sql).not.toMatch(/insert\s+into\s+public\.(admin|site)_boundaries/i);
   });
 
+  test("boundary tables grant no DELETE to client roles and nothing to anon (0016)", async () => {
+    // Deletes are not audited (SEC-1 records INSERT/UPDATE) and 0009 revoked
+    // them platform-wide; boundaries must follow the same posture.
+    for (const table of ["admin_boundaries", "site_boundaries"]) {
+      const [row] = await adminSql(
+        `select has_table_privilege('authenticated', 'public.${table}', 'DELETE') as del,
+                has_table_privilege('authenticated', 'public.${table}', 'INSERT') as ins,
+                has_table_privilege('authenticated', 'public.${table}', 'UPDATE') as upd,
+                has_table_privilege('anon', 'public.${table}', 'SELECT') as anon_sel`,
+      );
+      expect(row).toEqual({ del: false, ins: true, upd: true, anon_sel: false });
+    }
+  });
+
   test("a stored-invalid geometry would be dropped, not drawn", async () => {
     const { parseBoundaryGeometry } = await import("../src/lib/gis");
     expect(parseBoundaryGeometry('{"type":"Point","coordinates":[-10,6]}')).toBeNull();
@@ -622,6 +636,23 @@ describe("unverified data is visually distinct", () => {
     expect(out[0].byLevel).toEqual({ verified: 2, unverified: 1, reported: 0 });
     // an all-verified cluster stays verified
     expect(clusterPoints(pts.slice(0, 2).concat(mk("d", "sites", "verified", 6.5003, -9.5003)), 7)[0].level).toBe("verified");
+  });
+
+  test("clustering never merges features of different layers (a cluster is styled as one layer)", () => {
+    const pts = [
+      mk("s1", "sites", "verified", 6.5, -9.5),
+      mk("s2", "sites", "verified", 6.5001, -9.5001),
+      mk("i1", "incidents", "verified", 6.5002, -9.5002),
+      mk("i2", "incidents", "verified", 6.5003, -9.5003),
+      mk("i3", "incidents", "verified", 6.5004, -9.5004),
+    ];
+    const out = clusterPoints(pts, 7, true);
+    // 3 incidents form ONE incidents cluster; the 2 sites stay individual
+    // (below the 3-member minimum) instead of joining the incidents cluster.
+    expect(out.filter((o) => o.cluster)).toHaveLength(1);
+    expect(out.find((o) => o.cluster)?.feature.layer).toBe("incidents");
+    expect(out.find((o) => o.cluster)?.memberIds.sort()).toEqual(["i1", "i2", "i3"]);
+    expect(out.filter((o) => !o.cluster).map((o) => o.feature.id).sort()).toEqual(["s1", "s2"]);
   });
 
   test("clustering: zoom-aware, off when disabled, individual points when zoomed in", () => {

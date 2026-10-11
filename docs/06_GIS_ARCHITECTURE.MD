@@ -34,6 +34,12 @@ fail). The client validator `validateGeoJsonPolygon` mirrors it and
 that fails validation is dropped on read, never repaired or drawn. Every
 boundary write is audited in-transaction (`mg_audit_row`).
 
+Boundary writes are INSERT/UPDATE only (`geo.write`). Migration
+`0016_gis_boundary_hardening.sql` removes the `DELETE` grant 0015 had given
+the client roles (0009 revoked deletes platform-wide, and the audit trail
+records INSERT/UPDATE only) and all `anon` access; correcting a boundary is an
+audited update, removing one is a privileged maintenance action.
+
 Authoring path: `api.gis.saveSiteBoundary / saveAdminBoundary /
 setSiteGeoVerification` (admin only; client gate → RLS → CHECK → audit).
 
@@ -59,8 +65,14 @@ position and **inherit — never exceed — that position's verification**
 UI: per-layer toggles (defaults come from the layer config, so layers that
 arrive late still get their defaults), filters by position verification level
 and county, text search, zoom-aware grid clustering (cluster size shrinks per
-zoom; individual points from zoom 13; a cluster of ≥3). Coordinate-less or
+zoom; individual points from zoom 13; a cluster of ≥3; clusters never merge across layers). Coordinate-less or
 out-of-Liberia points are skipped, not plotted at (0,0).
+
+**Scale note.** `api.mapFeatures` pages through each layer's full (RLS-scoped)
+row set and builds features client-side — correct and simple at the current
+data volume. Past roughly tens of thousands of rows per layer the next step is
+a server-side viewport/aggregate RPC (bbox + zoom → clustered counts), keeping
+the same RLS scoping; the pure builders in `src/lib/gis.ts` would not change.
 
 ## GIS-3 — Provenance fields [IMPLEMENTED]
 
@@ -106,20 +118,29 @@ pre-seeding of tiles; caching tiles a user actually viewed, honouring HTTP
 semantics, is expected. Therefore:
 
 1. **No prefetch.** There is no "download region" feature against
-   `tile.openstreetmap.org`; `tests/gis.test.ts` pins that the worker's tile path
-   makes exactly one fetch — the response to a tile the map itself requested.
+   `tile.openstreetmap.org`; `tests/map-tiles-worker.test.ts` executes the
+   worker and pins that it makes exactly one fetch per tile the map itself
+   requested.
 2. **Viewed-tile cache.** `public/sw.js` caches only tiles the map requested
    while online, only inside the Liberia bbox and zoom 5–14 (`tileInRegion`),
    in a bounded cache `mgtiles-v1` (1,500 entries, oldest evicted). Online it is
    network-first (provider headers always apply); offline it serves the last
-   tile seen. The cache name does not start with `mineguard-`, so shell
-   upgrades never wipe tiles a field team already viewed.
+   tile seen and never invents one. The cache name does not start with
+   `mineguard-`, so shell upgrades never wipe tiles a field team already
+   viewed. Only readable (`ok`) responses are stored — tiles are requested in
+   CORS mode (`tileCrossOrigin`) because a plain `<img>` request is `no-cors`:
+   its response is opaque (status 0), cannot be validated, and browsers pad its
+   storage cost so heavily that the cache would exhaust the origin quota. OSM
+   and our own origin both send CORS headers.
 3. **Sustained offline mapping (documented alternative).** For teams that must
    work for days without any connectivity, use a tile source we are *licensed*
    to hold offline (own MBTiles/PMTiles export, or a commercial offline bundle)
-   served from our origin, and set `VITE_TILE_URL` (and
-   `VITE_TILE_ATTRIBUTION`) to it; the same cache rules apply. No such bundle is
-   shipped [REQUIRES OWNER CONFIRMATION of a provider/licence].
+   served from **our origin**, and set `VITE_TILE_URL` (and
+   `VITE_TILE_ATTRIBUTION`) to it; the same cache rules apply to same-origin
+   tiles. A tile server on a *third-party* origin other than OSM is not
+   intercepted by the worker (we cannot know its policy) and is left to the
+   browser's HTTP cache. No such bundle is shipped
+   [REQUIRES OWNER CONFIRMATION of a provider/licence].
 4. Vector data (sites, incidents, boundaries…) stays available offline through
    the app's existing offline stores; tiles are only the basemap.
 
@@ -140,4 +161,8 @@ county inspector, two operators and a guest through the real data layer on real
 Postgres RLS (incl. no cross-tenant/county ids anywhere in the payload);
 community-report scoping at table level; provenance guards; boundary
 validation parity client↔SQL; unverified/reported styling, legend, clustering
-and filters; tile region/zoom/cache policy and `sw.js`↔`map-tiles.ts` pin.
+and filters; tile region/zoom/cache policy and the `sw.js`↔`map-tiles.ts` pin.
+`tests/map-tiles-worker.test.ts` runs `sw.js` itself against a fake Cache
+Storage: in-region-only storage, `ok`-only storage, network-first online,
+last-seen offline, the 1,500-entry bound with oldest-first eviction, same-origin
+bundle handling, and no interception of non-tile traffic.

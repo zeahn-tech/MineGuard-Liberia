@@ -162,22 +162,24 @@ export function incidentFeature(row: Row, sites: SiteIndex): MapFeature | null {
 export function inspectionFeature(row: Row, sites: SiteIndex): MapFeature | null {
   const site = sites.get(String(row.site_id));
   const g = point(row);
-  if (!site && g.lat === undefined) return null;
-  const hasOwn = g.lat !== undefined && g.lng !== undefined;
-  const geoSource = hasOwn ? ((row.geo_source as string) ?? "device_gps") : "site_position";
-  const geoVerified = hasOwn ? row.geo_verified === true : site?.geoVerified === true;
+  // Own GPS fix wins; otherwise the site's registry position; otherwise nothing.
+  const own = g.lat !== undefined && g.lng !== undefined ? { lat: g.lat, lng: g.lng } : null;
+  const pos = own ?? (site ? { lat: site.lat, lng: site.lng } : null);
+  if (!pos) return null;
+  const geoSource = own ? ((row.geo_source as string) ?? "device_gps") : "site_position";
+  const geoVerified = own ? row.geo_verified === true : site?.geoVerified === true;
   return {
     id: String(row.id),
     layer: "inspections",
     label: `Inspection — ${site?.label ?? "site"}`,
-    lat: hasOwn ? (g.lat as number) : (site as MapFeature).lat,
-    lng: hasOwn ? (g.lng as number) : (site as MapFeature).lng,
+    lat: pos.lat,
+    lng: pos.lng,
     siteId: site?.id,
     county: site?.county,
     district: site?.district,
     status: (row.status as string) ?? undefined,
     geoSource,
-    geoAccuracyM: hasOwn ? num(row.gps_accuracy_m) : site?.geoAccuracyM,
+    geoAccuracyM: own ? num(row.gps_accuracy_m) : site?.geoAccuracyM,
     geoVerified,
     verification: verificationLevel({ geoVerified, geoSource }),
   };
@@ -186,22 +188,23 @@ export function inspectionFeature(row: Row, sites: SiteIndex): MapFeature | null
 export function observationFeature(row: Row, sites: SiteIndex): MapFeature | null {
   const site = sites.get(String(row.site_id));
   const g = point(row);
-  const hasOwn = g.lat !== undefined && g.lng !== undefined;
-  if (!site && !hasOwn) return null;
-  const geoSource = hasOwn ? ((row.geo_source as string) ?? "device_gps_or_manual") : "site_position";
-  const geoVerified = hasOwn ? row.geo_verified === true : site?.geoVerified === true;
+  const own = g.lat !== undefined && g.lng !== undefined ? { lat: g.lat, lng: g.lng } : null;
+  const pos = own ?? (site ? { lat: site.lat, lng: site.lng } : null);
+  if (!pos) return null;
+  const geoSource = own ? ((row.geo_source as string) ?? "device_gps_or_manual") : "site_position";
+  const geoVerified = own ? row.geo_verified === true : site?.geoVerified === true;
   return {
     id: String(row.id),
     layer: "observations",
     label: `${String(row.category).replace(/_/g, " ")} (${String(row.verification)})`,
-    lat: hasOwn ? (g.lat as number) : (site as MapFeature).lat,
-    lng: hasOwn ? (g.lng as number) : (site as MapFeature).lng,
+    lat: pos.lat,
+    lng: pos.lng,
     siteId: site?.id,
     county: site?.county,
     district: site?.district,
     status: (row.status as string) ?? undefined,
     geoSource,
-    geoAccuracyM: hasOwn ? num(row.geo_accuracy_m) : site?.geoAccuracyM,
+    geoAccuracyM: own ? num(row.geo_accuracy_m) : site?.geoAccuracyM,
     geoVerified,
     verification: verificationLevel({ geoVerified, geoSource }),
   };
@@ -509,7 +512,9 @@ export function clusterPoints(
   const size = cellSizeForZoom(zoom);
   const cells = new Map<string, MapFeature[]>();
   for (const f of features) {
-    const key = `${Math.floor(f.lat / size)}:${Math.floor(f.lng / size)}`;
+    // The layer is part of the cell key: a cluster is styled as ONE layer, so
+    // features of different layers must never be merged into the same cluster.
+    const key = `${f.layer}:${Math.floor(f.lat / size)}:${Math.floor(f.lng / size)}`;
     const list = cells.get(key) ?? [];
     list.push(f);
     cells.set(key, list);

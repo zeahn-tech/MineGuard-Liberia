@@ -3,7 +3,7 @@
 ## Quality gate [2026-10-11]
 
 **Status:** GREEN — `tsc -b` 0 errors, `eslint .` 0 errors / 0 warnings,
-`vite build` OK, `bun test` 410 pass / 4 skip (live-DB tests, need a real
+`vite build` OK, `bun test` 423 pass / 4 skip (live-DB tests, need a real
 project) / 0 fail.
 
 - **Data layer restored.** The 2026-10-09 "Rebuild backend.ts" reconstruction
@@ -25,6 +25,25 @@ project) / 0 fail.
   `useSyncExternalStore`), effect-owned async routines with cancellation
   (camera, evidence sync, queue sheet) — the camera no longer leaks a live
   stream when it resolves after unmount/flip.
+- **Full file-by-file review pass** (every changed file read, not sampled):
+  - Migration `0016` removes the client `DELETE` grant (and all `anon` access)
+    that 0015 had given the boundary tables — against the 0009 posture and
+    outside the audit trail (proven by a privilege test that fails without it).
+  - Offline tiles: Leaflet's `<img>` tile requests are `no-cors`, so responses
+    were opaque and the worker (which stores only `ok` responses) could never
+    cache a tile. Tiles are now requested in CORS mode, the worker also
+    handles same-origin tile bundles (as documented), and
+    `tests/map-tiles-worker.test.ts` executes `sw.js` against a fake Cache
+    Storage (region/zoom, ok-only, network-first, offline fallback, 1,500
+    bound, no prefetch).
+  - `clusterPoints` can no longer merge features of different layers;
+    feature builders no longer rely on type casts; `NationalMap` has no lint
+    suppression, no quadratic grouping and a loading state; dead
+    `MapFeature` fields removed; `AdminBoundary.level` includes `region`.
+  - `RootErrorBoundary` no longer shows stack traces / "Preview" text to
+    users in production (detail only in dev; reload action; error logged).
+  - New guard test for queued inspections that lost their site/template
+    (parked as permanent NOT_FOUND instead of retried forever).
 - **Test hygiene.** The scale suite's 5,000-row teardown ran minutes under
   row triggers and was silently abandoned at the default hook timeout,
   leaving its fixture in the shared per-process DB; teardown now skips row

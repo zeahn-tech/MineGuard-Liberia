@@ -1084,6 +1084,5 @@ export function createEdgeClient(): SupabaseClient {
     async removeChannel() {
       return "closed";
     },
-     
   } as unknown as SupabaseClient;
 }

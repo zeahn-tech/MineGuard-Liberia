@@ -47,17 +47,22 @@ function parseTile(pathname) {
   const m = /\/(\d{1,2})\/(\d+)\/(\d+)\.(?:png|jpg|jpeg|webp|pbf)$/.exec(pathname);
   return m ? { z: Number(m[1]), x: Number(m[2]), y: Number(m[3]) } : null;
 }
-function isTileRequest(url) {
-  // The configured offline origin (VITE_TILE_URL) is same-origin and handled
-  // by the generic same-origin rules; this branch is the public OSM host.
-  return TILE_HOST.test(url.hostname) && !!parseTile(url.pathname);
+function isTileRequest(req, url) {
+  // Only requests the map's own <img> tiles made (never a script/fetch of
+  // ours), for the public OSM host or our own origin (an offline bundle
+  // behind VITE_TILE_URL). Other third-party hosts are left to the browser.
+  if (req.destination !== "image" || !parseTile(url.pathname)) return false;
+  return TILE_HOST.test(url.hostname) || url.origin === self.location.origin;
 }
 async function trimTiles(cache) {
   const keys = await cache.keys(); // insertion order → oldest first
   for (let i = 0; i < keys.length - TILE_CACHE_MAX_ENTRIES; i++) await cache.delete(keys[i]);
 }
 /** Network-first (provider headers/policy always apply online); the cache is
- *  only the offline fallback. Never fetches anything the map did not ask for. */
+ *  only the offline fallback. Never fetches anything the map did not ask for.
+ *  Only readable (res.ok) responses are stored: the map requests tiles in CORS
+ *  mode, and an opaque response (status 0) is never cached — it cannot be
+ *  validated and carries a large storage-quota padding. */
 async function tileResponse(req, url) {
   const t = parseTile(url.pathname);
   const cache = await caches.open(TILE_CACHE);
@@ -175,7 +180,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   // Map tiles: bounded, region-limited, view-driven cache (see header above).
-  if (isTileRequest(url)) {
+  if (isTileRequest(req, url)) {
     event.respondWith(tileResponse(req, url));
     return;
   }

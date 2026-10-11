@@ -13,8 +13,17 @@
 //   3. For SUSTAINED offline field mapping the documented alternative is a
 //      licensed/own offline bundle (MBTiles/PMTiles) served from our own
 //      origin: set VITE_TILE_URL to that template (e.g. "/tiles/{z}/{x}/{y}.png"
-//      or a tile server) and the cache rules above still apply to it. See
-//      docs/06_GIS_ARCHITECTURE.MD §Offline tiles.
+//      or a tile server behind our origin) and the cache rules above apply to
+//      it too. A tile server on a THIRD-PARTY origin other than OSM is not
+//      intercepted by the worker (we cannot know its policy) and is left to
+//      the browser's normal HTTP cache. See docs/06_GIS_ARCHITECTURE.MD
+//      §Offline tiles.
+//   4. Tiles are requested in CORS mode (tileCrossOrigin) — a plain <img>
+//      tile request is "no-cors", whose response is OPAQUE (status 0,
+//      ok=false): the worker could not tell a good tile from an error page,
+//      and browsers pad opaque entries' storage cost so heavily that a
+//      1,500-tile cache would exhaust the origin quota. OSM and our own
+//      origin both serve tiles with CORS headers.
 //
 // This module is the single source of the numbers; public/sw.js duplicates
 // them (a worker cannot import TS) and tests/gis.test.ts pins the two copies
@@ -35,6 +44,27 @@ export const TILE_MAX_ZOOM = 14;
 export function tileTemplate(): string {
   const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
   return env?.VITE_TILE_URL?.trim() || OSM_TILE_TEMPLATE;
+}
+
+const OSM_TILE_HOST = /(^|\.)tile\.openstreetmap\.org$/;
+
+/** `crossOrigin` value for the TileLayer: "anonymous" for tile sources that
+ *  are cacheable by the worker (the public OSM host and our own origin),
+ *  undefined otherwise (an unknown third-party host may not send CORS
+ *  headers, and forcing CORS mode on it would stop its tiles loading). */
+export function tileCrossOrigin(
+  template: string = tileTemplate(),
+  pageOrigin: string | undefined = typeof location !== "undefined" ? location.origin : undefined,
+): "anonymous" | undefined {
+  try {
+    // Without a page (SSR/tests) a relative template still means "our origin".
+    const base = pageOrigin ?? "https://same-origin.invalid";
+    const u = new URL(template, base);
+    if (OSM_TILE_HOST.test(u.hostname)) return "anonymous";
+    return u.origin === new URL(base).origin ? "anonymous" : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function tileAttribution(): string {

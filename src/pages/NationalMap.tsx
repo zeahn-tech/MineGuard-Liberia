@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -11,7 +11,6 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { useEffect } from "react";
 
 import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
@@ -32,7 +31,7 @@ import {
   type ClusterOrPoint,
   type MapFilters,
 } from "@/lib/gis";
-import { tileAttribution, tileTemplate } from "@/lib/map-tiles";
+import { tileAttribution, tileCrossOrigin, tileTemplate } from "@/lib/map-tiles";
 
 const LEVELS: GeoVerificationLevel[] = ["verified", "unverified", "reported"];
 
@@ -67,6 +66,7 @@ function MapBridge({
 
 export default function NationalMap() {
   const data = useQuery(api.mapFeatures);
+  const loading = data === undefined;
   const layers = useMemo(() => data?.layers ?? [], [data]);
   const features = useMemo(() => data?.features ?? [], [data]);
   const adminBoundaries = useMemo(() => data?.adminBoundaries ?? [], [data]);
@@ -101,7 +101,11 @@ export default function NationalMap() {
 
   const items = useMemo(() => {
     const byLayer = new Map<GeoLayer, MapFeature[]>();
-    for (const f of visibleFeatures) byLayer.set(f.layer, [...(byLayer.get(f.layer) ?? []), f]);
+    for (const f of visibleFeatures) {
+      const list = byLayer.get(f.layer);
+      if (list) list.push(f);
+      else byLayer.set(f.layer, [f]);
+    }
     const out: { layer: GeoLayer; items: ClusterOrPoint[] }[] = [];
     for (const [layer, list] of byLayer) {
       const cfg = layers.find((l) => l.id === layer);
@@ -114,40 +118,43 @@ export default function NationalMap() {
     () => new Map(features.filter((f) => f.layer === "sites").map((f) => [f.id, f.county])),
     [features],
   );
+  const levelAllowed = useCallback(
+    (verified: boolean) =>
+      !filters.levels.length || filters.levels.includes(verified ? "verified" : "unverified"),
+    [filters.levels],
+  );
   const shownSiteBoundaries = useMemo(
     () =>
       visibleLayers.site_boundaries
         ? siteBoundaries.filter(
-            (b) => !filters.counties.length || filters.counties.includes(siteCounty.get(b.siteId) ?? ""),
+            (b) =>
+              levelAllowed(b.geoVerified) &&
+              (!filters.counties.length || filters.counties.includes(siteCounty.get(b.siteId) ?? "")),
           )
         : [],
-    [siteBoundaries, visibleLayers, filters.counties, siteCounty],
+    [siteBoundaries, visibleLayers, filters.counties, siteCounty, levelAllowed],
   );
   const shownAdminBoundaries = useMemo(
     () =>
       visibleLayers.admin_boundaries
         ? adminBoundaries.filter(
-            (b) => b.level !== "county" || !filters.counties.length || filters.counties.includes(b.name),
+            (b) =>
+              levelAllowed(b.geoVerified) &&
+              (b.level !== "county" || !filters.counties.length || filters.counties.includes(b.name)),
           )
         : [],
-    [adminBoundaries, visibleLayers, filters.counties],
+    [adminBoundaries, visibleLayers, filters.counties, levelAllowed],
   );
-  const levelFilteredBoundary = (verified: boolean) =>
-    !filters.levels.length || filters.levels.includes(verified ? "verified" : "unverified");
 
   const legend = useMemo(
     () =>
       buildLegend(
         layers,
         visibleFeatures,
-        {
-          admin: shownAdminBoundaries.filter((b) => levelFilteredBoundary(b.geoVerified)),
-          site: shownSiteBoundaries.filter((b) => levelFilteredBoundary(b.geoVerified)),
-        },
+        { admin: shownAdminBoundaries, site: shownSiteBoundaries },
         visibleLayers,
       ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [layers, visibleFeatures, shownAdminBoundaries, shownSiteBoundaries, visibleLayers, filters.levels],
+    [layers, visibleFeatures, shownAdminBoundaries, shownSiteBoundaries, visibleLayers],
   );
 
   const unverifiedCount = visibleFeatures.filter((f) => f.verification !== "verified").length;
@@ -245,12 +252,16 @@ export default function NationalMap() {
              *  tiles inside Liberia are cached (bounded, no prefetch) per the
              *  provider's tile usage policy; VITE_TILE_URL swaps in a licensed
              *  offline bundle. */}
-            <TileLayer attribution={tileAttribution()} url={tileTemplate()} minZoom={5} maxZoom={14} />
+            <TileLayer
+              attribution={tileAttribution()}
+              url={tileTemplate()}
+              crossOrigin={tileCrossOrigin()}
+              minZoom={5}
+              maxZoom={14}
+            />
             <MapBridge onZoom={setZoom} target={focus} />
 
-            {shownAdminBoundaries
-              .filter((b) => levelFilteredBoundary(b.geoVerified))
-              .map((b) => {
+            {shownAdminBoundaries.map((b) => {
                 const geom = parseBoundaryGeometry(b.geometryGeoJson);
                 if (!geom) return null;
                 return (
@@ -267,9 +278,7 @@ export default function NationalMap() {
                   </GeoJSON>
                 );
               })}
-            {shownSiteBoundaries
-              .filter((b) => levelFilteredBoundary(b.geoVerified))
-              .map((b) => {
+            {shownSiteBoundaries.map((b) => {
                 const geom = parseBoundaryGeometry(b.geometryGeoJson);
                 if (!geom) return null;
                 return (
@@ -334,8 +343,10 @@ export default function NationalMap() {
           </div>
           <ul className="max-h-[45vh] divide-y divide-border overflow-y-auto">
             {searchResults.length === 0 && (
-              <li className="px-3 py-6 text-center text-xs text-muted-foreground">
-                No visible features match the current layers and filters.
+              <li className="px-3 py-6 text-center text-xs text-muted-foreground" role="status">
+                {loading
+                  ? "Loading map features…"
+                  : "No visible features match the current layers and filters."}
               </li>
             )}
             {searchResults.slice(0, 120).map((f) => (
@@ -367,7 +378,9 @@ export default function NationalMap() {
         className="legend flex flex-wrap gap-x-5 gap-y-1.5 border-t border-border pt-3 text-xs text-muted-foreground"
         aria-label="Map legend"
       >
-        {legend.length === 0 && <span>No features in the current view.</span>}
+        {legend.length === 0 && (
+          <span role="status">{loading ? "Loading map data…" : "No features in the current view."}</span>
+        )}
         {legend.map((e) => (
           <span key={`${e.layer}:${e.level}`} className="legend-item inline-flex items-center gap-1.5">
             <span

@@ -61,9 +61,9 @@ export interface Site {
   createdAt: number;
   // Computed client-side for the registry view:
   openActions?: number;
-  // GIS fields (Session 6): authoritative geo is PostGIS/GeoJSON boundary
-  // tables; these point-sized fields are the legacy registry-only fallback
-  // and exist only when a boundary polygon has not been authored.
+  // GIS provenance (Session 6): where this point position came from, how
+  // accurate it is, and whether an authorized administrator verified it.
+  // Boundary outlines live in the validated-GeoJSON boundary tables.
   geoSource?: string;
   geoAccuracyM?: number;
   geoVerified?: boolean;
@@ -88,9 +88,6 @@ export interface MapLayerConfig {
   supportsClustering: boolean;
 }
 
-/** One feature shown on the map. Point features use lng/lat; polygon
- *  features use their own geometry; both carry the same trust metadata so the
- *  legend and styling can be driven from real data. */
 /** How far the GEOGRAPHIC claim of a feature is trusted (GIS-3/GIS-4). Fail-safe:
  *  anything not explicitly verified is NOT "verified".
  *  - verified   — geo_verified = true with a recorded source (geo.write act)
@@ -98,6 +95,10 @@ export interface MapLayerConfig {
  *  - reported   — supplied by the public; never vetted (community reports) */
 export type GeoVerificationLevel = "verified" | "unverified" | "reported";
 
+/** One point feature shown on the map. Polygon outlines are not features:
+ *  they are loaded separately as `AdminBoundary` / `SiteBoundary`. Every
+ *  feature carries the same trust metadata so styling, clustering and the
+ *  legend are driven from real data. */
 export interface MapFeature {
   id: string;
   layer: GeoLayer;
@@ -113,8 +114,7 @@ export interface MapFeature {
   label: string;
   lng: number;
   lat: number;
-  /** For point features with no boundary geometry, the site this feature
-   *  belongs to (if any) so boundary layers can be toggled alongside it. */
+  /** The site this feature belongs to (if any), for site-scoped filtering. */
   siteId?: string;
   /** Verification metadata for the GEOGRAPHIC claim, distinct from record
    *  lifecycle status. A site can be "active" but its coordinates still
@@ -122,22 +122,12 @@ export interface MapFeature {
   geoSource?: string;
   geoAccuracyM?: number;
   geoVerified?: boolean;
-  /** Optional GeoJSON geometry for polygon layers (admin/site boundaries).
-   *  Stored as GeoJSON on the row; rendered directly, never inferred. */
-  geometryGeoJson?: string;
-  /** Client-side cluster merge marker (NationalMap clustering) — NOT a
-   *  server field; synthesized per session over dense point layers. */
-  _cluster?: boolean;
-  /** Count of the features merged into this cluster marker. */
-  _memberCount?: number;
-  /** Mutable per-session UI state (NOT persisted). */
-  visible?: boolean;
 }
 
 export interface AdminBoundary {
   _id: string;
   name: string;
-  level: "national" | "county" | "district" | "community";
+  level: "national" | "region" | "county" | "district" | "community";
   parentId?: string;
   geometryGeoJson: string;
   source: string;

@@ -35,7 +35,8 @@ import {
   FileCheck2,
   Loader2,
   Send,
-} from "lucide-react";import { useState } from "react";
+} from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { useNow } from "@/hooks/use-now";

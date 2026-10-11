@@ -348,6 +348,33 @@ describe("sync engine", () => {
     expect(readQueue()).toHaveLength(0);
   });
 
+  test("a queued inspection with no template parks as dead (NOT_FOUND) and never calls the API", async () => {
+    // Items persisted by an older build can lack their template; retrying can
+    // never succeed, so the sync engine must park it instead of looping.
+    await enqueueInspectionSubmission({
+      clientRef: "insp-no-template",
+      siteId: "s1",
+      siteCode: "MGL-NIMBA-0001",
+      templateId: "",
+      answers: {},
+    });
+    let apiCalls = 0;
+    const r = await syncQueue({
+      createDraft: async () => {
+        apiCalls++;
+        return "never";
+      },
+      updateDraft: async () => undefined,
+      submit: async () => undefined,
+    });
+    expect(apiCalls).toBe(0);
+    expect(r.dead).toBe(1);
+    const item = readQueue()[0];
+    expect(item.status).toBe("dead");
+    expect(item.failureKind).toBe("permanent");
+    expect(item.lastError).toContain("NOT_FOUND");
+  });
+
   test("inspection sync runs draft → update → submit in order", async () => {
     await enqueueInspectionSubmission({
       clientRef: "insp-1",

@@ -434,7 +434,6 @@ export async function buildQueueExport(): Promise<QueueExport> {
 // opaque strings. Every handler is optional — a caller binds only what it
 // needs. A queued item whose handler is missing is treated as a per-item
 // retryable failure, never a silent drop (NO_SYNC_HANDLER).
- 
 type Api = {
   createDraft?: (args: {
     siteId: string;
