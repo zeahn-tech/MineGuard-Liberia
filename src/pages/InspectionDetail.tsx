@@ -13,7 +13,6 @@ import { ArrowLeft, MapPin } from "lucide-react";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -44,7 +43,6 @@ export default function InspectionDetail() {
   const addFinding = useMutation(api.inspections.addFinding);
   const updateFindingStatus = useMutation(api.inspections.updateFindingStatus);
   const openCa = useMutation(api.inspections.openCorrectiveAction);
-  const decideCa = useMutation(api.inspections.decideCorrectiveAction);
   const { user } = useAuth();
 
   const isReviewer = user?.role === "admin" || user?.role === "supervisor";

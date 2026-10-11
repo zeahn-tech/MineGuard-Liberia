@@ -50,9 +50,7 @@ beforeAll(async () => {
   }
 });
 
-let currentUid: string | null = null;
 function setIdentity(uid: string | null) {
-  currentUid = uid;
   __testSetAuthUserId(uid);
   edgeIdentity.set(uid);
 }

@@ -52,7 +52,6 @@ export default function Environment() {
   const observations = useQuery(api.records.listObservations);
   const sites = useQuery(api.sites.list);
   const setStatus = useMutation(api.records.setObservationStatus);
-  const [open, setOpen] = useState(false);
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     try {

@@ -47,7 +47,6 @@ const MIGRATIONS_DIR = join(ROOT, "supabase", "migrations");
 // dedicated database — boot once per process
 // ---------------------------------------------------------------------------
 
-let edgeDb: PGlite | null = null;
 let edgeBoot: Promise<PGlite> | null = null;
 
 export const EDGE_IDS = {
@@ -204,7 +203,6 @@ export async function getEdgeDb(): Promise<PGlite> {
         }
       }
       await db.exec(EDGE_SEED);
-      edgeDb = db;
       return db;
     })();
   }
@@ -224,7 +222,7 @@ function enqueue<T>(fn: () => Promise<T>): Promise<T> {
 
 /** Identity for subsequent wire requests. Mirrors the supabase.ts test hook
  *  (which drives backend.ts's authUserId()). */
-let current: { uid: string | null } = { uid: null };
+const current: { uid: string | null } = { uid: null };
 
 export const edgeIdentity = {
   set(uid: string | null) {
@@ -1086,6 +1084,6 @@ export function createEdgeClient(): SupabaseClient {
     async removeChannel() {
       return "closed";
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
   } as unknown as SupabaseClient;
 }

@@ -16,7 +16,6 @@ import {
   getDb,
   getFixture,
   MIGRATIONS,
-  PLATFORM_STUB,
   withRole,
   type Runner,
 } from "./helpers/pglite-db";
@@ -447,9 +446,9 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
     const trig = await db.query<{ touch: string; audit: string }>(
       `select
          (select count(*)::text from pg_trigger
-           where tgname like '%\_touch' and not tgisinternal) as touch,
+           where tgname like '%\\_touch' and not tgisinternal) as touch,
          (select count(*)::text from pg_trigger
-           where tgname like '%\_audit' and not tgisinternal) as audit`,
+           where tgname like '%\\_audit' and not tgisinternal) as audit`,
     );
     // 10 domain tables + organizations (0010's integrity stamps).
     expect(Number(trig.rows[0]?.touch)).toBe(11);

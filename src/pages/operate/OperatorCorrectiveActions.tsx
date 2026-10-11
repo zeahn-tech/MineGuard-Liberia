@@ -9,9 +9,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useMutation, useQuery } from "@/lib/backend-react";
@@ -31,6 +28,7 @@ import {
   enqueueCaResponse,
   newClientRef,
 } from "@/lib/offline-queue";
+import { useNow } from "@/hooks/use-now";
 
 const DAY = 86_400_000;
 
@@ -48,6 +46,7 @@ function severityClasses(sev: string | Severity | undefined): string {
 }
 
 export default function OperatorCorrectiveActions() {
+  const now = useNow();
   const obligationsQ = useQuery(api.inspections.listMyCorrectiveActions);
   const respond = useMutation(api.inspections.respondCorrectiveAction);
   const [searchParams] = useSearchParams();
@@ -60,7 +59,7 @@ export default function OperatorCorrectiveActions() {
   const all = obligationsQ ?? [];
   const obligations = siteFilter ? all.filter((o) => o.siteId === siteFilter) : all;
   const open = obligations.filter((o) => o.status === "open" || o.status === "in_progress");
-  const overdue = open.filter((o) => o.dueAt < Date.now());
+  const overdue = open.filter((o) => o.dueAt < now);
   const submitted = obligations.filter((o) => o.status === "submitted");
 
   const submitResponse = async (caId: string) => {
@@ -221,7 +220,7 @@ export default function OperatorCorrectiveActions() {
       <div className="space-y-3">
         {obligations.map((o) => {
           const isOpen = o.status === "open" || o.status === "in_progress";
-          const dueMs = o.dueAt - Date.now();
+          const dueMs = o.dueAt - now;
           const overdueNow = isOpen && dueMs < 0;
           return (
             <Card key={o._id} className="paper rounded-none border-border shadow-none">

@@ -19,7 +19,13 @@
 //     per-component state copies, no extra render passes.
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   authUserId,
   isAuthReady,
@@ -27,6 +33,7 @@ import {
   onProfileVersionChanged,
 } from "./supabase";
 import type { QueryHandle } from "./backend";
+import { useLatest } from "./use-latest";
 
 type Listener = () => void;
 
@@ -181,11 +188,12 @@ function useAuthEpoch(): number {
 // ---------------------------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function useQuery<T = any>(
-  // Keep T in the parameter type so it is inferred from the query factory at
-  // every call site (e.g. api.stats.commandCenter → CommandCenterStats).
-  fn: (args?: any) => QueryHandle<T>,
-  args?: unknown,
+export function useQuery<T = any, A = never>(
+  // Keep T and A in the parameter types so both are inferred from the query
+  // factory at every call site (e.g. api.stats.commandCenter →
+  // CommandCenterStats; api.evidence.forParent → its { parentType, … } args).
+  fn: (args: A) => QueryHandle<T>,
+  args?: A | "skip",
 ): T | undefined {
   const epoch = useAuthEpoch();
   // Convex "skip" sentinel: keep the query undefined without subscribing.
@@ -197,9 +205,14 @@ export function useQuery<T = any>(
 
   // Stable per call-site identity even though `fn` may be re-created.
   const fnRef = useRef(fn);
-  fnRef.current = fn;
   const argsRef = useRef(args);
-  argsRef.current = args;
+  // Refs are written after commit (never during render); this effect is
+  // declared before the subscribing effect below, so that one always reads
+  // the current fn/args.
+  useEffect(() => {
+    fnRef.current = fn;
+    argsRef.current = args;
+  });
 
   const subscribe = useCallback(
     (cb: Listener) => {
@@ -244,8 +257,7 @@ export function useQuery<T = any>(
 /** Identity for the query fn so call sites don't need to memoize it. */
 const FN_IDS = new WeakMap<object, string>();
 let FN_SEQ = 0;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function fnCacheId(fn: (args?: any) => AnyHandle): string {
+function fnCacheId(fn: object): string {
   let id = FN_IDS.get(fn);
   if (!id) {
     id = `q${FN_SEQ++}`;
@@ -272,104 +284,97 @@ export interface KeysetFeed<T> {
   loadMore: () => void;
 }
 
+type KeysetCursorArg = { at: number; id: string } | null;
+
+interface KeysetPageResult<T> {
+  rows: T[];
+  nextCursor: { at: number; id: string } | null;
+  source: string;
+}
+
+/** The accumulation for ONE stream (auth epoch + resetKey). `key` ties the
+ *  rows to the stream that produced them, so a stale stream is never shown. */
+interface KeysetAccumulation<T> {
+  key: string;
+  rows: T[];
+  cursor: KeysetCursorArg;
+  loadedPages: number;
+  done: boolean;
+}
+
+const emptyAccumulation = <T,>(key: string): KeysetAccumulation<T> => ({
+  key,
+  rows: [],
+  cursor: null,
+  loadedPages: 0,
+  done: false,
+});
+
 export function useKeysetPage<T>(
-  fetch: (before: {
-    at: number;
-    id: string;
-  } | null) => Promise<{
-    rows: T[];
-    nextCursor: { at: number; id: string } | null;
-    source: string;
-  }>,
+  fetch: (before: KeysetCursorArg) => Promise<KeysetPageResult<T>>,
   pageKeys: number,
   resetKey: string = "",
 ): KeysetFeed<T> {
   const epoch = useAuthEpoch();
-  const [state, setState] = useState<{
-    rows: T[];
-    cursor: { at: number; id: string } | null;
-    hasMore: boolean;
-    loading: boolean;
-    done: boolean;
-    pages: number;
-  }>(() => ({
-    rows: [],
-    cursor: null,
-    hasMore: false,
-    loading: false,
-    done: false,
-    pages: 0,
-  }));
+  const streamKey = `${epoch}:${resetKey}`;
+  const fetchRef = useLatest(fetch);
 
-  const fetchRef = useRef(fetch);
-  fetchRef.current = fetch;
-  const stateRef = useRef(state);
-  stateRef.current = state;
+  // Pages the caller has asked for = the requested floor (pageKeys, the
+  // "does the table have anything" probe is 1) plus every loadMore() since
+  // this stream began. Both counters belong to a stream: a new stream starts
+  // over, derived during render (no state-sync effect, no flash of old rows).
+  const [more, setMore] = useState<{ key: string; n: number }>({ key: streamKey, n: 0 });
+  const wanted = Math.max(1, pageKeys) + (more.key === streamKey ? more.n : 0);
 
-  // Effective pages: pageKeys open pages, kept open once opened (loadMore
-  // must never retract rows the caller has already rendered). pageKeys
-  // starts at 1 (the "does the table have anything" probe).
+  const [acc, setAcc] = useState<KeysetAccumulation<T>>(() => emptyAccumulation(streamKey));
+  const current = acc.key === streamKey ? acc : emptyAccumulation<T>(streamKey);
+
+  const { done, loadedPages, cursor } = current;
+  const needsPage = !done && loadedPages < wanted;
+
+  // Pull ONE page when more are wanted. Each arrival changes loadedPages,
+  // which re-runs the effect for the next page — so fetches are serialized
+  // by construction, and a stream change or unmount cancels the in-flight
+  // request (its late result is discarded, never mixed into another stream).
   useEffect(() => {
-    setState((s) => ({ ...s, pages: Math.max(1, pageKeys) }));
-  }, [pageKeys]);
-
-  // Pull pages until the requested count is satisfied. Serialized (one fetch
-  // at a time) so the in-flight guard below stays the only coordination.
-  useEffect(() => {
+    if (!needsPage) return;
     let cancelled = false;
-    const step = async () => {
-      const cur = stateRef.current;
-      if (cancelled || cur.loading || cur.done || cur.pages <= 0) return;
-      setState((s) => ({ ...s, loading: true }));
+    void (async () => {
       try {
-        while (!cancelled) {
-          const s = stateRef.current;
-          if (s.done || s.pages === 0) break;
-          const res = await fetchRef.current(s.cursor);
-          if (cancelled) return;
-          setState((prev) => ({
-            rows: [...prev.rows, ...res.rows],
+        const res = await fetchRef.current(cursor);
+        if (cancelled) return;
+        setAcc((prev) => {
+          const base = prev.key === streamKey ? prev : emptyAccumulation<T>(streamKey);
+          return {
+            key: streamKey,
+            rows: [...base.rows, ...res.rows],
             cursor: res.nextCursor,
-            hasMore: res.nextCursor !== null,
-            loading: false,
+            loadedPages: base.loadedPages + 1,
             done: res.nextCursor === null,
-            pages: res.nextCursor === null ? 0 : prev.pages - 1,
-          }));
-          if (res.nextCursor === null) break;
-        }
+          };
+        });
       } catch (e) {
         console.error("[keysetpage] fetch failed:", e);
-        if (!cancelled) setState((s) => ({ ...s, loading: false, done: true }));
+        if (cancelled) return;
+        setAcc((prev) => ({
+          ...(prev.key === streamKey ? prev : emptyAccumulation<T>(streamKey)),
+          done: true,
+        }));
       }
-    };
-    void step();
+    })();
     return () => {
       cancelled = true;
     };
-  }, [epoch, resetKey]);
-
-  // Reset the Accumulation when the identity/feed epoch turns over — the
-  // rows already rendered belong to the previous stream.
-  useEffect(() => {
-    setState({
-      rows: [],
-      cursor: null,
-      hasMore: false,
-      loading: false,
-      done: false,
-      pages: Math.max(1, pageKeys),
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [epoch, resetKey]);
+  }, [needsPage, cursor, streamKey, fetchRef]);
 
   const loadMore = useCallback(() => {
-    setState((s) => (s.done ? s : { ...s, pages: s.pages + 1 }));
-  }, []);
+    setMore((m) => ({ key: streamKey, n: (m.key === streamKey ? m.n : 0) + 1 }));
+  }, [streamKey]);
 
   return {
-    rows: state.rows,
-    hasMore: state.hasMore,
-    loading: state.loading,
+    rows: current.rows,
+    hasMore: !current.done && current.cursor !== null,
+    loading: needsPage,
     loadMore,
   };
 }
@@ -378,14 +383,13 @@ export function useKeysetPage<T>(
 // useMutation — thin stable wrapper around the async backend function.
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export function useMutation(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   fn: (...args: any[]) => Promise<any>,
 ): // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (...args: any[]) => Promise<any> {
-  const fnRef = useRef(fn);
-  fnRef.current = fn;
+  const fnRef = useLatest(fn);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (...args: any[]) => fnRef.current(...args);
 }

@@ -52,7 +52,6 @@ export default function Incidents() {
   const { user } = useAuth();
   const isStaff =
     user?.role === "admin" || user?.role === "supervisor" || user?.role === "inspector";
-  const [open, setOpen] = useState(false);
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     try {

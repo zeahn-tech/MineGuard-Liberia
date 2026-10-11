@@ -3553,7 +3553,6 @@ async function runSeed() {
   const now = Date.now();
   const day = 24 * 60 * 60 * 1000;
   const uid = user.uid;
-  const label = await actorLabel(user);
 
   const siteDefs = [
     { name: "Demo Gold Operation — Zorzor Corridor", operatorName: "Lofa Minerals Demo", county: "Lofa", district: "Zorzor", community: "Zorzor City", mineralType: "Gold", lat: 7.6067, lng: 9.4236 },

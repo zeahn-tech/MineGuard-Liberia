@@ -27,6 +27,10 @@ export type CameraCaptureResult = {
   mimeType: "image/jpeg";
 };
 
+/** True when the browser can open a live camera stream. */
+const cameraSupported = (): boolean =>
+  typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+
 export default function CameraCapture({
   onCaptured,
   onClose,
@@ -37,7 +41,11 @@ export default function CameraCapture({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [phase, setPhase] = useState<"starting" | "live" | "error" | "fallback">("starting");
+  // Without getUserMedia the component starts (and stays) in the file-input
+  // fallback — decided at init, not by a state update inside the stream effect.
+  const [phase, setPhase] = useState<"starting" | "live" | "error" | "fallback">(() =>
+    cameraSupported() ? "starting" : "fallback",
+  );
   const [facing, setFacing] = useState<"environment" | "user">("environment");
   const [preview, setPreview] = useState<string | null>(null);
   const [lastBlob, setLastBlob] = useState<Blob | null>(null);
@@ -51,19 +59,23 @@ export default function CameraCapture({
     if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
-  const startStream = useCallback(
-    async (wantFacing: "environment" | "user") => {
-      setPhase("starting");
+  // Open (and on `facing` change, reopen) the camera. The routine is owned by
+  // the effect so a stream that resolves after unmount / after another flip is
+  // released immediately instead of leaking a live camera.
+  useEffect(() => {
+    if (!cameraSupported()) return; // phase initialised to "fallback"
+    let cancelled = false;
+    const start = async () => {
       stopStream();
       try {
-        if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-          setPhase("fallback");
-          return;
-        }
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: wantFacing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
           audio: false,
         });
+        if (cancelled) {
+          for (const track of stream.getTracks()) track.stop();
+          return;
+        }
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -71,20 +83,19 @@ export default function CameraCapture({
             /* autoplay policies: the video element is muted, so this rarely fires */
           });
         }
-        setPhase("live");
+        if (!cancelled) setPhase("live");
       } catch (e) {
+        if (cancelled) return;
         console.warn("Camera unavailable, falling back to file input:", e);
         setPhase("fallback");
       }
-    },
-    [stopStream],
-  );
-
-  useEffect(() => {
-    void startStream(facing);
-    return stopStream;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [facing]);
+    };
+    void start();
+    return () => {
+      cancelled = true;
+      stopStream();
+    };
+  }, [facing, stopStream]);
 
   const capture = () => {
     const video = videoRef.current;
@@ -177,7 +188,10 @@ export default function CameraCapture({
               variant="ghost"
               size="icon"
               className="size-7"
-              onClick={() => setFacing((f) => (f === "environment" ? "user" : "environment"))}
+              onClick={() => {
+                setPhase("starting");
+                setFacing((f) => (f === "environment" ? "user" : "environment"));
+              }}
               aria-label="Switch camera"
             >
               <SwitchCamera className="size-3.5" />

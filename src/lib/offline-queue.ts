@@ -434,29 +434,29 @@ export async function buildQueueExport(): Promise<QueueExport> {
 // opaque strings. Every handler is optional — a caller binds only what it
 // needs. A queued item whose handler is missing is treated as a per-item
 // retryable failure, never a silent drop (NO_SYNC_HANDLER).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type Api = {
   createDraft?: (args: {
-    siteId: any;
-    templateId: any;
+    siteId: string;
+    templateId: string;
     clientRef: string;
   }) => Promise<string>;
   updateDraft?: (args: {
-    inspectionId: any;
+    inspectionId: string;
     answers?: Record<string, unknown>;
     notes?: string;
     latitude?: number;
     longitude?: number;
     gpsAccuracyM?: number;
-  }) => Promise<any>;
-  submit?: (args: { inspectionId: any }) => Promise<any>;
-  reportIncident?: (args: Record<string, unknown>) => Promise<any>;
-  reportObservation?: (args: Record<string, unknown>) => Promise<any>;
+  }) => Promise<unknown>;
+  submit?: (args: { inspectionId: string }) => Promise<unknown>;
+  reportIncident?: (args: Record<string, unknown>) => Promise<unknown>;
+  reportObservation?: (args: Record<string, unknown>) => Promise<unknown>;
   respondCorrectiveAction?: (args: {
     caId: string;
     operatorNote: string;
     expectedRowVersion?: number;
-  }) => Promise<any>;
+  }) => Promise<unknown>;
 };
 
 /** The handler bundle a layout binds into syncQueue (exported for the
@@ -484,6 +484,10 @@ async function runItem(item: QueueItem, api: Api): Promise<string | null> {
   if (item.kind === "inspectionSubmit") {
     if (!api.createDraft || !api.updateDraft || !api.submit)
       throw new Error("NO_SYNC_HANDLER");
+    // A queued inspection without its site or template can never sync —
+    // park it as a permanent failure (NOT_FOUND) instead of retrying.
+    if (!item.siteId || !item.templateId)
+      throw new Error("NOT_FOUND: queued inspection is missing its site or template");
     const inspectionId = await api.createDraft({
       siteId: item.siteId,
       templateId: item.templateId,

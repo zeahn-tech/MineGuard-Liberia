@@ -1,5 +1,36 @@
 # 11 — Implementation Status
 
+## Quality gate [2026-10-11]
+
+**Status:** GREEN — `tsc -b` 0 errors, `eslint .` 0 errors / 0 warnings,
+`vite build` OK, `bun test` 410 pass / 4 skip (live-DB tests, need a real
+project) / 0 fail.
+
+- **Data layer restored.** The 2026-10-09 "Rebuild backend.ts" reconstruction
+  (≈2,840 lines) had lost ≈640 lines of behavior (staff-only reads returned
+  `FORBIDDEN` instead of `[]`, masked detail returned `undefined` instead of
+  `null`, realtime/retry in `live()` gone, snake_case scope columns broken).
+  `src/lib/backend.ts` is back to the last complete version (`ba7292a`) with
+  the Session 6 GIS API (`api.gis`, `api.mapFeatures`, geo fields on `Site`)
+  re-applied on top; 44 failing tests → 0. `risk-model.ts` keeps its later
+  fix (finding-severity points are no longer dropped from the score).
+- **`useKeysetPage` rewritten** (no ref writes during render, no effect-driven
+  state sync). The previous version only fetched after an auth-epoch change,
+  so the Incidents / Inspections lists could stay empty; now covered by
+  `tests/keyset-page-hook.test.tsx` (real React over happy-dom, registered
+  only inside that file).
+- **React Hooks rules** (`refs`, `set-state-in-effect`) satisfied at every
+  site: shared `useLatest` helper (`src/lib/use-latest.ts`), derived state
+  instead of effect syncs (profile gate, carousel via
+  `useSyncExternalStore`), effect-owned async routines with cancellation
+  (camera, evidence sync, queue sheet) — the camera no longer leaks a live
+  stream when it resolves after unmount/flip.
+- **Test hygiene.** The scale suite's 5,000-row teardown ran minutes under
+  row triggers and was silently abandoned at the default hook timeout,
+  leaving its fixture in the shared per-process DB; teardown now skips row
+  triggers and completes in seconds. GIS scope tests assert over their own
+  fixtures (positive) and stay global for every leakage check (negative).
+
 ## Session 6 — GIS (GIS-1…5) [2026-10-10]
 
 **Status:** IMPLEMENTED (details in `docs/06_GIS_ARCHITECTURE.MD`).

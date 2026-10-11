@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
-import { useQuery, useMutation } from "@/lib/backend-react";
+import { useMutation } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
+import { useLatest } from "@/lib/use-latest";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { sectionJump } from "@/lib/utils";
@@ -64,7 +65,6 @@ import {
 } from "@/lib/offline-sync";
 import { QueueManagerButton } from "@/components/QueueManager";
 import { toast } from "sonner";
-import { ROLES } from "@/lib/types";
 
 const NAV = [
   { to: "/portal", label: "Command Center", icon: LayoutDashboard },
@@ -78,6 +78,9 @@ const NAV = [
   { to: "/portal/templates", label: "Templates", icon: ClipboardList },
   { to: "/portal/security", label: "Account Security", icon: ShieldEllipsis },
 ];
+
+/** Sentinel: the profile gate has not yet looked at any `user` value. */
+const GATE_UNSET = Symbol("profile-gate-unset");
 
 export default function PortalLayout() {
   const { user, signOut } = useAuth();
@@ -95,8 +98,6 @@ export default function PortalLayout() {
   const [targetCounty, setTargetCounty] = useState("");
   const [targetOperator, setTargetOperator] = useState("");
 
-  const isStaff =
-    user?.role === "admin" || user?.role === "supervisor" || user?.role === "inspector";
   const isAdmin = user?.role === "admin";
 
   // First-run provisioning: first admin can assign roles; seed available to staff.
@@ -125,10 +126,14 @@ export default function PortalLayout() {
   // (not just staff) — the first email account to do so becomes the platform
   // administrator via the server-side bootstrap. Without this, a fresh
   // install could never create its first admin.
-  useEffect(() => {
-    if (!user) return;
-    if (user.profileComplete !== true) setShowProfile(true);
-  }, [user]);
+  // Derived on the render that first sees a new `user` (React's "adjust state
+  // while rendering" pattern) — same once-per-user-change semantics as the
+  // effect it replaces, without an extra commit + re-render.
+  const [gateUser, setGateUser] = useState<typeof user | typeof GATE_UNSET>(GATE_UNSET);
+  if (user !== gateUser) {
+    setGateUser(user);
+    if (user && user.profileComplete !== true) setShowProfile(true);
+  }
 
   // NOTE (§20 structural split): operators no longer pass through here at
   // all — RequireStaff bounces them to /operate before this layout renders.
@@ -138,10 +143,8 @@ export default function PortalLayout() {
   // online triggers, backoff timing and single-flight; this effect only
   // mirrors the durable queue into the header badge.
   const schedulerRef = useRef<SyncScheduler | null>(null);
-  const apiRef = useRef(syncApi);
-  apiRef.current = syncApi;
-  const uploadRef = useRef(syncUploadEvidence);
-  uploadRef.current = syncUploadEvidence;
+  const apiRef = useLatest(syncApi);
+  const uploadRef = useLatest(syncUploadEvidence);
 
   const announce = useCallback((r: SchedulerResult) => {
     const synced = (r.queue?.synced ?? 0) + (r.evidence?.synced ?? 0);
@@ -190,7 +193,7 @@ export default function PortalLayout() {
       scheduler.dispose();
       schedulerRef.current = null;
     };
-  }, [announce]);
+  }, [announce, apiRef, uploadRef]);
 
   const handleSyncNow = async () => {
     const scheduler = schedulerRef.current;

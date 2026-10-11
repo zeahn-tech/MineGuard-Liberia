@@ -24,10 +24,12 @@ import {
   Loader2,
 } from "lucide-react";
 import { Link } from "react-router";
+import { useNow } from "@/hooks/use-now";
 
 const DAY = 86_400_000;
 
 export default function OperatorOverview() {
+  const now = useNow();
   const { user } = useAuth();
   const sitesQ = useQuery(api.sites.list);
   const obligationsQ = useQuery(api.inspections.listMyCorrectiveActions);
@@ -38,7 +40,7 @@ export default function OperatorOverview() {
   const openCAs = obligations.filter(
     (o) => o.status === "open" || o.status === "in_progress",
   );
-  const overdue = openCAs.filter((o) => o.dueAt < Date.now());
+  const overdue = openCAs.filter((o) => o.dueAt < now);
   const awaiting = obligations.filter((o) => o.status === "submitted");
   const openFindings = findings.filter(
     (f) => f.status === "open" || f.status === "acknowledged",
@@ -121,7 +123,7 @@ export default function OperatorOverview() {
             </p>
           )}
           {openCAs.slice(0, 5).map((o) => {
-            const dueMs = o.dueAt - Date.now();
+            const dueMs = o.dueAt - now;
             const isOverdue = dueMs < 0;
             return (
               <Link

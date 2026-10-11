@@ -5,12 +5,9 @@ import { useAuth } from "@/hooks/use-auth";
 import { StaffOnly } from "@/components/StaffOnly";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { ShieldAlert } from "lucide-react";
 import EvidenceSection from "@/components/EvidenceSection";
-
-type Decision = "under_review" | "verified" | "dismissed" | "referred";
 
 export default function Community() {
   const reports = useQuery(api.records.listCommunityReports);

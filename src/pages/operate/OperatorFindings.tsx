@@ -8,9 +8,6 @@
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";

@@ -24,7 +24,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { api } from "../src/lib/backend";
 import { validateTemplateSections } from "../src/lib/template-schema";
 import { __testSetSupabaseClient, __testSetAuthUserId } from "../src/lib/supabase";
-import type { InspectionTemplate, TemplateSection } from "../src/lib/types";
+import type { TemplateSection } from "../src/lib/types";
 import {
   adminSql,
   createEdgeClient,
@@ -58,9 +58,10 @@ function first<T>(q: { subscribe: (cb: (v: T) => void) => () => void }): Promise
 }
 
 /** PGlite decodes jsonb into JS objects already; tolerate strings too. */
-function asJson(v: unknown): Record<string, any> {
-  if (typeof v === "string") return JSON.parse(v) as Record<string, any>;
-  return v as Record<string, any>;
+type AuditDetails = { after: Record<string, unknown> };
+function asJson(v: unknown): AuditDetails {
+  if (typeof v === "string") return JSON.parse(v) as AuditDetails;
+  return v as AuditDetails;
 }
 
 async function expectError(fn: () => Promise<unknown>, token: string) {

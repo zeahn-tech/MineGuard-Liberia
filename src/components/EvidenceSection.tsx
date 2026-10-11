@@ -26,6 +26,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
+import { useLatest } from "@/lib/use-latest";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -120,37 +121,42 @@ export default function EvidenceSection({
   // own site); the backend + rules re-derive scope. Guests never have a role.
   const canUpload = !!user?.role;
 
-  const refreshPending = useCallback(async () => {
-    setPending(await readPendingEvidenceForParent(parentType, parentId));
-  }, [parentType, parentId]);
+  const refreshPending = useCallback(
+    () => readPendingEvidenceForParent(parentType, parentId).then(setPending),
+    [parentType, parentId],
+  );
 
   // Keep the latest upload mutation without making the sync effect depend on a
   // freshly-created function each render (which would re-run the effect).
-  const uploadRef = useRef(upload);
-  uploadRef.current = upload;
+  const uploadRef = useLatest(upload);
 
-  const runSync = useCallback(async () => {
-    try {
-      const { synced } = await syncEvidenceQueue((a) => uploadRef.current(a));
-      if (synced > 0) {
-        toast.success(
-          `Uploaded ${synced} queued evidence file${synced > 1 ? "s" : ""}`,
-        );
-        setNonce((n) => n + 1);
-      }
-    } catch {
-      /* sync is best-effort; items remain queued */
-    }
-    await refreshPending();
-  }, [refreshPending]);
-
-  // Replay the queue on mount and whenever connectivity returns.
+  // Replay the queue on mount and whenever connectivity returns. The routine
+  // lives inside the effect so a late result after unmount is dropped
+  // instead of updating an unmounted component.
   useEffect(() => {
+    let cancelled = false;
+    const runSync = async () => {
+      try {
+        const { synced } = await syncEvidenceQueue((a) => uploadRef.current(a));
+        if (synced > 0 && !cancelled) {
+          toast.success(
+            `Uploaded ${synced} queued evidence file${synced > 1 ? "s" : ""}`,
+          );
+          setNonce((n) => n + 1);
+        }
+      } catch {
+        /* sync is best-effort; items remain queued */
+      }
+      if (!cancelled) await refreshPending();
+    };
     void runSync();
     const onOnline = () => void runSync();
     window.addEventListener("online", onOnline);
-    return () => window.removeEventListener("online", onOnline);
-  }, [runSync]);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("online", onOnline);
+    };
+  }, [refreshPending, uploadRef]);
 
   const resetDialog = useCallback(() => {
     setOpen(false);

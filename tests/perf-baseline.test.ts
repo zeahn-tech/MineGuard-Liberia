@@ -61,7 +61,6 @@ const totals = {
 // ------------------------------------------------------------------- harness
 
 let clientSwapped = false;
-let currentUid: string | null = null;
 
 beforeAll(async () => {
   await getEdgeDb();
@@ -72,7 +71,6 @@ beforeAll(async () => {
 });
 
 function setIdentity(uid: string | null) {
-  currentUid = uid;
   __testSetAuthUserId(uid);
   edgeIdentity.set(uid);
 }

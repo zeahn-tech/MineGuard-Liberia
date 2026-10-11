@@ -32,6 +32,7 @@ import {
 import { QueueManagerButton } from "@/components/QueueManager";
 import { sectionJump } from "@/lib/utils";
 import { api } from "@/lib/backend";
+import { useLatest } from "@/lib/use-latest";
 import { useMutation } from "@/lib/backend-react";
 import {
   Building2,
@@ -110,10 +111,8 @@ export default function OperatorLayout() {
   // backoff + jitter; the effect only mirrors the durable queue into the
   // header badge (parity with the staff portal, OFF-5).
   const schedulerRef = useRef<SyncScheduler | null>(null);
-  const apiRef = useRef(syncApi);
-  apiRef.current = syncApi;
-  const uploadRef = useRef(syncUploadEvidence);
-  uploadRef.current = syncUploadEvidence;
+  const apiRef = useLatest(syncApi);
+  const uploadRef = useLatest(syncUploadEvidence);
 
   const announce = useCallback((r: SchedulerResult) => {
     const synced = (r.queue?.synced ?? 0) + (r.evidence?.synced ?? 0);
@@ -155,7 +154,7 @@ export default function OperatorLayout() {
       scheduler.dispose();
       schedulerRef.current = null;
     };
-  }, [announce]);
+  }, [announce, apiRef, uploadRef]);
 
   const pendingCount = queue.filter((q) => q.status !== "done").length;
 

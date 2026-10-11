@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useKeysetPage, useMutation, useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
@@ -40,12 +40,11 @@ import {
   newClientRef,
   readDraft,
   readDrafts,
-  readQueue,
   subscribeQueue,
   upsertDraft,
   type LocalDraft,
 } from "@/lib/offline-queue";
-import type { Doc, Id } from "@/lib/compat-types";
+import type { Doc } from "@/lib/compat-types";
 
 type TemplateDoc = Doc<"inspectionTemplates">;
 type SiteDoc = Doc<"sites">;
@@ -85,11 +84,6 @@ export default function Inspections() {
       clearInterval(i);
     };
   }, []);
-
-  const siteById = useMemo(
-    () => new Map((sites ?? []).map((s) => [s._id, s])),
-    [sites],
-  );
 
   return (
     <div className="space-y-6">

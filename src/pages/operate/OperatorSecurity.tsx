@@ -21,19 +21,16 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
-  mfaAal,
   mfaEnrollStart,
   mfaEnrollVerify,
-  mfaListFactors,
   mfaUnenroll,
   updatePassword,
-  type MfaAal,
   type MfaEnrollStart,
-  type MfaFactor,
 } from "@/lib/backend";
 import { KeyRound, Loader2, ShieldCheck, ShieldOff } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
+import { useMfaState } from "@/hooks/use-mfa-state";
 
 function friendlyMfaError(err: unknown, fallback: string): string {
   const msg = err instanceof Error ? err.message : "";
@@ -45,9 +42,7 @@ function friendlyMfaError(err: unknown, fallback: string): string {
 }
 
 export default function OperatorSecurityPage() {
-  const [loading, setLoading] = useState(true);
-  const [aal, setAal] = useState<MfaAal | null>(null);
-  const [factors, setFactors] = useState<MfaFactor[]>([]);
+  const { loading, aal, factors, refresh } = useMfaState();
 
   // Enrollment flow state
   const [enrolling, setEnrolling] = useState(false);
@@ -58,24 +53,6 @@ export default function OperatorSecurityPage() {
   // Password change state
   const [pw, setPw] = useState("");
   const [pwConfirm, setPwConfirm] = useState("");
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [level, list] = await Promise.all([mfaAal(), mfaListFactors()]);
-      setAal(level);
-      setFactors(list.filter((f) => f.status === "verified"));
-    } catch (err) {
-      console.error("Security state error:", err);
-      toast.error("Could not load your security settings.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
 
   const beginEnroll = async () => {
     setBusy(true);
@@ -236,7 +213,6 @@ export default function OperatorSecurityPage() {
               disabled={busy}
             />
             {start.qr && (
-              /* eslint-disable-next-line @next/next/no-img-element */
               <img src={start.qr} alt="Authenticator QR code" className="max-w-40 self-center" />
             )}
           </CardContent>

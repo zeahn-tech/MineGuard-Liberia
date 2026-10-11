@@ -38,6 +38,7 @@ import {
 } from "lucide-react";import { useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
+import { useNow } from "@/hooks/use-now";
 
 const DAY = 86_400_000;
 
@@ -55,6 +56,7 @@ function severityClasses(sev: string | Severity | undefined): string {
 }
 
 export default function OperatorPortal() {
+  const now = useNow();
   const { user } = useAuth();
   const sitesQ = useQuery(api.sites.list);
   const obligationsQ = useQuery(api.inspections.listMyCorrectiveActions);
@@ -67,7 +69,7 @@ export default function OperatorPortal() {
   const sites = sitesQ ?? [];
   const obligations = obligationsQ ?? [];
   const open = obligations.filter((o) => o.status === "open" || o.status === "in_progress");
-  const overdue = open.filter((o) => o.dueAt < Date.now());
+  const overdue = open.filter((o) => o.dueAt < now);
   const submitted = obligations.filter((o) => o.status === "submitted");
 
   const submitResponse = async (caId: string) => {
@@ -180,7 +182,7 @@ export default function OperatorPortal() {
           )}
           {obligations.map((o) => {
             const isOpen = o.status === "open" || o.status === "in_progress";
-            const dueMs = o.dueAt - Date.now();
+            const dueMs = o.dueAt - now;
             const overdueNow = isOpen && dueMs < 0;
             return (
               <div key={o._id} className="rounded border border-border bg-muted/30 p-3">

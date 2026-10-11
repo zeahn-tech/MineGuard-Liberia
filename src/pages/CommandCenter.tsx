@@ -50,12 +50,13 @@ export default function CommandCenter() {
 
   // 8s without data → surface the failure instead of loading forever.
   useEffect(() => {
-    if (stats) {
-      setTimedOut(false);
-      return;
-    }
+    if (stats) return;
     const t = setTimeout(() => setTimedOut(true), 8_000);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      // Data arrived (or a retry started): the next wait begins un-timed-out.
+      setTimedOut(false);
+    };
   }, [stats, loadKey]);
 
   if (!stats) {

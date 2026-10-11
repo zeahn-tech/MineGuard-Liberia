@@ -1,7 +1,6 @@
 import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { StaffOnly } from "@/components/StaffOnly";
-import { ScrollText } from "lucide-react";
 
 export default function Audit() {
   const entries = useQuery(api.stats.recentAuditLog, {});

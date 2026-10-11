@@ -18,7 +18,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -31,7 +30,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { useMutation, useQuery } from "@/lib/backend-react";
 import { api, validateTemplateSections } from "@/lib/backend";
 import type { InspectionTemplate, TemplateSection } from "@/lib/types";

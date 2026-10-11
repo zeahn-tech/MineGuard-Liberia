@@ -251,7 +251,7 @@ describe("camera capture contract (§10)", () => {
     expect(src).toContain("getUserMedia");
     // facingMode starts at environment (rear camera) and is user-switchable:
     expect(src).toContain('useState<"environment" | "user">("environment")');
-    expect(src).toContain("facingMode: { ideal: wantFacing }");
+    expect(src).toContain("facingMode: { ideal: facing }");
     expect(src).toContain("toBlob");
   });
 
@@ -262,7 +262,7 @@ describe("camera capture contract (§10)", () => {
 
   test("the stream is always stopped on close (no camera light left on)", () => {
     expect(src).toMatch(/for \(const track of streamRef\.current\.getTracks\(\)\) track\.stop\(\)/);
-    expect(src).toMatch(/return stopStream;/); // effect cleanup
+    expect(src).toMatch(/return \(\) => \{[^}]*stopStream\(\);/); // effect cleanup
   });
 
   test("EvidenceSection routes camera output into the same batch/queue as picked files", () => {

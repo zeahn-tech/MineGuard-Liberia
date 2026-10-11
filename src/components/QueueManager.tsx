@@ -23,7 +23,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useMutation } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -116,6 +115,18 @@ interface ConfirmState {
   id?: string;
 }
 
+/** One consistent read of everything the queue sheet displays. */
+async function loadQueueSnapshot() {
+  await ensureOfflineReady();
+  return {
+    items: readQueue(),
+    draftCount: readDrafts().length,
+    evidence: await readPendingEvidence(),
+    backend: await storeBackend(),
+  };
+}
+type QueueSnapshot = Awaited<ReturnType<typeof loadQueueSnapshot>>;
+
 export default function QueueManager({
   open,
   onOpenChange,
@@ -136,24 +147,36 @@ export default function QueueManager({
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [conflictItem, setConflictItem] = useState<QueueItem | null>(null);
 
-  const refresh = useCallback(async () => {
-    await ensureOfflineReady();
-    setItems(readQueue());
-    setDraftCount(readDrafts().length);
-    setEvidence(await readPendingEvidence());
-    setBackend(await storeBackend());
+  const applySnapshot = useCallback((snap: QueueSnapshot) => {
+    setItems(snap.items);
+    setDraftCount(snap.draftCount);
+    setEvidence(snap.evidence);
+    setBackend(snap.backend);
   }, []);
 
+  const refresh = useCallback(
+    () => loadQueueSnapshot().then(applySnapshot),
+    [applySnapshot],
+  );
+
+  // Mirror the durable queue while the sheet is open. Loads are applied only
+  // while the effect is live, so a slow read can't land after close/unmount.
   useEffect(() => {
     if (!open) return;
-    void refresh();
-    const offQ = subscribeQueue(() => void refresh());
-    const offS = subscribeStore(() => void refresh());
+    let live = true;
+    const reload = () =>
+      void loadQueueSnapshot().then((snap) => {
+        if (live) applySnapshot(snap);
+      });
+    reload();
+    const offQ = subscribeQueue(reload);
+    const offS = subscribeStore(reload);
     return () => {
+      live = false;
       offQ();
       offS();
     };
-  }, [open, refresh]);
+  }, [open, applySnapshot]);
 
   const syncApi = {
     reportIncident,
@@ -246,7 +269,6 @@ export default function QueueManager({
   };
 
   const active = items.filter((q) => q.status !== "done");
-  const conflicts = active.filter((q) => q.status === "conflict");
 
   return (
     <>

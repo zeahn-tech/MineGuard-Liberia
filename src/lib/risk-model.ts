@@ -44,12 +44,6 @@ export type RiskFactor = {
   recordIds: string[];
 };
 
-const severityPoints = (sev: string): number =>
-  sev === "critical" ? RISK_WEIGHTS.criticalFinding
-  : sev === "high" ? RISK_WEIGHTS.highFinding
-  : sev === "medium" ? RISK_WEIGHTS.mediumFinding
-  : RISK_WEIGHTS.lowFinding;
-
 // ---------------------------------------------------------------------------
 // SEC-4 v2 — the aggregation boundary. The risk model's inputs can arrive two
 // ways: as raw record lists (the fallback path — the client pages every

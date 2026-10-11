@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
@@ -19,10 +19,14 @@ export default function CommunityTrack() {
   const [searchParams, setSearchParams] = useSearchParams();
   const code = searchParams.get("code") ?? "";
   const [input, setInput] = useState(code);
-
-  useEffect(() => {
+  // Keep the text box in step with the URL's ?code= (e.g. a pasted link or
+  // back/forward navigation) by adjusting state while rendering — React's
+  // documented alternative to an effect that only copies a prop into state.
+  const [syncedCode, setSyncedCode] = useState(code);
+  if (code !== syncedCode) {
+    setSyncedCode(code);
     setInput(code);
-  }, [code]);
+  }
 
   // Only fetch when a code is present (public endpoint, coarse fields only).
   const report = useQuery(

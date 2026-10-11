@@ -62,7 +62,6 @@ const N_FINDINGS = 5100;
 const N_INCIDENTS = 5200;
 const N_INSPECTIONS = 800; // findings' parent; causal chain, not aggregate
 const N_CAS = 5050;
-const N_REPORTS = 0; // no extra community reports needed for these pins
 
 const SITE = "96000000-0000-4000-8000-000000000001";
 const SCALING = "95000000-0000-4000-8000-000000000001";
@@ -237,7 +236,7 @@ async function seedFixture() {
   );
 
   // Customer reports (not needed >5,000 for these pins, but seed SOMETHING
-  // so admin-visible counts are non-trivial): N_REPORTS stays 0 by design.
+  // so admin-visible counts are non-trivial): no extra community reports are seeded, by design.
 }
 
 beforeAll(async () => {

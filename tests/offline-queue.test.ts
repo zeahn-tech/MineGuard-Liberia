@@ -32,7 +32,6 @@ import {
   buildQueueExport,
   __resetOfflineQueue,
 } from "../src/lib/offline-queue";
-import { NotSavedError } from "../src/lib/offline-store";
 
 // Minimal localStorage for the bun runtime (browser provides it natively).
 const store = new Map<string, string>();

@@ -22,7 +22,7 @@
 // ---------------------------------------------------------------------------
 
 import { beforeAll, describe, expect, test } from "bun:test";
-import { getDb, getFixture, withRole, type Runner } from "./helpers/pglite-db";
+import { getFixture, withRole, type Runner } from "./helpers/pglite-db";
 import { createHash } from "node:crypto";
 
 beforeAll(async () => {

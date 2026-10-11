@@ -26,7 +26,7 @@ export function useAuth() {
       emailOrOpts?:
         | string
         | { email: string; password: string; name?: string },
-      maybePassword?: string,
+      _maybePassword?: string,
     ) => {
       // Convex-style call signature is not used by the new auth page; kept
       // flexible so legacy call sites compile.

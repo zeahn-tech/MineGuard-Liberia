@@ -48,7 +48,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     isLoading: authLoading,
     isAuthenticated,
     user,
-    signInEmail,
     signUpEmail,
     signInGuest,
     signOut,

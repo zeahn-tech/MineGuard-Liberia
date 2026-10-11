@@ -13,14 +13,15 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useState } from "react";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { ArrowLeft, MapPin, Sparkles } from "lucide-react";
+import { ArrowLeft, MapPin } from "lucide-react";
 import type { Id } from "@/lib/compat-types";
 import { RiskAiPanel } from "../components/RiskAiPanel";
+import { useNow } from "@/hooks/use-now";
 
 export default function SiteDetail() {
+  const now = useNow();
   const { siteId } = useParams<{ siteId: string }>();
   const site = useQuery(
     api.sites.get,
@@ -170,7 +171,7 @@ export default function SiteDetail() {
                   <p className="mt-1 text-xs text-muted-foreground">
                     <span className="stamp">{ca.status.replace(/_/g, " ")}</span>{" "}
                     due {new Date(ca.dueAt).toLocaleDateString()}
-                    {ca.dueAt < Date.now() && ca.status !== "closed" && ca.status !== "verified" && (
+                    {ca.dueAt < now && ca.status !== "closed" && ca.status !== "verified" && (
                       <span className="text-destructive"> · overdue</span>
                     )}
                   </p>

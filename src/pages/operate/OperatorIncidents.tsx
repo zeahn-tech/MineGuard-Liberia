@@ -67,7 +67,7 @@ function OperatorIncidentForm({ onDone }: { onDone: () => void }) {
   const [type, setType] = useState<Incident["type"]>("near_miss");
   const [severity, setSeverity] = useState<Incident["severity"]>("low");
   const [description, setDescription] = useState("");
-  const [occurredAt, setOccurredAt] = useState<string>(
+  const [occurredAt, setOccurredAt] = useState<string>(() =>
     new Date(Date.now() - DAY).toISOString().slice(0, 10),
   );
   const [fatalities, setFatalities] = useState("");
