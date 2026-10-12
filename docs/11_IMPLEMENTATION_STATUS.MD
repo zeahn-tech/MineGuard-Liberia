@@ -3,7 +3,7 @@
 ## Quality gate [2026-10-11]
 
 **Status:** GREEN — `tsc -b` 0 errors, `eslint .` 0 errors / 0 warnings,
-`vite build` OK, `bun test` 428 pass / 4 skip (live-DB tests, need a real
+`vite build` OK, `bun test` 517 pass / 4 skip (live-DB tests, need a real
 project) / 0 fail.
 
 - **Data layer restored.** The 2026-10-09 "Rebuild backend.ts" reconstruction
@@ -64,6 +64,15 @@ project) / 0 fail.
   `id` to replace. Covered by `tests/gis-import.test.ts`,
   `tests/site-position.test.ts`, `tests/site-location-picker.test.tsx`,
   `tests/boundary-loader.test.tsx` and the API tests in `tests/gis.test.ts`.
+- **"Site still not on the map after verification" (2026-10-11).** Cause: the
+  map reads through a shared cache (90 s keep-alive) and re-reads only on a
+  Realtime event; a position saved on this device did not refresh an open or
+  recently-open map when Realtime was slow/off. Fixed with an in-process
+  write signal (`notifyLocalWrite`) on every site/boundary write, a Refresh
+  button on the map, and migration `0018` (boundary tables published to
+  Realtime). The importer now names rows at the deepest level (HDX district
+  files were being named after their county). New "Where do I get this data?"
+  panel on Map Boundaries. Apply migrations 0015–0018 on any environment.
 - **Test hygiene.** The scale suite's 5,000-row teardown ran minutes under
   row triggers and was silently abandoned at the default hook timeout,
   leaving its fixture in the shared per-process DB; teardown now skips row

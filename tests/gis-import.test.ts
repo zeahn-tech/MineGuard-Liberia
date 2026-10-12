@@ -149,6 +149,32 @@ describe("parseBoundaryGeoJson — invalid shapes are explained, never repaired"
   });
 });
 
+describe("real-world attribute schemas (names are read at the deepest level)", () => {
+  const nameOf = (properties: unknown) => parse(feature(polygon(), properties)).candidates[0].name;
+
+  test("geoBoundaries: shapeName", () => {
+    expect(nameOf({ shapeName: "Bomi", shapeISO: "LR-BM", shapeID: "x-ADM1-1", shapeGroup: "LBR", shapeType: "ADM1" })).toBe("Bomi");
+  });
+  test("OCHA/HDX district rows carry county AND district — the DISTRICT wins, not the county", () => {
+    expect(nameOf({ ADM1_EN: "Bomi", ADM1_PCODE: "LR01", ADM2_EN: "Klay", ADM2_PCODE: "LR0101" })).toBe("Klay");
+  });
+  test("OCHA/HDX county rows (no district column) are named by the county", () => {
+    expect(nameOf({ ADM1_EN: "Bomi", ADM1_PCODE: "LR01", ADM0_EN: "Liberia" })).toBe("Bomi");
+  });
+  test("GADM-style rows: the deepest NAME_n wins", () => {
+    expect(nameOf({ NAME_0: "Liberia", NAME_1: "Bomi", NAME_2: "Klay" })).toBe("Klay");
+    expect(nameOf({ NAME_0: "Liberia", NAME_1: "Bomi" })).toBe("Bomi");
+  });
+  test("an explicit `name` always beats the level columns", () => {
+    expect(nameOf({ name: "Custom", ADM2_EN: "Klay" })).toBe("Custom");
+  });
+  test("blank and non-text values are skipped, numeric names are kept as text", () => {
+    expect(nameOf({ name: "   ", ADM1_EN: "Bomi" })).toBe("Bomi");
+    expect(nameOf({ name: { nested: true }, shapeName: 42 })).toBe("42");
+    expect(nameOf(null)).toBeUndefined();
+  });
+});
+
 describe("matching — exact, never fuzzy", () => {
   const sites = [
     { _id: "s1", code: "MGL-BOM-0001", name: "Bomi Gold Works" },

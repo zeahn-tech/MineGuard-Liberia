@@ -204,6 +204,8 @@ export function BoundaryLoader({
         </TabsList>
       </Tabs>
 
+      <DataSourcesHelp />
+
       {/* 1 — the data */}
       <section className="space-y-3">
         <h2 className="display border-b border-border pb-2 text-lg">1 · Choose the GeoJSON</h2>
@@ -483,6 +485,74 @@ export function BoundaryLoader({
   );
 }
 
+
+const EXTERNAL = { target: "_blank", rel: "noopener noreferrer" } as const;
+
+/** Where boundary data comes from, and how to get it into GeoJSON. */
+function DataSourcesHelp() {
+  const link = "underline underline-offset-2";
+  return (
+    <details className="paper group p-4 text-sm">
+      <summary className="cursor-pointer font-medium">Where do I get this data?</summary>
+      <div className="mt-3 space-y-4 text-xs leading-relaxed text-muted-foreground">
+        <section>
+          <h3 className="text-sm font-medium text-foreground">Counties and districts (administrative areas)</h3>
+          <ul className="mt-1 list-disc space-y-1 pl-4">
+            <li>
+              <a className={link} href="https://www.geoboundaries.org/" {...EXTERNAL}>
+                geoBoundaries
+              </a>{" "}
+              — open data (CC BY 4.0, so credit it in the Source field). Choose Liberia: ADM1 = counties,
+              ADM2 = districts. It offers GeoJSON directly, plus a simplified version if the full file is
+              over 5 MB.
+            </li>
+            <li>
+              <a className={link} href="https://data.humdata.org/dataset/cod-ab-lbr" {...EXTERNAL}>
+                OCHA / HDX — Liberia Subnational Administrative Boundaries
+              </a>{" "}
+              — a shapefile (.zip) covering counties and districts; convert it as below. Check the licence
+              shown on the dataset page before use.
+            </li>
+          </ul>
+        </section>
+        <section>
+          <h3 className="text-sm font-medium text-foreground">Site outlines</h3>
+          <p className="mt-1">
+            There is no public source for individual site outlines. They come from your own survey (a GPS
+            track, or traced in QGIS), or from the concession / permit boundary supplied by the licensing
+            authority or the operator. Save the result as GeoJSON.
+          </p>
+        </section>
+        <section>
+          <h3 className="text-sm font-medium text-foreground">Converting a Shapefile, KML or TopoJSON to GeoJSON</h3>
+          <ul className="mt-1 list-disc space-y-1 pl-4">
+            <li>
+              <a className={link} href="https://mapshaper.org/" {...EXTERNAL}>
+                mapshaper.org
+              </a>{" "}
+              (free, runs in your browser): drop in the .zip (or the .shp, .dbf and .prj files together) or
+              the KML/TopoJSON file, then Export → GeoJSON. If the data is not in degrees, type{" "}
+              <code>-proj wgs84</code> in its console first. Its Simplify slider shrinks big files.
+            </li>
+            <li>
+              <a className={link} href="https://qgis.org/" {...EXTERNAL}>
+                QGIS
+              </a>{" "}
+              (free): right-click the layer → Export → Save Features As… → format GeoJSON, CRS
+              EPSG:4326.
+            </li>
+            <li>
+              Command line: <code>ogr2ogr -f GeoJSON -t_srs EPSG:4326 out.geojson in.shp</code>
+            </li>
+          </ul>
+          <p className="mt-1">
+            The file must be WGS84 longitude/latitude (EPSG:4326) — this page tells you if it is not.
+          </p>
+        </section>
+      </div>
+    </details>
+  );
+}
 
 function LoadedList({
   title,

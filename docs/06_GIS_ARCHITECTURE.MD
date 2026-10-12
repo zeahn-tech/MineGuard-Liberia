@@ -119,6 +119,33 @@ Flow: **choose → review → source and load**; nothing is saved before the rev
 - "Already loaded" lists what exists; until something is loaded the boundary
   layers on the National Map are empty (the toggles show `(0)`).
 
+### Where boundary data comes from
+
+The page carries a "Where do I get this data?" panel. Administrative areas:
+**geoBoundaries** (open, CC BY 4.0 — credit it in the Source field; GeoJSON
+direct, ADM1 = counties, ADM2 = districts, a simplified file if > 5 MB) and the
+**OCHA/HDX "Liberia – Subnational Administrative Boundaries"** shapefile
+(check the licence on the dataset page). Site outlines have no public source:
+own survey, or the concession/permit boundary from the licensing authority or
+operator. Conversion to GeoJSON (WGS84 / EPSG:4326): mapshaper.org (in-browser;
+`-proj wgs84` if not in degrees), QGIS (Export → Save Features As → GeoJSON,
+EPSG:4326) or `ogr2ogr -f GeoJSON -t_srs EPSG:4326 out.geojson in.shp`. Names
+are read at the deepest level a file carries (geoBoundaries `shapeName`, HDX
+`ADMn_EN`, GADM `NAME_n`), so a district row is named for the district, not its
+county.
+
+### Why an edit may not show immediately — and the fix
+
+Screens read through a shared query cache that keeps a screen's last result for
+90 s, and re-reads on a Realtime event. Realtime is best-effort (it can be off
+for a project, still connecting, or delayed), so a write made **by this
+client** now signals every live query watching those tables to re-read at once
+(`notifyLocalWrite` in `backend.ts`; covered by `tests/gis.test.ts`, which fails
+without it). Changes made by *other* people still arrive via Realtime —
+migration `0018` adds the two boundary tables to the publication — and the
+National map has a **Refresh** button for the case where Realtime is not
+connected.
+
 **Why a layer can be empty.** A point is plotted only if it has coordinates
 inside Liberia (lat 4.3…8.6, lng −11.6…−7.3). Liberia is **west** of the prime
 meridian, so longitudes are **negative** — `9.43` (no minus sign) is Nigeria and

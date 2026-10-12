@@ -13,7 +13,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { api } from "../src/lib/backend";
+import { api, refreshMapFeatures } from "../src/lib/backend";
 import { __testSetSupabaseClient, __testSetAuthUserId } from "../src/lib/supabase";
 import {
   adminExec,
@@ -964,6 +964,156 @@ describe("loading boundaries: replace in place", () => {
       msg = e instanceof Error ? e.message : String(e);
     }
     expect(msg).toContain("NOT_FOUND");
+  });
+});
+
+// ===========================================================================
+// The map must reflect YOUR OWN edits without waiting for realtime
+// ===========================================================================
+describe("live queries refresh after this client's own writes", () => {
+  const created: string[] = [];
+  const dropSites = (...ids: string[]) =>
+    adminExec(
+      `set session_replication_role = replica;
+       delete from public.sites where id in (${ids.map((i) => `'${i}'`).join(", ")});
+       set session_replication_role = origin;`,
+    );
+  afterAll(async () => {
+    if (created.length) await dropSites(...created);
+  });
+
+  /** Subscribe like a page does; resolves with the first payload satisfying
+   *  `ok`, failing the test if none arrives in time. No realtime exists in this
+   *  harness, so only the local-write signal can deliver the update. */
+  function untilPayload<T>(
+    handle: { subscribe: (cb: (v: T | undefined) => void) => () => void },
+    ok: (v: T) => boolean,
+    ms = 4000,
+  ) {
+    let unsub = () => {};
+    const done = new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`no matching update within ${ms} ms`)), ms);
+      unsub = handle.subscribe((v) => {
+        if (v !== undefined && ok(v)) {
+          clearTimeout(timer);
+          resolve(v);
+        }
+      });
+    });
+    return { done, stop: () => unsub() };
+  }
+
+  async function newSite() {
+    setIdentity(f.admin);
+    const id = await api.sites.create({ name: "Refresh Probe", operatorName: "Probe Op", county: "Bomi" });
+    created.push(id);
+    return id;
+  }
+
+  test("a site given a position appears on an ALREADY-OPEN map, then shows as verified", async () => {
+    const id = await newSite();
+    const map = api.mapFeatures();
+    const first = untilPayload(map, () => true);
+    const initial = await first.done;
+    expect(initial.features.some((x) => x.id === id)).toBe(false); // not on the map yet
+    first.stop();
+
+    // Keep ONE subscription open across the edits — the page, not a new fetch.
+    let latest = initial;
+    const stop = map.subscribe((v) => {
+      if (v) latest = v;
+    });
+    const wait = async (ok: (v: typeof initial) => boolean) => {
+      const t0 = Date.now();
+      while (!ok(latest)) {
+        if (Date.now() - t0 > 4000) throw new Error("the open map never refreshed");
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    };
+    try {
+      await api.sites.update({ siteId: id, latitude: 6.5, longitude: -10.7, geoSource: "device_gps", geoAccuracyM: 6 });
+      await wait((v) => v.features.some((x) => x.id === id));
+      expect(latest.features.find((x) => x.id === id)?.verification).toBe("unverified");
+
+      await api.gis.setSiteGeoVerification({ siteId: id, geoVerified: true, source: "surveyed with a GPS receiver", accuracyM: 2 });
+      await wait((v) => v.features.find((x) => x.id === id)?.verification === "verified");
+
+      await api.gis.saveSiteBoundary({ siteId: id, geometryGeoJson: POLY(-10.7, 6.5, 0.01), source: "survey" });
+      await wait((v) => v.siteBoundaries.some((b) => b.siteId === id));
+
+      const adminB = await api.gis.saveAdminBoundary({ name: "Refresh Probe Area", level: "district", geometryGeoJson: POLY(-10.8, 6.4), source: "x" });
+      await wait((v) => v.adminBoundaries.some((b) => b._id === adminB._id));
+    } finally {
+      stop();
+    }
+  });
+
+  test("an open site page (a different live query) refreshes after the position is saved", async () => {
+    const id = await newSite();
+    const page = api.sites.get({ siteId: id });
+    let latest: { latitude?: number | null; geoVerified?: boolean } | null | undefined;
+    const stop = page.subscribe((v) => {
+      latest = v;
+    });
+    try {
+      await untilPayload(page, (v) => v !== null && v.latitude == null).done;
+      await api.sites.update({ siteId: id, latitude: 6.6, longitude: -10.6 });
+      const t0 = Date.now();
+      while (latest?.latitude !== 6.6) {
+        if (Date.now() - t0 > 4000) throw new Error("the open site page never refreshed");
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    } finally {
+      stop();
+    }
+  });
+
+  test("the Refresh button re-reads data changed OUTSIDE this client (another person's edit)", async () => {
+    const id = await newSite();
+    const map = api.mapFeatures();
+    let latest: Awaited<ReturnType<typeof feed>> | undefined;
+    const stop = map.subscribe((v) => {
+      if (v) latest = v;
+    });
+    try {
+      const t0 = Date.now();
+      while (!latest) {
+        if (Date.now() - t0 > 4000) throw new Error("map never loaded");
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(latest.features.some((x) => x.id === id)).toBe(false);
+      // Somebody else (or a script) sets the position directly in the database:
+      await adminSql(`update public.sites set latitude = 6.7, longitude = -10.5 where id = '${id}'`);
+      refreshMapFeatures();
+      const t1 = Date.now();
+      while (!latest.features.some((x) => x.id === id)) {
+        if (Date.now() - t1 > 4000) throw new Error("Refresh did not re-read the map");
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    } finally {
+      stop();
+    }
+  });
+
+  test("unsubscribing detaches the listener (a closed page must not keep re-fetching)", async () => {
+    const id = await newSite();
+    let calls = 0;
+    const stop = api.sites.get({ siteId: id }).subscribe(() => {
+      calls++;
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    stop();
+    const before = calls;
+    await api.sites.update({ siteId: id, notes: "after close" });
+    await new Promise((r) => setTimeout(r, 700)); // longer than the 300 ms debounce
+    expect(calls).toBe(before);
+  });
+
+  test("boundary tables are published to Realtime (0018), so other people's loads refresh an open map", async () => {
+    const rows = await adminSql(
+      `select tablename from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename in ('admin_boundaries', 'site_boundaries') order by 1`,
+    );
+    expect(rows.map((r) => r.tablename)).toEqual(["admin_boundaries", "site_boundaries"]);
   });
 });
 

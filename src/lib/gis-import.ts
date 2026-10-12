@@ -42,9 +42,16 @@ export interface ParsedBoundaries {
   fatal?: string;
 }
 
+// Attribute names used by the common sources, in PRIORITY order. Files that
+// carry several levels per row (a district row also holds its county) must be
+// read at the DEEPEST level first — otherwise every district would be named
+// after its county. Covers geoBoundaries (shapeName), OCHA/HDX COD (ADMn_EN)
+// and GADM-style (NAME_n) files, then generic names.
 const NAME_KEYS = [
-  "name", "NAME", "Name", "shapeName", "NAME_1", "NAME_2", "NAME_3", "ADM1_EN", "ADM2_EN",
-  "ADM3_EN", "admin_name", "county", "COUNTY", "district", "DISTRICT",
+  "name", "NAME", "Name", "shapeName",
+  "ADM5_EN", "ADM4_EN", "ADM3_EN", "ADM2_EN", "ADM1_EN",
+  "NAME_5", "NAME_4", "NAME_3", "NAME_2", "NAME_1",
+  "admin_name", "district", "DISTRICT", "county", "COUNTY",
 ];
 const CODE_KEYS = ["code", "CODE", "Code", "site_code", "SITE_CODE", "siteCode"];
 

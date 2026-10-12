@@ -279,6 +279,28 @@ describe("BoundaryLoader — administrative areas", () => {
   });
 });
 
+describe("BoundaryLoader — where to get the data", () => {
+  test("explains the sources and the conversion, with external links that cannot hijack the page", async () => {
+    const h = await mount();
+    expect(h.text()).toContain("Where do I get this data?");
+    expect(h.text()).toContain("CC BY 4.0");
+    expect(h.text()).toContain("Converting a Shapefile, KML or TopoJSON to GeoJSON");
+    expect(h.text()).toContain("EPSG:4326");
+    const links = [...h.host.querySelectorAll("a")] as HTMLAnchorElement[];
+    expect(links.map((a) => new URL(a.href).hostname)).toEqual([
+      "www.geoboundaries.org",
+      "data.humdata.org",
+      "mapshaper.org",
+      "qgis.org",
+    ]);
+    for (const a of links) {
+      expect(a.target).toBe("_blank");
+      expect(a.rel).toContain("noopener");
+    }
+    await h.unmount();
+  });
+});
+
 describe("BoundaryLoader — what is already loaded", () => {
   test("says plainly that the map layers are empty when nothing is loaded", async () => {
     const h = await mount();

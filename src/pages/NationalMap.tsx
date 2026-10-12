@@ -1,3 +1,4 @@
+import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   MapContainer,
@@ -13,7 +14,8 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import { useQuery } from "@/lib/backend-react";
-import { api } from "@/lib/backend";
+import { api, refreshMapFeatures } from "@/lib/backend";
+import { Button } from "@/components/ui/button";
 import type { GeoLayer, GeoVerificationLevel, MapFeature } from "@/lib/types";
 import {
   LIBERIA_CENTER,
@@ -192,8 +194,21 @@ export default function NationalMap() {
   return (
     <div className="space-y-4">
       <header>
-        <p className="kicker">GIS</p>
-        <h1 className="display text-3xl">National map</h1>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="kicker">GIS</p>
+            <h1 className="display text-3xl">National map</h1>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={refreshMapFeatures}
+            title="Re-read sites, boundaries and records now"
+          >
+            <RefreshCw className="size-4" /> Refresh
+          </Button>
+        </div>
         <p className="mt-1 text-sm text-muted-foreground">
           Only records you are authorized to see are shown. Verified positions are drawn solid;
           unverified positions are dashed and pale; unvetted public reports are dotted and hollow.

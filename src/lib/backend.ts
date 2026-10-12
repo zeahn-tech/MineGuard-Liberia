@@ -998,6 +998,44 @@ function mapCommandCenterStats(
 //    filters of its own.
 // ---------------------------------------------------------------------------
 
+/** In-process "this client just wrote to these tables" signal.
+ *
+ *  Realtime (postgres_changes) is best-effort: it can be disabled for a
+ *  project, not yet connected, or delayed — and the shared query cache keeps a
+ *  screen's last result for 90 s after you leave it. Without this, saving a
+ *  site's position and going straight back to the map replays the OLD map
+ *  until an event that may never arrive. A write made by THIS client therefore
+ *  tells every live query watching those tables to re-read right away
+ *  (realtime still covers changes made by other people). */
+const localWriteListeners = new Set<(tables: readonly string[]) => void>();
+
+function onLocalWrite(listener: (tables: readonly string[]) => void): () => void {
+  localWriteListeners.add(listener);
+  return () => {
+    localWriteListeners.delete(listener);
+  };
+}
+
+export function notifyLocalWrite(...tables: string[]): void {
+  for (const listener of [...localWriteListeners]) listener(tables);
+}
+
+/** Tables the National map reads — a manual "Refresh" re-reads all of them. */
+const MAP_TABLES = [
+  "sites",
+  "incidents",
+  "inspections",
+  "environmental_observations",
+  "community_reports",
+  "admin_boundaries",
+  "site_boundaries",
+] as const;
+
+/** Force the map's data to re-read now (the page's Refresh button). */
+export function refreshMapFeatures(): void {
+  notifyLocalWrite(...MAP_TABLES);
+}
+
 function live<T>(
   fetcher: () => Promise<T>,
   watch: string[],
@@ -1024,6 +1062,9 @@ function live<T>(
           void run();
         }, 300);
       };
+      const offLocalWrite = onLocalWrite((tables) => {
+        if (tables.some((t) => watch.includes(t))) onWatchEvent();
+      });
 
       const setupWatchers = () => {
         if (watchersReady || cancelled || watch.length === 0) return;
@@ -1092,6 +1133,7 @@ function live<T>(
       void run();
       return () => {
         cancelled = true;
+        offLocalWrite();
         if (timer) clearTimeout(timer);
         if (retryTimer) clearTimeout(retryTimer);
         for (const u of unsubs) u();
@@ -1134,6 +1176,10 @@ function liveDoc<T>(
           void run();
         }, 300);
       };
+      // NOT kept in `unsubs`: its emptiness means "realtime channel not set up".
+      const offLocalWrite = onLocalWrite((tables) => {
+        if (tables.includes(table)) onWatchEvent();
+      });
 
       const run = async () => {
         if (inFlight) {
@@ -1201,6 +1247,7 @@ function liveDoc<T>(
       void run();
       return () => {
         cancelled = true;
+        offLocalWrite();
         if (timer) clearTimeout(timer);
         if (retryTimer) clearTimeout(retryTimer);
         for (const u of unsubs) u();
@@ -1430,6 +1477,7 @@ export const api = {
         code,
         created_by: user.uid,
       });
+      notifyLocalWrite("sites");
       await logAudit({
         actorId: user.uid,
         actorLabel: await actorLabel(user),
@@ -1458,6 +1506,7 @@ export const api = {
         .update({ status: args.status })
         .eq("id", args.siteId);
       if (error) throw backendError(error);
+      notifyLocalWrite("sites");
       await logAudit({
         actorId: user.uid,
         actorLabel: await actorLabel(user),
@@ -1572,6 +1621,7 @@ export const api = {
         .update(patch)
         .eq("id", args.siteId);
       if (error) throw backendError(error);
+      notifyLocalWrite("sites");
       await logAudit({
         actorId: user.uid,
         actorLabel: await actorLabel(user),
@@ -3337,6 +3387,8 @@ export const api = {
         return { seeded: false, reason: "not_empty" as const };
       }
       await runSeed();
+      refreshMapFeatures();
+      notifyLocalWrite("sites");
       return { seeded: true as const };
     },
   },
@@ -3381,6 +3433,7 @@ export const api = {
             .from("site_boundaries")
             .insert({ ...row, id, created_by: user.uid });
       if (write.error) throw backendError(write.error);
+      notifyLocalWrite("site_boundaries");
       // Re-read (RLS-scoped) instead of trusting a write's RETURNING shape.
       const back = await supabase
         .from("site_boundaries")
@@ -3426,6 +3479,7 @@ export const api = {
             .from("admin_boundaries")
             .insert({ ...row, id, created_by: user.uid });
       if (write.error) throw backendError(write.error);
+      notifyLocalWrite("admin_boundaries");
       const back = await supabase
         .from("admin_boundaries")
         .select("*")
@@ -3459,6 +3513,7 @@ export const api = {
         })
         .eq("id", args.siteId);
       if (write.error) throw backendError(write.error);
+      notifyLocalWrite("sites");
       const back = await getSite(args.siteId);
       if (!back) throw new Error("NOT_FOUND");
       return back;
