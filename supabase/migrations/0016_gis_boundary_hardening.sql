@@ -15,6 +15,23 @@
 -- privileged (service-role) maintenance action by design.
 -- ===========================================================================
 
+-- ---------------------------------------------------------------------------
+-- Precondition: fail early, in plain words, instead of halfway through with an
+-- opaque 'relation does not exist'. The usual cause is running this file in the
+-- WRONG Supabase project (the project ref must match src/lib/supabase.ts), or
+-- running it before the earlier migrations.
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  if to_regclass('public.admin_boundaries') is null
+     or to_regclass('public.site_boundaries') is null then
+    raise exception using
+      message = 'MineGuard migration 0016_gis_boundary_hardening cannot run: the boundary tables do not exist.',
+      detail  = 'public.admin_boundaries / public.site_boundaries are created by migration 0015_gis.sql. Apply 0015 first (and 0001-0014 before it).',
+      hint    = 'Check you are connected to the project whose ref matches src/lib/supabase.ts. Safest: SUPABASE_ACCESS_TOKEN=<token> bun scripts/db-sql.ts supabase/migrations/0016_gis_boundary_hardening.sql (the runner is tied to the right project).';
+  end if;
+end $$;
+
 revoke all on public.admin_boundaries, public.site_boundaries from anon;
 revoke delete on public.admin_boundaries, public.site_boundaries from authenticated;
 

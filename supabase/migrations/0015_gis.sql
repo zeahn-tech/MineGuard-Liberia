@@ -23,6 +23,24 @@
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
+-- Precondition: fail early, in plain words, instead of halfway through with an
+-- opaque 'relation does not exist'. The usual cause is running this file in the
+-- WRONG Supabase project (the project ref must match src/lib/supabase.ts), or
+-- running it before the earlier migrations.
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  if to_regclass('public.sites') is null
+     or to_regclass('public.admin_areas') is null
+     or to_regprocedure('public.mg_has_permission(text)') is null then
+    raise exception using
+      message = 'MineGuard migration 0015_gis cannot run: the base schema is missing in this database.',
+      detail  = 'public.sites, public.admin_areas or public.mg_has_permission(text) was not found. Migrations 0001-0014 must be applied first, in order.',
+      hint    = 'Check you are connected to the project whose ref matches src/lib/supabase.ts. Safest: SUPABASE_ACCESS_TOKEN=<token> bun scripts/db-sql.ts supabase/migrations/0015_gis.sql (the runner is tied to the right project).';
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- A. GeoJSON validator (immutable, no table access)
 -- ---------------------------------------------------------------------------
 create or replace function public.mg_valid_position(p jsonb)

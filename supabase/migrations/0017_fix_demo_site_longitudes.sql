@@ -13,6 +13,22 @@
 -- user entered are never touched (the app now rejects such input up front;
 -- an existing real site with a mistyped sign is corrected by editing it).
 -- ===========================================================================
+-- ---------------------------------------------------------------------------
+-- Precondition: fail early, in plain words, instead of halfway through with an
+-- opaque 'relation does not exist'. The usual cause is running this file in the
+-- WRONG Supabase project (the project ref must match src/lib/supabase.ts), or
+-- running it before the earlier migrations.
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  if to_regclass('public.sites') is null then
+    raise exception using
+      message = 'MineGuard migration 0017_fix_demo_site_longitudes cannot run: public.sites does not exist.',
+      detail  = 'The base schema is missing in this database. Apply migrations 0001-0016 first, in order.',
+      hint    = 'Check you are connected to the project whose ref matches src/lib/supabase.ts. Safest: SUPABASE_ACCESS_TOKEN=<token> bun scripts/db-sql.ts supabase/migrations/0017_fix_demo_site_longitudes.sql (the runner is tied to the right project).';
+  end if;
+end $$;
+
 update public.sites
    set longitude = -longitude
  where notes = 'Synthetic demonstration record — not real operational data.'

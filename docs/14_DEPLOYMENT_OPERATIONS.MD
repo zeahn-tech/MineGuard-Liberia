@@ -101,6 +101,36 @@ design:**
 Rollback: redeploy the previous known-good artifact (Pages keeps deployment
 history) and, for data-level incidents, the restore path below.
 
+## Applying migrations safely [INCIDENT 2026-10-11 → HARDENED]
+
+**The only database this app uses is Supabase project ref
+`ewukneoblhogtreeekqc`** (`src/lib/supabase.ts`; `scripts/db-sql.ts` is wired to
+the same ref). **Incident:** migrations 0015–0018 were pasted into the SQL Editor
+of a *different* project in the same account (an unrelated application) and
+failed with `relation "public.sites" does not exist`. A read-only inspection
+confirmed the failed runs left nothing behind (each run is one transaction).
+Since then 0015–0018 begin with a precondition that stops with a plain
+explanation ("base schema is missing — wrong project, or earlier migrations not
+applied"), covered by `tests/migration-guards.test.ts`.
+
+Procedure — every time:
+
+1. **Check what is applied** in the right project: run
+   `supabase/checks/migration_state.sql` (read-only; one row per migration,
+   `true`/`false`). In the SQL Editor, first confirm the dashboard URL contains
+   `…/project/ewukneoblhogtreeekqc`. Or:
+   `SUPABASE_ACCESS_TOKEN=<token> bun scripts/db-sql.ts supabase/checks/migration_state.sql`
+2. **Apply every migration that shows `false`, in filename order**, with the
+   runner (it cannot reach another project, stops at the first failure and runs
+   the files strictly in the order given):
+   `SUPABASE_ACCESS_TOKEN=<token> bun scripts/db-sql.ts supabase/migrations/0012_*.sql supabase/migrations/0013_*.sql …`
+   (SQL-Editor alternative: one file at a time, in the right project.)
+3. **Re-run the check** until every row is `true`, then reload the app.
+
+Note the state recorded above (live project at 0001–0011 as of 2026-10-06):
+0012–0014 may still be pending there, and 0015 requires them to be applied
+first. Never skip a migration to reach a later one.
+
 ## Backup schedule [IMPLEMENTED 2026-09-27]
 
 | Property | Value |
