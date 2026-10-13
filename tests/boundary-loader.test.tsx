@@ -283,7 +283,9 @@ describe("BoundaryLoader — where to get the data", () => {
   test("explains the sources and the conversion, with external links that cannot hijack the page", async () => {
     const h = await mount();
     expect(h.text()).toContain("Where do I get this data?");
-    expect(h.text()).toContain("CC BY 4.0");
+    expect(h.text()).toContain("per boundary"); // geoBoundaries licences vary
+    expect(h.text()).toContain("CC BY 3.0 IGO"); // the Liberia source (HDX / UNMIL, OCHA ROWCA)
+    expect(h.text()).not.toContain("CC BY 4.0"); // never claimed for the data
     expect(h.text()).toContain("Converting a Shapefile, KML or TopoJSON to GeoJSON");
     expect(h.text()).toContain("EPSG:4326");
     const links = [...h.host.querySelectorAll("a")] as HTMLAnchorElement[];

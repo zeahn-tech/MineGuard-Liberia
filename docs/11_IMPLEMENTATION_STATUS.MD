@@ -3,7 +3,7 @@
 ## Quality gate [2026-10-11]
 
 **Status:** GREEN — `tsc -b` 0 errors, `eslint .` 0 errors / 0 warnings,
-`vite build` OK, `bun test` 545 pass / 4 skip (live-DB tests, need a real
+`vite build` OK, `bun test` 547 pass / 4 skip (live-DB tests, need a real
 project) / 0 fail.
 
 - **Data layer restored.** The 2026-10-09 "Rebuild backend.ts" reconstruction
@@ -74,18 +74,20 @@ project) / 0 fail.
   files were being named after their county). New "Where do I get this data?"
   panel on Map Boundaries. Apply migrations 0015–0018 on any environment
   (procedure and the read-only state check: doc 14 §Applying migrations safely).
-- **Official boundaries integrated (2026-10-12).** Uploaded
-  `liberia-counties.geojson` / `liberia-districts.geojson` verified
-  byte-identical to geoBoundaries gbOpen simplified (LBR ADM1/ADM2): 15 counties
-  + 136 districts, WGS84, all valid under the app's importer and the DB CHECK.
-  Licence only partly verifiable here (project CC BY 4.0; per-boundary
-  original licence unreadable) — recorded as an open owner action in
-  `data/boundaries/geoboundaries-lbr/PROVENANCE.md`. Added: the data +
-  provenance, a deterministic generator and idempotent SQL seed
-  (`supabase/seeds/`), county-name matching ("Rivercess"/"River Cess") in the
-  map filter, and an on-map credit line from the drawn boundaries' sources.
-  **Not yet loaded into the live project** (not reachable from the build
-  environment) — apply migrations, then the seed (doc 06).
+- **Official boundaries integrated (2026-10-12), licence corrected (2026-10-13).**
+  `liberia-counties.geojson` / `liberia-districts.geojson` are byte-identical to
+  geoBoundaries gbOpen simplified (LBR ADM1/ADM2): 15 counties + 136 districts,
+  WGS84, all valid under the importer and the DB CHECK. The publisher's record
+  (confirmed by the project owner): **boundarySource UNMIL, OCHA ROWCA;
+  boundaryLicense CC BY 3.0 IGO; buildDate Dec 12, 2023; year represented 2021**
+  — *not* CC BY 4.0 (an earlier help text and doc wording implied otherwise and
+  were corrected; a test now fails if the app labels the data CC BY 4.0).
+  Added: the data + `PROVENANCE.md`, a deterministic generator and idempotent
+  SQL seed (`supabase/seeds/`) that stores the required attribution, county-name
+  matching ("Rivercess"/"River Cess"), and an on-map credit line. Licence
+  acceptance is an open institutional decision (doc 16). **Not yet loaded into
+  the live project** (not reachable from the build environment) — apply
+  migrations, then the seed (doc 06).
 - **Test hygiene.** The scale suite's 5,000-row teardown ran minutes under
   row triggers and was silently abandoned at the default hook timeout,
   leaving its fixture in the shared per-process DB; teardown now skips row

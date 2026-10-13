@@ -12,6 +12,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { ATTRIBUTION } from "../scripts/build-boundary-seed";
 import { join } from "node:path";
 import { api, refreshMapFeatures } from "../src/lib/backend";
 import { __testSetSupabaseClient, __testSetAuthUserId } from "../src/lib/supabase";
@@ -1122,7 +1123,6 @@ describe("live queries refresh after this client's own writes", () => {
 // ===========================================================================
 describe("official county/district boundaries seed", () => {
   const SEED = readFileSync(join(ROOT, "supabase/seeds/liberia_boundaries_geoboundaries.sql"), "utf8");
-  const ATTRIBUTION = "geoBoundaries (gbOpen), William & Mary geoLab";
   const wipe = () =>
     adminSql(
       `delete from public.admin_boundaries where source like '${ATTRIBUTION}%' or source = 'manual load (seed test)'`,

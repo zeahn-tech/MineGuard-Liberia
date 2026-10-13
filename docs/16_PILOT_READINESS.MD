@@ -44,7 +44,14 @@ require evidence across the dimensions below.
 - Adopting institution's identity, data ownership, and legal basis.
 - Regulatory citation set (currently intentionally empty).
 - Retention schedule and legal-hold policy.
-- Boundary/licensing datasets if map layers are extended.
+- Boundary/licensing datasets if map layers are extended. **Currently proposed:**
+  the Liberia county (15) and district (136) boundaries in
+  `data/boundaries/geoboundaries-lbr/` — source UNMIL, OCHA ROWCA, via
+  geoBoundaries; licence **CC BY 3.0 IGO** (attribution; commercial use and
+  adaptation permitted; no share-alike; carries IGO immunity and arbitration
+  clauses). Full record: that directory's `PROVENANCE.md`. The institution must
+  accept this licence, or name another dataset, before the data is loaded into
+  the pilot database.
 - Official naming/branding decision (platform must not imply official status
   until adopted).
 

@@ -122,20 +122,26 @@ Flow: **choose → review → source and load**; nothing is saved before the rev
 ### Official county / district boundaries (loaded dataset)
 
 `data/boundaries/geoboundaries-lbr/` holds the Liberia ADM1 (15 counties) and
-ADM2 (136 districts) boundaries, with `PROVENANCE.md` (source, checksums,
-licence status) and `SHA256SUMS`. **Source — verified:** the files are
-byte-for-byte identical to geoBoundaries' `gbOpen` *simplified* releases
-(`wmgeolab/geoBoundaries`, `releaseData/gbOpen/LBR/`). **Licence — partly
-verified:** the geoBoundaries project releases under CC BY 4.0 and `gbOpen` is
-its open release, but each boundary keeps its *original source's* licence
-(CC BY / CC BY-SA / ODbL), and Liberia's own `boundaryLicense` /
-`boundarySource` could not be read (Git-LFS-hosted metadata) — an owner action
-is recorded in `PROVENANCE.md`. Until closed: attribution is required (the map
-shows each drawn boundary's `source`; the seed sets it to "geoBoundaries
-(gbOpen), William & Mary geoLab — www.geoboundaries.org · LBR ADM1/ADM2
-(simplified)"). The repository is public, so the files are redistributed with
-that attribution; `PROVENANCE.md` lists the extra obligations that would apply
-if the record shows CC BY-SA / ODbL.
+ADM2 (136 districts) boundaries, with `PROVENANCE.md` (the full record:
+source, licence, build date, URLs, attribution, retrieval dates) and
+`SHA256SUMS`. In short:
+
+* **Source:** byte-identical to geoBoundaries' `gbOpen` *simplified* Liberia
+  releases (William & Mary geoLab); the publisher records **boundarySource:
+  UNMIL, OCHA ROWCA**, **buildDate: Dec 12, 2023**, **boundaryYearRepresented:
+  2021**.
+* **Licence:** **Creative Commons Attribution 3.0 Intergovernmental
+  Organisations (CC BY 3.0 IGO)** (the publisher's `boundaryLicense`). It is
+  **not** CC BY 4.0 — geoBoundaries' project-level CC BY 4.0 statement covers
+  its own outputs, while each boundary keeps its original source's licence.
+  CC BY 3.0 IGO allows commercial use and adaptation with attribution; it has no
+  non-commercial, no-derivatives or share-alike condition, so it places no terms
+  on the MIT-licensed application code. It requires credit (stored as every
+  boundary's `source` and shown on the map), identification of changes
+  (simplified geometry), the licence URI with any redistributed copy, and no
+  implied endorsement by UNMIL / OCHA / geoBoundaries.
+* **Acceptance:** whether the adopting institution accepts this licence is a
+  pre-pilot decision (`docs/16`), not a technical one.
 
 Two ways to load them (neither marks anything verified):
 
@@ -155,17 +161,18 @@ Districts carry no county attribute, so no parent link is stored.
 ### Where boundary data comes from
 
 The page carries a "Where do I get this data?" panel. Administrative areas:
-**geoBoundaries** (open, CC BY 4.0 — credit it in the Source field; GeoJSON
-direct, ADM1 = counties, ADM2 = districts, a simplified file if > 5 MB) and the
-**OCHA/HDX "Liberia – Subnational Administrative Boundaries"** shapefile
-(check the licence on the dataset page). Site outlines have no public source:
-own survey, or the concession/permit boundary from the licensing authority or
-operator. Conversion to GeoJSON (WGS84 / EPSG:4326): mapshaper.org (in-browser;
-`-proj wgs84` if not in degrees), QGIS (Export → Save Features As → GeoJSON,
-EPSG:4326) or `ogr2ogr -f GeoJSON -t_srs EPSG:4326 out.geojson in.shp`. Names
-are read at the deepest level a file carries (geoBoundaries `shapeName`, HDX
-`ADMn_EN`, GADM `NAME_n`), so a district row is named for the district, not its
-county.
+**geoBoundaries** (open data, but the licence is set **per boundary** — read each
+dataset's `boundaryLicense` / `boundarySource` and credit them in the Source
+field; GeoJSON direct, ADM1 = counties, ADM2 = districts, a simplified file if
+> 5 MB) and the **OCHA/HDX "Liberia – Subnational Administrative Boundaries"**
+shapefile (source UNMIL, contributor OCHA ROWCA, CC BY 3.0 IGO). Site outlines
+have no public source: own survey, or the concession/permit boundary from the
+licensing authority or operator. Conversion to GeoJSON (WGS84 / EPSG:4326):
+mapshaper.org (in-browser; `-proj wgs84` if not in degrees), QGIS (Export → Save
+Features As → GeoJSON, EPSG:4326) or `ogr2ogr -f GeoJSON -t_srs EPSG:4326
+out.geojson in.shp`. Names are read at the deepest level a file carries
+(geoBoundaries `shapeName`, HDX `ADMn_EN`, GADM `NAME_n`), so a district row is
+named for the district, not its county.
 
 ### Why an edit may not show immediately — and the fix
 

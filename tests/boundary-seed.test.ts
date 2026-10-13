@@ -11,7 +11,7 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildRows, buildSql, SEED_PATH } from "../scripts/build-boundary-seed";
+import { ATTRIBUTION, buildRows, buildSql, SEED_PATH } from "../scripts/build-boundary-seed";
 import { sameCountyName } from "../src/lib/gis";
 
 const DATA = join(import.meta.dir, "..", "data", "boundaries", "geoboundaries-lbr");
@@ -43,11 +43,29 @@ describe("data integrity", () => {
     }
   });
 
-  test("the provenance record keeps the unverified licence items visibly unverified", () => {
+  test("PROVENANCE records the publisher's actual licence and source verbatim — and says it is NOT CC BY 4.0", () => {
     const prov = readFileSync(join(DATA, "PROVENANCE.md"), "utf8");
-    expect(prov).toContain("NOT VERIFIED");
-    expect(prov).toContain("boundaryLicense");
-    expect(prov).toContain("www.geoboundaries.org/api/current/gbOpen/LBR/ADM1/");
+    // geoBoundaries API record (gbOpen / LBR / ADM1 and ADM2), as reported 2026-10-13
+    expect(prov).toContain("| `boundarySource` | UNMIL, OCHA ROWCA |");
+    expect(prov).toContain(
+      "| `boundaryLicense` | Creative Commons Attribution 3.0 Intergovernmental Organisations (CC BY 3.0 IGO) |",
+    );
+    expect(prov).toContain("| `buildDate` | Dec 12, 2023 |");
+    expect(prov).toContain("| `boundaryYearRepresented` | 2021 |");
+    // source URLs and the licence
+    expect(prov).toContain("https://www.geoboundaries.org/api/current/gbOpen/LBR/ADM1/");
+    expect(prov).toContain("https://www.geoboundaries.org/api/current/gbOpen/LBR/ADM2/");
+    expect(prov).toContain("https://data.humdata.org/dataset/cod-ab-lbr");
+    expect(prov).toContain("https://github.com/wmgeolab/geoBoundaries");
+    expect(prov).toContain("https://creativecommons.org/licenses/by/3.0/igo/");
+    // retrieval dates, attribution, and the explicit refusal to relabel
+    expect(prov).toContain("## 6. Retrieval");
+    expect(prov).toContain("2026-10-12");
+    expect(prov).toContain("2026-10-13");
+    expect(prov).toContain(`> ${ATTRIBUTION}`);
+    expect(prov).toContain("must not be described or labelled as CC BY 4.0");
+    // fields we do not have are marked as such, not guessed
+    expect(prov).toContain("NOT RECORDED");
   });
 });
 
@@ -69,11 +87,28 @@ describe("the seed", () => {
     expect(buildRows().map((r) => r.id)).toEqual(rows.map((r) => r.id)); // deterministic
   });
 
-  test("every boundary carries the required attribution as its source", () => {
+  test("every boundary carries the licence-required attribution as its source — CC BY 3.0 IGO, never 4.0", () => {
     for (const r of rows) {
-      expect(r.source).toContain("geoBoundaries (gbOpen), William & Mary geoLab");
-      expect(r.source).toContain("www.geoboundaries.org");
+      expect(r.source).toBe(ATTRIBUTION);
+      expect(r.source).toContain("UNMIL; OCHA ROWCA");
+      expect(r.source).toContain("simplified geometry"); // the change must be identified (§3(b))
+      expect(r.source).toContain("CC BY 3.0 IGO");
+      expect(r.source).not.toContain("4.0");
     }
+  });
+
+  test("the seed's own header states the real licence", () => {
+    const sql = readFileSync(SEED_PATH, "utf8");
+    expect(sql).toContain("Creative Commons Attribution 3.0 Intergovernmental");
+    expect(sql).toContain("Not CC BY 4.0");
+  });
+
+  test("nothing in the application labels this data as CC BY 4.0", () => {
+    const files = new Bun.Glob("**/*.{ts,tsx}").scanSync({ cwd: join(import.meta.dir, "..", "src") });
+    const offenders = [...files].filter((f) =>
+      /CC[ -]BY[ -]4\.0/i.test(readFileSync(join(import.meta.dir, "..", "src", f), "utf8")),
+    );
+    expect(offenders).toEqual([]);
   });
 
   test("the seed never marks anything verified and never overwrites or deletes", () => {

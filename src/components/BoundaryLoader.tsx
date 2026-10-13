@@ -502,16 +502,19 @@ function DataSourcesHelp() {
               <a className={link} href="https://www.geoboundaries.org/" {...EXTERNAL}>
                 geoBoundaries
               </a>{" "}
-              — open data (CC BY 4.0, so credit it in the Source field). Choose Liberia: ADM1 = counties,
-              ADM2 = districts. It offers GeoJSON directly, plus a simplified version if the full file is
-              over 5 MB.
+              — open data, but the licence is set <strong>per boundary</strong>: check each
+              dataset&apos;s <code>boundaryLicense</code> and <code>boundarySource</code> on its
+              geoBoundaries page and credit them in the Source field. Choose Liberia: ADM1 =
+              counties, ADM2 = districts. GeoJSON downloads directly; use the simplified file if
+              the full one is over 5 MB.
             </li>
             <li>
               <a className={link} href="https://data.humdata.org/dataset/cod-ab-lbr" {...EXTERNAL}>
                 OCHA / HDX — Liberia Subnational Administrative Boundaries
               </a>{" "}
-              — a shapefile (.zip) covering counties and districts; convert it as below. Check the licence
-              shown on the dataset page before use.
+              — a shapefile (.zip) covering counties and districts; convert it as below. Source
+              UNMIL / OCHA ROWCA; licence CC BY 3.0 IGO (credit the source, say if you changed it, and
+              do not imply their endorsement).
             </li>
           </ul>
         </section>
