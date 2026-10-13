@@ -126,6 +126,9 @@ Procedure — every time:
    `SUPABASE_ACCESS_TOKEN=<token> bun scripts/db-sql.ts supabase/migrations/0012_*.sql supabase/migrations/0013_*.sql …`
    (SQL-Editor alternative: one file at a time, in the right project.)
 3. **Re-run the check** until every row is `true`, then reload the app.
+4. **Optional data seed:** the official county/district boundaries
+   (`supabase/seeds/liberia_boundaries_geoboundaries.sql`, see doc 06) — only
+   after step 3 shows 0015/0016 as `true`. Same runner, same project.
 
 Note the state recorded above (live project at 0001–0011 as of 2026-10-06):
 0012–0014 may still be pending there, and 0015 requires them to be applied

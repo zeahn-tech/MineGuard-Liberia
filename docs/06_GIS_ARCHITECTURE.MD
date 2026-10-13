@@ -119,6 +119,39 @@ Flow: **choose → review → source and load**; nothing is saved before the rev
 - "Already loaded" lists what exists; until something is loaded the boundary
   layers on the National Map are empty (the toggles show `(0)`).
 
+### Official county / district boundaries (loaded dataset)
+
+`data/boundaries/geoboundaries-lbr/` holds the Liberia ADM1 (15 counties) and
+ADM2 (136 districts) boundaries, with `PROVENANCE.md` (source, checksums,
+licence status) and `SHA256SUMS`. **Source — verified:** the files are
+byte-for-byte identical to geoBoundaries' `gbOpen` *simplified* releases
+(`wmgeolab/geoBoundaries`, `releaseData/gbOpen/LBR/`). **Licence — partly
+verified:** the geoBoundaries project releases under CC BY 4.0 and `gbOpen` is
+its open release, but each boundary keeps its *original source's* licence
+(CC BY / CC BY-SA / ODbL), and Liberia's own `boundaryLicense` /
+`boundarySource` could not be read (Git-LFS-hosted metadata) — an owner action
+is recorded in `PROVENANCE.md`. Until closed: attribution is required (the map
+shows each drawn boundary's `source`; the seed sets it to "geoBoundaries
+(gbOpen), William & Mary geoLab — www.geoboundaries.org · LBR ADM1/ADM2
+(simplified)"). The repository is public, so the files are redistributed with
+that attribution; `PROVENANCE.md` lists the extra obligations that would apply
+if the record shows CC BY-SA / ODbL.
+
+Two ways to load them (neither marks anything verified):
+
+1. **Seed** — `supabase/seeds/liberia_boundaries_geoboundaries.sql`, generated
+   and checked by `scripts/build-boundary-seed.ts` (`--check` fails if stale).
+   Idempotent, never overwrites or duplicates a same-level/same-name boundary an
+   administrator already loaded, ids derived from geoBoundaries' `shapeID`.
+   Needs migrations 0001–0016:
+   `SUPABASE_ACCESS_TOKEN=<token> bun scripts/db-sql.ts supabase/seeds/liberia_boundaries_geoboundaries.sql`
+2. **Map Boundaries page** — upload each file there (both are well under 5 MB;
+   district names are unique so the page loads them as-is).
+
+County names are matched ignoring case/spaces/punctuation (`sameCountyName`),
+because geoBoundaries spells "Rivercess" and the application "River Cess".
+Districts carry no county attribute, so no parent link is stored.
+
 ### Where boundary data comes from
 
 The page carries a "Where do I get this data?" panel. Administrative areas:

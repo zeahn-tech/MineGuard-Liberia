@@ -1118,6 +1118,111 @@ describe("live queries refresh after this client's own writes", () => {
 });
 
 // ===========================================================================
+// Official boundaries seed — the REAL geoBoundaries data through the real DB
+// ===========================================================================
+describe("official county/district boundaries seed", () => {
+  const SEED = readFileSync(join(ROOT, "supabase/seeds/liberia_boundaries_geoboundaries.sql"), "utf8");
+  const ATTRIBUTION = "geoBoundaries (gbOpen), William & Mary geoLab";
+  const wipe = () =>
+    adminSql(
+      `delete from public.admin_boundaries where source like '${ATTRIBUTION}%' or source = 'manual load (seed test)'`,
+    );
+  // The shared per-process DB already holds other suites' boundary fixtures
+  // (e.g. a county called "Bomi"), which the seed — correctly — leaves alone.
+  // Set them aside for this block so the counts below are exact, and restore
+  // them afterwards so no other test notices.
+  let stash = "[]";
+  beforeAll(async () => {
+    const [row] = (await adminSql(
+      `select coalesce(jsonb_agg(to_jsonb(b)), '[]'::jsonb)::text as j from public.admin_boundaries b`,
+    )) as Array<{ j: string }>;
+    stash = row.j;
+    await adminSql(`delete from public.admin_boundaries`);
+  });
+  const seeded = async () =>
+    (await adminSql(
+      `select level, count(*)::int as n from public.admin_boundaries where source like '${ATTRIBUTION}%' group by level order by level`,
+    )) as Array<{ level: string; n: number }>;
+  afterAll(async () => {
+    await adminSql(`delete from public.admin_boundaries`);
+    await adminSql(
+      `insert into public.admin_boundaries
+         select * from jsonb_populate_recordset(null::public.admin_boundaries, $stash$${stash}$stash$::jsonb)`,
+    );
+  });
+
+  test("applies: 15 counties + 136 districts pass the database's own geometry CHECK, loaded UNVERIFIED with attribution", async () => {
+    await wipe();
+    await adminExec(SEED);
+    expect(await seeded()).toEqual([
+      { level: "county", n: 15 },
+      { level: "district", n: 136 },
+    ]);
+    const [flags] = (await adminSql(
+      `select count(*) filter (where geo_verified)::int as verified,
+              count(*) filter (where created_by is not null)::int as authored
+         from public.admin_boundaries where source like '${ATTRIBUTION}%'`,
+    )) as Array<{ verified: number; authored: number }>;
+    expect(flags).toEqual({ verified: 0, authored: 0 });
+  });
+
+  test("re-running the seed is a no-op (nothing duplicated, nothing changed)", async () => {
+    await adminExec(SEED);
+    await adminExec(SEED);
+    expect(await seeded()).toEqual([
+      { level: "county", n: 15 },
+      { level: "district", n: 136 },
+    ]);
+  });
+
+  test("the National map feed carries them, with their source, for everyone entitled to read boundaries", async () => {
+    setIdentity(f.admin);
+    const admin = await feed();
+    const official = admin.adminBoundaries.filter((b) => b.source.startsWith(ATTRIBUTION));
+    expect(official.filter((b) => b.level === "county")).toHaveLength(15);
+    expect(official.filter((b) => b.level === "district")).toHaveLength(136);
+    expect(official.every((b) => b.geoVerified === false)).toBe(true);
+
+    setIdentity(f.county); // staff inspector
+    expect((await feed()).adminBoundaries.filter((b) => b.source.startsWith(ATTRIBUTION))).toHaveLength(151);
+    setIdentity(f.opA); // operator: reference geography is readable
+    expect((await feed()).adminBoundaries.filter((b) => b.source.startsWith(ATTRIBUTION))).toHaveLength(151);
+    setIdentity(f.guest);
+    expect((await feed()).adminBoundaries).toEqual([]);
+  });
+
+  test("a boundary an administrator already loaded by hand is left alone — never duplicated or overwritten", async () => {
+    await wipe();
+    await adminSql(
+      `insert into public.admin_boundaries (name, level, geometry_geojson, source)
+       values ('BOMI', 'county', '${POLY(-10.8, 6.5)}'::jsonb, 'manual load (seed test)')`,
+    );
+    await adminExec(SEED);
+    const bomi = await adminSql(
+      `select source from public.admin_boundaries where level = 'county' and lower(name) = 'bomi'`,
+    );
+    expect(bomi).toEqual([{ source: "manual load (seed test)" }]); // theirs, untouched, only one
+    expect(await seeded()).toEqual([
+      { level: "county", n: 14 }, // every county except the one already there
+      { level: "district", n: 136 },
+    ]);
+  });
+
+  test("on a database without the boundary tables the seed stops with a plain explanation", async () => {
+    const { PGlite } = await import("@electric-sql/pglite");
+    const db = new PGlite();
+    let msg = "";
+    try {
+      await db.exec(SEED);
+    } catch (e) {
+      msg = (e as { message?: string }).message ?? "";
+    }
+    expect(msg).toContain("Boundary seed cannot run");
+    await db.close();
+  });
+});
+
+// ===========================================================================
 // GIS-5 — offline tile strategy (within provider policy)
 // ===========================================================================
 describe("offline tile strategy", () => {

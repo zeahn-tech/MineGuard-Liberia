@@ -297,6 +297,15 @@ function validPolygon(c: unknown): boolean {
   return Array.isArray(c) && c.length >= 1 && c.every(validRing);
 }
 
+/** County names compared the way people write them: "River Cess" (the app's
+ *  list) and "Rivercess" (geoBoundaries) are the same county. Case, spaces and
+ *  punctuation are ignored; nothing fuzzier than that. */
+export function sameCountyName(a: string, b: string): boolean {
+  const squash = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
+  const x = squash(a);
+  return x.length > 0 && x === squash(b);
+}
+
 /** Client mirror of public.mg_valid_geojson_polygon (migration 0015). Accepts
  *  a geometry object or its JSON text. A bare Polygon/MultiPolygon only —
  *  Features/collections are rejected so one shape = one stored contract. */

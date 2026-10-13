@@ -32,6 +32,7 @@ import {
   symbolSvg,
   type ClusterOrPoint,
   type MapFilters,
+  sameCountyName,
 } from "@/lib/gis";
 import { tileAttribution, tileCrossOrigin, tileTemplate } from "@/lib/map-tiles";
 
@@ -143,7 +144,9 @@ export default function NationalMap() {
         ? adminBoundaries.filter(
             (b) =>
               levelAllowed(b.geoVerified) &&
-              (b.level !== "county" || !filters.counties.length || filters.counties.includes(b.name)),
+              (b.level !== "county" ||
+                !filters.counties.length ||
+                filters.counties.some((c) => sameCountyName(c, b.name))),
           )
         : [],
     [adminBoundaries, visibleLayers, filters.counties, levelAllowed],
@@ -158,6 +161,16 @@ export default function NationalMap() {
         visibleLayers,
       ),
     [layers, visibleFeatures, shownAdminBoundaries, shownSiteBoundaries, visibleLayers],
+  );
+
+  // Credit for the boundary data actually on screen (CC BY and similar licences
+  // require it): the distinct `source` of every boundary currently drawn.
+  const boundarySources = useMemo(
+    () =>
+      [...new Set([...shownAdminBoundaries, ...shownSiteBoundaries].map((b) => b.source.trim()))]
+        .filter(Boolean)
+        .sort(),
+    [shownAdminBoundaries, shownSiteBoundaries],
   );
 
   // Records loaded per layer (before toggles/filters) — shown on each toggle
@@ -439,6 +452,12 @@ export default function NationalMap() {
           </span>
         ))}
       </div>
+
+      {boundarySources.length > 0 && (
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Boundary data: {boundarySources.join(" · ")}
+        </p>
+      )}
 
       <p className="text-xs leading-relaxed text-muted-foreground">
         Community report locations are as reported by the public and have not been verified; they
