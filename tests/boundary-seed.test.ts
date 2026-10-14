@@ -43,29 +43,65 @@ describe("data integrity", () => {
     }
   });
 
-  test("PROVENANCE records the publisher's actual licence and source verbatim — and says it is NOT CC BY 4.0", () => {
+  describe("PROVENANCE.md — the publisher record, verbatim and complete", () => {
     const prov = readFileSync(join(DATA, "PROVENANCE.md"), "utf8");
-    // geoBoundaries API record (gbOpen / LBR / ADM1 and ADM2), as reported 2026-10-13
-    expect(prov).toContain("| `boundarySource` | UNMIL, OCHA ROWCA |");
-    expect(prov).toContain(
-      "| `boundaryLicense` | Creative Commons Attribution 3.0 Intergovernmental Organisations (CC BY 3.0 IGO) |",
-    );
-    expect(prov).toContain("| `buildDate` | Dec 12, 2023 |");
-    expect(prov).toContain("| `boundaryYearRepresented` | 2021 |");
-    // source URLs and the licence
-    expect(prov).toContain("https://www.geoboundaries.org/api/current/gbOpen/LBR/ADM1/");
-    expect(prov).toContain("https://www.geoboundaries.org/api/current/gbOpen/LBR/ADM2/");
-    expect(prov).toContain("https://data.humdata.org/dataset/cod-ab-lbr");
-    expect(prov).toContain("https://github.com/wmgeolab/geoBoundaries");
-    expect(prov).toContain("https://creativecommons.org/licenses/by/3.0/igo/");
-    // retrieval dates, attribution, and the explicit refusal to relabel
-    expect(prov).toContain("## 6. Retrieval");
-    expect(prov).toContain("2026-10-12");
-    expect(prov).toContain("2026-10-13");
-    expect(prov).toContain(`> ${ATTRIBUTION}`);
-    expect(prov).toContain("must not be described or labelled as CC BY 4.0");
-    // fields we do not have are marked as such, not guessed
-    expect(prov).toContain("NOT RECORDED");
+    const both = (field: string, value: string) => `| \`${field}\` | ${value} | ${value} |`;
+    const PINNED = "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/LBR";
+    const HDX = "https://data.humdata.org/dataset/liberia-admin-level-2-boundaries";
+
+    test("every field supplied from the official API is recorded exactly, for both ADM1 and ADM2", () => {
+      expect(prov).toContain(both("boundarySource", "UNMIL, OCHA ROWCA"));
+      expect(prov).toContain(
+        both("boundaryLicense", "Creative Commons Attribution 3.0 Intergovernmental Organisations (CC BY 3.0 IGO)"),
+      );
+      expect(prov).toContain(both("boundarySourceURL", HDX));
+      expect(prov).toContain(both("licenseSource", HDX));
+      expect(prov).toContain(both("buildDate", "Dec 12, 2023"));
+      expect(prov).toContain(both("boundaryYearRepresented", "2021"));
+      expect(prov).toContain(
+        `| \`downloadURL\` | ${PINNED}/ADM1/geoBoundaries-LBR-ADM1_simplified.geojson | ${PINNED}/ADM2/geoBoundaries-LBR-ADM2_simplified.geojson |`,
+      );
+      expect(prov).toContain("https://www.geoboundaries.org/api/current/gbOpen/LBR/ADM1/");
+      expect(prov).toContain("https://www.geoboundaries.org/api/current/gbOpen/LBR/ADM2/");
+    });
+
+    test("licenseDetail is the literal 'nan' — recorded as not specified, not interpreted", () => {
+      expect(prov).toContain("| `licenseDetail` | `nan` (not specified in the API) | `nan` (not specified in the API) |");
+      expect(prov).toContain("read as a permission or a restriction");
+    });
+
+    test("the verification evidence names the pinned commit and ties both files to it", () => {
+      expect(prov).toContain("9469f09592ced973a3448cf66b6100b741b64c0d");
+      expect(prov).toContain("Tue, 12 Dec 2023 23:03:07 -0500");
+      for (const oid of Object.values(PUBLISHED)) expect(prov).toContain(`${oid.slice(0, 8)}…${oid.slice(-7)}`);
+      expect(prov).toContain("**MATCH**");
+      expect(prov).toContain("byte-for-byte the files the publisher's");
+    });
+
+    test("what could NOT be confirmed is stated as such, never filled in", () => {
+      expect(prov).toContain("HTTP 429");
+      expect(prov).toContain("NOT RE-CONFIRMED");
+      expect(prov).toContain("NOT VERIFIED");
+      expect(prov).toContain("NOT STATED");
+      expect(prov).toContain("`____-__-__`"); // the retrieval date is a blank to be filled, not an invented date
+    });
+
+    test("the source build date and the metadata retrieval date are separate rows, and never mixed", () => {
+      const row = (label: string) => prov.split("\n").find((l) => l.startsWith(`| **${label}**`)) ?? "";
+      expect(row("Source build date")).toContain("Dec 12, 2023");
+      expect(row("Metadata retrieved from the API")).not.toContain("Dec 12, 2023");
+      expect(row("Metadata retrieved from the API")).toContain("NOT STATED");
+      expect(prov).toContain("## 4. Dates — kept separate");
+    });
+
+    test("the licence is kept as published and never relabelled; attribution and obligations are present", () => {
+      expect(prov).toContain("https://creativecommons.org/licenses/by/3.0/igo/");
+      expect(prov).toContain("must not\nbe described or labelled as CC BY 4.0");
+      expect(prov).toContain(`> ${ATTRIBUTION}`);
+      expect(prov).toContain("clearly identify that changes were made");
+      expect(prov).toContain("Do not state or imply");
+      expect(prov).toContain("https://doi.org/10.1371/journal.pone.0231866");
+    });
   });
 });
 

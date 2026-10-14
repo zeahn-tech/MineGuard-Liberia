@@ -3,7 +3,7 @@
 ## Quality gate [2026-10-11]
 
 **Status:** GREEN — `tsc -b` 0 errors, `eslint .` 0 errors / 0 warnings,
-`vite build` OK, `bun test` 547 pass / 4 skip (live-DB tests, need a real
+`vite build` OK, `bun test` 552 pass / 4 skip (live-DB tests, need a real
 project) / 0 fail.
 
 - **Data layer restored.** The 2026-10-09 "Rebuild backend.ts" reconstruction
@@ -82,6 +82,11 @@ project) / 0 fail.
   boundaryLicense CC BY 3.0 IGO; buildDate Dec 12, 2023; year represented 2021**
   — *not* CC BY 4.0 (an earlier help text and doc wording implied otherwise and
   were corrected; a test now fails if the app labels the data CC BY 4.0).
+  `PROVENANCE.md` completed 2026-10-13 with the full API record (source URL,
+  licence source, licenseDetail `nan`, pinned downloadURL) and a check that both
+  files are byte-identical to the files at the pinned commit `9469f09`
+  (build-date and counts consistent; the API itself returned HTTP 429 on
+  re-fetch, and the owner's retrieval date is recorded as not stated).
   Added: the data + `PROVENANCE.md`, a deterministic generator and idempotent
   SQL seed (`supabase/seeds/`) that stores the required attribution, county-name
   matching ("Rivercess"/"River Cess"), and an on-map credit line. Licence
