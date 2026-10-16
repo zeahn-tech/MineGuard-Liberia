@@ -3,7 +3,7 @@
 ## Quality gate [2026-10-11]
 
 **Status:** GREEN — `tsc -b` 0 errors, `eslint .` 0 errors / 0 warnings,
-`vite build` OK, `bun test` 552 pass / 4 skip (live-DB tests, need a real
+`vite build` OK, `bun test` 575 pass / 4 skip (live-DB tests, need a real
 project) / 0 fail.
 
 - **Data layer restored.** The 2026-10-09 "Rebuild backend.ts" reconstruction
@@ -93,6 +93,16 @@ project) / 0 fail.
   acceptance is an open institutional decision (doc 16). **Not yet loaded into
   the live project** (not reachable from the build environment) — apply
   migrations, then the seed (doc 06).
+- **Mobile blank map + "Still loading your account" (2026-10-13).** Both
+  reproduced in real headless Chromium against the built app. Blank map: a
+  0 px-tall Leaflet container in the phone (flex-column) layout — fixed.
+  Account loading: stalled reads waited forever with no retry, and the real
+  error was only in the console — every read now has a time limit and cancels
+  the stalled request, retries, re-reads at once when the tab is visible or the
+  connection returns, shows the real reason on screen, and offers "Sign out and
+  start over". Also: the service worker's navigation is bounded (5 s, then the
+  cached shell; v1.2.0) and a stale shell after a deploy reloads once
+  (`chunk-recovery`). Details and a diagnosis table: doc 14.
 - **Test hygiene.** The scale suite's 5,000-row teardown ran minutes under
   row triggers and was silently abandoned at the default hook timeout,
   leaving its fixture in the shared per-process DB; teardown now skips row

@@ -13,6 +13,9 @@ import { createClient, type Session, type SupabaseClient } from "@supabase/supab
 export const SUPABASE_URL = "https://ewukneoblhogtreeekqc.supabase.co";
 export const SUPABASE_ANON_KEY = "sb_publishable_g_SOzhE21n76m1-FAx-c5Q_CzUi7VMi";
 
+/** localStorage key of the auth session (also used to clear a poisoned one). */
+export const AUTH_STORAGE_KEY = "mg.supabase.auth.v1";
+
 export let supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
@@ -20,7 +23,7 @@ export let supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_K
     // Recovery links (Gap #4) restore their session from the URL — the token
     // exchange must run before the hash router claims the location.
     detectSessionInUrl: true,
-    storageKey: "mg.supabase.auth.v1",
+    storageKey: AUTH_STORAGE_KEY,
   },
   realtime: {
     params: { eventsPerSecond: 8 },
@@ -373,4 +376,24 @@ export function backendError(err: unknown): Error {
     }
   }
   return new Error(String(err) || "Unknown backend error");
+}
+
+/** Drop THIS device's sign-in and nothing else — the escape for a session that
+ *  will not load (stale refresh token, a stuck auth lock). Local scope: no
+ *  network call, so it works exactly when the connection does not. Offline
+ *  queue and drafts live under other keys and are left untouched. */
+export async function resetLocalSession(): Promise<void> {
+  try {
+    await Promise.race([
+      supabase.auth.signOut({ scope: "local" }),
+      new Promise((resolve) => setTimeout(resolve, 3000)), // a held lock must not trap us
+    ]);
+  } catch {
+    /* fall through to the direct removal below */
+  }
+  try {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+  } catch {
+    /* storage unavailable (private mode): nothing more to clear */
+  }
 }

@@ -7,6 +7,9 @@ import { createRoot } from "react-dom/client";
 import { HashRouter, Route, Routes } from "react-router";
 import { RequireStaff } from "@/components/RequireAuth";
 import "./index.css";
+import { installChunkRecovery } from "@/lib/chunk-recovery";
+
+installChunkRecovery();
 
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));

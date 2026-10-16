@@ -1,21 +1,31 @@
 import { useAuth } from "@/hooks/use-auth";
 import { isStaffRole, ROLES } from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import { getLoadProblems, subscribeLoadProblems } from "@/lib/backend";
+import { resetLocalSession } from "@/lib/supabase";
 import { Loader2 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Navigate, useLocation } from "react-router";
 
 /** Full-screen gate while auth resolves. BOUNDED: if the profile query
  *  cannot load (network/backend failure), the gate used to spin forever —
  *  the reported "loads forever" failure mode. After 12s it switches to an
- *  honest message with a retry; the query layer keeps retrying underneath,
- *  so a recovered backend lands the user straight in the portal. */
-function AuthLoading() {
+ *  honest message; the query layer keeps retrying underneath (and re-reads the
+ *  moment the tab is visible or the connection returns), so a recovered backend
+ *  lands the user straight in the portal.
+ *
+ *  The REAL reason is shown on screen — a phone has no console to look in — and
+ *  there is a recovery that changes something: "Try again" only reloads into
+ *  the same state, while "Sign out and start over" drops this device's session
+ *  (stale refresh token, stuck auth lock) without touching queued field work. */
+export function AuthLoading({ slowAfterMs = 12_000 }: { slowAfterMs?: number }) {
   const [slow, setSlow] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const problems = useSyncExternalStore(subscribeLoadProblems, getLoadProblems);
   useEffect(() => {
-    const t = setTimeout(() => setSlow(true), 12_000);
+    const t = setTimeout(() => setSlow(true), slowAfterMs);
     return () => clearTimeout(t);
-  }, []);
+  }, [slowAfterMs]);
 
   if (!slow) {
     return (
@@ -24,17 +34,38 @@ function AuthLoading() {
       </main>
     );
   }
+
+  const reason = problems.find((p) => p.scope === "profiles") ?? problems[0];
+  const startOver = async () => {
+    setResetting(true);
+    await resetLocalSession();
+    window.location.assign(`${window.location.pathname}${window.location.search}#/auth`);
+    window.location.reload();
+  };
   return (
     <main className="flex min-h-screen items-center justify-center bg-background p-6">
-      <div className="max-w-md text-center">
+      <div className="max-w-md text-center" role="alert">
         <p className="display text-lg">Still loading your account</p>
         <p className="mt-2 text-sm text-muted-foreground">
-          This is taking longer than usual. Check your connection and try
-          again — the exact error is logged in the browser console.
+          This is taking longer than usual. It keeps retrying in the background and will
+          continue by itself when the connection recovers.
         </p>
-        <Button className="mt-4" onClick={() => window.location.reload()}>
-          Try again
-        </Button>
+        <p className="mt-3 break-words text-xs text-muted-foreground" data-testid="auth-problem">
+          {reason
+            ? `What we found: ${reason.message} (${reason.scope})`
+            : "No answer from the server yet — check your connection."}
+        </p>
+        <div className="mt-4 flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
+          <Button onClick={() => window.location.reload()} disabled={resetting}>
+            Try again
+          </Button>
+          <Button variant="outline" onClick={() => void startOver()} disabled={resetting}>
+            {resetting ? "Signing out…" : "Sign out and start over"}
+          </Button>
+        </div>
+        <p className="mt-3 text-[11px] text-muted-foreground">
+          Signing out only affects this device. Work queued for upload stays on it.
+        </p>
       </div>
     </main>
   );

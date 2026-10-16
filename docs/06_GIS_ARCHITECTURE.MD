@@ -174,6 +174,20 @@ out.geojson in.shp`. Names are read at the deepest level a file carries
 (geoBoundaries `shapeName`, HDX `ADMn_EN`, GADM `NAME_n`), so a district row is
 named for the district, not its county.
 
+### The map on a phone (blank-map defect, fixed 2026-10-13)
+
+Reproduced in headless Chromium against the built app: at a phone viewport the
+Leaflet container measured **356 × 0 px** (blank), on desktop 638 × 478. Cause:
+stacked on a phone the layout is a flex *column*; the map wrapper was
+`h-[60vh] flex-1` with the map at `size-full` (`height: 100%`). In an auto-height
+column `flex-1` replaces the wrapper's height, and a child's percentage height
+does not resolve against it. The wrapper is now `relative h-[60vh] min-h-[420px]
+flex-none lg:flex-1` and the map is `absolute inset-0` — it no longer depends on
+a percentage resolving. After the fix: 356 × 504 px on the phone, desktop
+unchanged. `tests/map-layout.test.ts` pins the rule (layout itself cannot be
+measured without a browser). The other two maps (location picker, boundary
+preview) sit in plain fixed-height blocks and are unaffected.
+
 ### Why an edit may not show immediately — and the fix
 
 Screens read through a shared query cache that keeps a screen's last result for

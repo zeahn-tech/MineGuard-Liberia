@@ -101,6 +101,47 @@ design:**
 Rollback: redeploy the previous known-good artifact (Pages keeps deployment
 history) and, for data-level incidents, the restore path below.
 
+## Phones, weak connections, and "Still loading your account" [HARDENED 2026-10-13]
+
+**Reproduced** in a real browser (headless Chromium, phone viewport, the built
+app with its network answered locally). Two defects, both fixed:
+
+1. **A stalled request waited forever.** When the profile read neither succeeded
+   nor failed (mobile data, captive Wi-Fi, a tab waking from the background) the
+   app made *one* request in 17 s and never retried — the retry loop only ran
+   after a thrown error. Every read now has a time limit (15 s for a single row,
+   30 s for lists, 60 s for the map's multi-table feed), the stalled request is
+   **cancelled**, and it retries with backoff. When the tab becomes visible or
+   the connection returns, a failed or stale read re-runs immediately, and a
+   read that has been stalled for several seconds is replaced instead of awaited.
+2. **The real reason was only in a console.** Phones have none. The screen now
+   shows "What we found: …" with the actual message and the table it concerned,
+   and a **Sign out and start over** button (drops this device's sign-in only —
+   queued offline work is untouched), because **Try again** just reloads into
+   the same state.
+
+Reading the message:
+
+| "What we found" | Meaning | Do |
+|---|---|---|
+| *The server did not answer within N seconds.* | Network stall, or the Supabase project is **paused** (free projects pause when idle) | Check the project is *Active*; it keeps retrying and continues by itself when reachable |
+| *Load failed* / *Failed to fetch* | The device cannot reach the server (offline, blocked, wrong URL/key) | Check the connection; verify `src/lib/supabase.ts` points at the right project |
+| *JWT expired* / *Invalid Refresh Token* / auth messages | A stale or poisoned session on this device | **Sign out and start over** |
+| *permission denied for table …* / *relation … does not exist* | Database side: policies or migrations | Run `supabase/checks/migration_state.sql`, apply what is missing |
+| *The server returned an error page instead of data.* | A gateway/CDN error (HTML) in front of Supabase | Check Supabase status; retry later |
+| *(no message yet)* | Nothing has come back yet | Wait; the screen updates by itself |
+
+Other phone-specific protections added with it:
+
+* **Service worker navigation is bounded.** It stays network-first, but a page
+  request that has not answered within 5 s now shows the cached shell (and keeps
+  refreshing the cache in the background) instead of leaving a blank page. The
+  worker version is `v1.2.0`; older shell caches are purged on activate.
+* **Stale app shell after a deploy.** A phone holding the old shell asks for page
+  chunks that no longer exist (blank screen). One automatic reload per session
+  fetches the new shell (`vite:preloadError`, `src/lib/chunk-recovery.ts`); it
+  never loops.
+
 ## Applying migrations safely [INCIDENT 2026-10-11 → HARDENED]
 
 **The only database this app uses is Supabase project ref

@@ -12,7 +12,7 @@
  * Version bump busts the cache on deploy.
  * ------------------------------------------------------------------------- */
 
-const VERSION = "v1.1.0";
+const VERSION = "v1.2.0";
 const CACHE = `mineguard-shell-${VERSION}`;
 
 // ---- Map tiles (GIS-5) — keep in sync with src/lib/map-tiles.ts (pinned by
@@ -145,6 +145,48 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+/** How long a page request may stall before the cached shell is shown instead. */
+const NAV_NETWORK_TIMEOUT_MS = 5000;
+
+/** Network-first for the app shell, but BOUNDED. A plain network-first fetch has
+ *  no time limit: on a stalled mobile connection (weak signal, captive Wi-Fi,
+ *  a tab waking from the background) the page request just hangs and the user
+ *  stares at a blank screen while a perfectly good cached shell sits unused.
+ *  Here the network still wins when it answers; if it has not answered within
+ *  NAV_NETWORK_TIMEOUT_MS and a cached shell exists, the shell is shown and the
+ *  request carries on in the background to refresh the cache for next time.
+ *  With no cached shell there is nothing to fall back to, so it keeps waiting. */
+function navigationResponse(req) {
+  const cachedShell = () =>
+    caches.match("./index.html").then((r) => r || caches.match("./"));
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (res) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(res);
+    };
+    const timer = setTimeout(() => {
+      cachedShell().then((r) => {
+        if (r) settle(r);
+      });
+    }, NAV_NETWORK_TIMEOUT_MS);
+    fetch(req).then(
+      (res) => {
+        // Only cache a good shell — never a 404/500 page (even when it arrives
+        // after the cached shell was already shown).
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put("./index.html", copy));
+        }
+        settle(res);
+      },
+      () => cachedShell().then((r) => settle(r || Response.error())),
+    );
+  });
+}
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
@@ -162,20 +204,7 @@ self.addEventListener("fetch", (event) => {
 
   // Navigations: network first, fall back to the cached shell.
   if (req.mode === "navigate") {
-    event.respondWith(
-      fetch(req)
-        .then((res) => {
-          // Only cache a good shell — never a 404/500 page.
-          if (res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put("./index.html", copy));
-          }
-          return res;
-        })
-        .catch(() =>
-          caches.match("./index.html").then((r) => r || caches.match("./")),
-        ),
-    );
+    event.respondWith(navigationResponse(req));
     return;
   }
 

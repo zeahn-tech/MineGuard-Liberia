@@ -303,8 +303,14 @@ export default function NationalMap() {
       </div>
 
       <div className="flex flex-col gap-4 lg:flex-row">
-        <div className="h-[60vh] min-h-[420px] flex-1 overflow-hidden rounded-sm border border-border">
-          <MapContainer center={LIBERIA_CENTER} zoom={7} scrollWheelZoom className="size-full">
+        {/* The map must never depend on a PERCENTAGE height resolving: in the
+            stacked (phone) layout this wrapper is a flex item of an auto-height
+            column, where `flex-1` replaces its height and `height: 100%` on a
+            child resolves to 0 — Leaflet then renders a 0px-tall (blank) map.
+            So: a fixed height, no flex growth in the column, and the map is
+            positioned to fill the wrapper (it needs no resolved % height). */}
+        <div className="relative h-[60vh] min-h-[420px] flex-none overflow-hidden rounded-sm border border-border lg:flex-1">
+          <MapContainer center={LIBERIA_CENTER} zoom={7} scrollWheelZoom className="absolute inset-0">
             {/* Offline tiles: see src/lib/map-tiles.ts + public/sw.js — viewed
              *  tiles inside Liberia are cached (bounded, no prefetch) per the
              *  provider's tile usage policy; VITE_TILE_URL swaps in a licensed

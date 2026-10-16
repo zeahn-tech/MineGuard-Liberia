@@ -1036,12 +1036,186 @@ export function refreshMapFeatures(): void {
   notifyLocalWrite(...MAP_TABLES);
 }
 
+// ---------------------------------------------------------------------------
+// READ RELIABILITY — a stalled request must never leave a screen waiting forever
+//
+// On mobile data, captive Wi-Fi, a tab resuming from the background or a held
+// auth lock, a request can STALL: it neither succeeds nor fails. The retry
+// loops below only re-ran after a thrown error, so a stalled first read left
+// `inFlight` set forever — one request, no retry, a permanent "Still loading
+// your account". Every read now has a time limit, the real reason is recorded
+// for the screen to show (a phone has no console), and a returning tab or a
+// restored connection re-reads immediately instead of waiting out a backoff.
+// ---------------------------------------------------------------------------
+
+const DOC_READ_TIMEOUT_MS = 15_000; // one small row (profile, site)
+const LIST_READ_TIMEOUT_MS = 30_000; // paged lists / multi-table feeds
+/** Re-read on resume only when the last good read is older than this. */
+const RESUME_STALE_MS = 60_000;
+/** A read already in flight for this long when the tab returns is presumed
+ *  dead (the OS froze the page and its sockets) and is replaced, not awaited. */
+const RESUME_STALL_MS = 5_000;
+
+let testReadTimeoutMs: number | null = null;
+/** TEST HOOK ONLY: shrink every read time limit so a stall is observable. */
+export function __testSetReadTimeout(ms: number | null): void {
+  testReadTimeoutMs = ms;
+}
+const readTimeout = (fallback: number, requested?: number) =>
+  testReadTimeoutMs ?? requested ?? fallback;
+
+export class ReadTimeoutError extends Error {
+  constructor(ms: number) {
+    super(
+      `The server did not answer within ${ms >= 1000 ? Math.round(ms / 1000) : ms / 1000} seconds.`,
+    );
+    this.name = "ReadTimeoutError";
+  }
+}
+
+/** Lets the caller give up on an attempt early (see the resume handlers). */
+interface Abandonable {
+  abandon?: () => void;
+}
+
+/** Race `work` against a time limit. `onTimeout` should cancel the request
+ *  (abort its signal) so the socket is freed, not just abandoned. */
+function withReadTimeout<T>(
+  work: PromiseLike<T>,
+  ms: number,
+  onTimeout?: () => void,
+  handle?: Abandonable,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let done = false;
+    const finish = (settle: () => void) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      settle();
+    };
+    const timer = setTimeout(
+      () =>
+        finish(() => {
+          onTimeout?.();
+          reject(new ReadTimeoutError(ms));
+        }),
+      ms,
+    );
+    if (handle) {
+      handle.abandon = () =>
+        finish(() => {
+          onTimeout?.();
+          reject(
+            new Error(
+              "The request was interrupted (the app was in the background or the connection changed).",
+            ),
+          );
+        });
+    }
+    Promise.resolve(work).then(
+      (v) => finish(() => resolve(v)),
+      (e) => finish(() => reject(e)),
+    );
+  });
+}
+
+// ---- what went wrong, for the screen -------------------------------------
+
+export interface LoadProblem {
+  /** The table(s) being read, e.g. "profiles". */
+  scope: string;
+  /** Plain message — never a URL or a credential. */
+  message: string;
+  at: number;
+}
+
+const loadProblems = new Map<string, LoadProblem>();
+let loadProblemSnapshot: readonly LoadProblem[] = [];
+const loadProblemListeners = new Set<() => void>();
+
+function emitLoadProblems(): void {
+  // A NEW array each change: useSyncExternalStore needs a stable snapshot
+  // identity between changes and a different one after.
+  loadProblemSnapshot = [...loadProblems.values()].sort((a, b) => b.at - a.at);
+  for (const l of [...loadProblemListeners]) l();
+}
+
+function describeProblem(err: unknown): string {
+  let raw =
+    err instanceof Error ? err.message : typeof err === "string" ? err : "Unknown error";
+  const text = raw.trim();
+  if (text.startsWith("{")) {
+    // A server error body that arrived as text: show its message (and code),
+    // not the JSON.
+    try {
+      const body = JSON.parse(text) as { message?: unknown; code?: unknown };
+      if (typeof body.message === "string" && body.message.trim()) {
+        raw = typeof body.code === "string" && body.code ? `${body.message} (${body.code})` : body.message;
+      }
+    } catch {
+      /* not JSON after all — fall through with the text as is */
+    }
+  } else if (/^<(!doctype|html|\?xml)/i.test(text)) {
+    // A gateway/CDN error page: never paste markup onto a phone screen.
+    raw = "The server returned an error page instead of data.";
+  }
+  return raw.replace(/\s+/g, " ").trim().slice(0, 200) || "Unknown error";
+}
+
+function reportLoadProblem(scope: string, err: unknown): void {
+  loadProblems.set(scope, { scope, message: describeProblem(err), at: Date.now() });
+  emitLoadProblems();
+}
+
+function clearLoadProblem(scope: string): void {
+  if (loadProblems.delete(scope)) emitLoadProblems();
+}
+
+export function getLoadProblems(): readonly LoadProblem[] {
+  return loadProblemSnapshot;
+}
+
+export function subscribeLoadProblems(listener: () => void): () => void {
+  loadProblemListeners.add(listener);
+  return () => {
+    loadProblemListeners.delete(listener);
+  };
+}
+
+// ---- resume: tab visible again / connection restored ---------------------
+
+const resumeListeners = new Set<() => void>();
+
+function onResume(listener: () => void): () => void {
+  resumeListeners.add(listener);
+  return () => {
+    resumeListeners.delete(listener);
+  };
+}
+
+export function notifyResume(): void {
+  for (const l of [...resumeListeners]) l();
+}
+
+if (typeof window !== "undefined" && typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") notifyResume();
+  });
+  window.addEventListener("online", notifyResume);
+  // Restored from the back/forward cache: timers were frozen, sockets are dead.
+  window.addEventListener("pageshow", (e) => {
+    if ((e as PageTransitionEvent).persisted) notifyResume();
+  });
+}
+
 function live<T>(
   fetcher: () => Promise<T>,
   watch: string[],
-  opts?: { authBound?: boolean },
+  opts?: { authBound?: boolean; timeoutMs?: number },
 ): QueryHandle<T> {
   const authBound = opts?.authBound !== false;
+  const scope = watch.join(",") || "data";
   return {
     authBound,
     subscribe(cb) {
@@ -1051,6 +1225,10 @@ function live<T>(
       let timer: ReturnType<typeof setTimeout> | null = null;
       let retryTimer: ReturnType<typeof setTimeout> | null = null;
       let attempts = 0;
+      let failing = false;
+      let lastOkAt = 0;
+      let inFlightSince = 0;
+      const attemptHandle: Abandonable = {};
       const unsubs: (() => void)[] = [];
       let watchersReady = false;
 
@@ -1064,6 +1242,29 @@ function live<T>(
       };
       const offLocalWrite = onLocalWrite((tables) => {
         if (tables.some((t) => watch.includes(t))) onWatchEvent();
+      });
+      // Tab visible again / connection restored: don't wait out a backoff (or a
+      // dead request) — re-read now if the last read failed or has gone stale.
+      const offResume = onResume(() => {
+        if (cancelled) return;
+        const stalled =
+          inFlight &&
+          Date.now() - inFlightSince >
+            Math.min(RESUME_STALL_MS, readTimeout(LIST_READ_TIMEOUT_MS, opts?.timeoutMs) / 3);
+        if (!stalled && !failing && Date.now() - lastOkAt < RESUME_STALE_MS) return;
+        attempts = 0;
+        if (retryTimer) {
+          clearTimeout(retryTimer);
+          retryTimer = null;
+        }
+        if (stalled) {
+          // Replace the dead attempt: abandoning it ends the in-flight run, and
+          // `dirty` makes that run start the fresh one straight away.
+          dirty = true;
+          attemptHandle.abandon?.();
+          return;
+        }
+        void run();
       });
 
       const setupWatchers = () => {
@@ -1096,15 +1297,26 @@ function live<T>(
           return;
         }
         inFlight = true;
+        inFlightSince = Date.now();
         try {
-          const value = await fetcher();
+          const value = await withReadTimeout(
+            fetcher(),
+            readTimeout(LIST_READ_TIMEOUT_MS, opts?.timeoutMs),
+            undefined,
+            attemptHandle,
+          );
           if (!cancelled) {
             attempts = 0;
+            failing = false;
+            lastOkAt = Date.now();
+            clearLoadProblem(scope);
             cb(value);
           }
         } catch (err) {
           console.error("[backend] query failed:", err);
           if (!cancelled) {
+            failing = true;
+            reportLoadProblem(scope, err);
             cb(undefined); // no value yet — consumers stay in "loading"
             // SELF-HEAL: without this retry the FIRST failure bricked the
             // screen forever — the shared cache reads the error's
@@ -1113,10 +1325,13 @@ function live<T>(
             // 1s, 2s, 4s, 8s, 16s, then every 30s.
             attempts += 1;
             const delay = Math.min(30_000, 1_000 * 2 ** Math.min(attempts, 5));
-            retryTimer = setTimeout(() => {
-              retryTimer = null;
-              void run();
-            }, delay);
+            // A re-run is already queued (`dirty`): don't also schedule a backoff.
+            if (!dirty) {
+              retryTimer = setTimeout(() => {
+                retryTimer = null;
+                void run();
+              }, delay);
+            }
           }
         } finally {
           inFlight = false;
@@ -1134,6 +1349,7 @@ function live<T>(
       return () => {
         cancelled = true;
         offLocalWrite();
+        offResume();
         if (timer) clearTimeout(timer);
         if (retryTimer) clearTimeout(retryTimer);
         for (const u of unsubs) u();
@@ -1167,6 +1383,10 @@ function liveDoc<T>(
       let dirty = false;
       let retryTimer: ReturnType<typeof setTimeout> | null = null;
       let attempts = 0;
+      let failing = false;
+      let lastOkAt = 0;
+      let inFlightSince = 0;
+      const attemptHandle: Abandonable = {};
 
       const onWatchEvent = () => {
         if (cancelled) return;
@@ -1180,6 +1400,29 @@ function liveDoc<T>(
       const offLocalWrite = onLocalWrite((tables) => {
         if (tables.includes(table)) onWatchEvent();
       });
+      // Tab visible again / connection restored: re-read now if the last read
+      // failed or has gone stale, instead of waiting out a backoff.
+      const offResume = onResume(() => {
+        if (cancelled) return;
+        const stalled =
+          inFlight &&
+          Date.now() - inFlightSince >
+            Math.min(RESUME_STALL_MS, readTimeout(DOC_READ_TIMEOUT_MS) / 3);
+        if (!stalled && !failing && Date.now() - lastOkAt < RESUME_STALE_MS) return;
+        attempts = 0;
+        if (retryTimer) {
+          clearTimeout(retryTimer);
+          retryTimer = null;
+        }
+        if (stalled) {
+          // Replace the dead attempt: abandoning it ends the in-flight run, and
+          // `dirty` makes that run start the fresh one straight away.
+          dirty = true;
+          attemptHandle.abandon?.();
+          return;
+        }
+        void run();
+      });
 
       const run = async () => {
         if (inFlight) {
@@ -1187,31 +1430,49 @@ function liveDoc<T>(
           return;
         }
         inFlight = true;
+        inFlightSince = Date.now();
+        // The request is CANCELLED on timeout (not merely abandoned), so a
+        // stalled socket is freed and the retry starts clean.
+        const abort = new AbortController();
         try {
-          const { data, error } = await supabase
-            .from(table)
-            .select("*")
-            .eq(column, value)
-            .maybeSingle();
+          const { data, error } = await withReadTimeout(
+            supabase
+              .from(table)
+              .select("*")
+              .eq(column, value)
+              .abortSignal(abort.signal)
+              .maybeSingle(),
+            readTimeout(DOC_READ_TIMEOUT_MS),
+            () => abort.abort(),
+            attemptHandle,
+          );
           if (error) throw backendError(error);
           const v = data ? mapRow(data) : null;
           if (!cancelled) {
             attempts = 0;
+            failing = false;
+            lastOkAt = Date.now();
+            clearLoadProblem(table);
             cb(v);
           }
         } catch (err) {
           console.error("[backend] doc query failed:", err);
           if (!cancelled) {
+            failing = true;
+            reportLoadProblem(table, err);
             // An ERROR is not "no row": emitting null here pushed signed-in
             // users into the wrong empty state ("no portal role assigned")
             // on a transient failure. Stay silent — the document keeps
             // loading — and retry with the same capped backoff.
             attempts += 1;
             const delay = Math.min(30_000, 1_000 * 2 ** Math.min(attempts, 5));
-            retryTimer = setTimeout(() => {
-              retryTimer = null;
-              void run();
-            }, delay);
+            // A re-run is already queued (`dirty`): don't also schedule a backoff.
+            if (!dirty) {
+              retryTimer = setTimeout(() => {
+                retryTimer = null;
+                void run();
+              }, delay);
+            }
           }
         } finally {
           inFlight = false;
@@ -1248,6 +1509,7 @@ function liveDoc<T>(
       return () => {
         cancelled = true;
         offLocalWrite();
+        offResume();
         if (timer) clearTimeout(timer);
         if (retryTimer) clearTimeout(retryTimer);
         for (const u of unsubs) u();
@@ -3539,7 +3801,8 @@ export const api = {
         "admin_boundaries",
         "site_boundaries",
       ],
-      { authBound: true },
+      // Seven tables, paged: legitimately slower than a single-row read.
+      { authBound: true, timeoutMs: 60_000 },
     ),
 };
 

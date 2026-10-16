@@ -42,11 +42,13 @@ function makeCaches() {
     if (!stores.has(name)) stores.set(name, new Map());
     const store = stores.get(name)!;
     return {
-      put: async (req: FakeRequest, res: Response) => {
-        store.delete(req.url); // re-put refreshes recency, like the real API
-        store.set(req.url, res);
+      put: async (req: FakeRequest | string, res: Response) => {
+        const key = typeof req === "string" ? req : req.url;
+        store.delete(key); // re-put refreshes recency, like the real API
+        store.set(key, res);
       },
-      match: async (req: FakeRequest) => store.get(req.url)?.clone(),
+      match: async (req: FakeRequest | string) =>
+        store.get(typeof req === "string" ? req : req.url)?.clone(),
       keys: async () => [...store.keys()].map((url) => ({ url })),
       delete: async (key: { url: string }) => store.delete(key.url),
     };
@@ -57,7 +59,11 @@ function makeCaches() {
       open,
       keys: async () => [...stores.keys()],
       delete: async (n: string) => stores.delete(n),
-      match: async () => undefined,
+      match: async (req: FakeRequest | string) => {
+        const key = typeof req === "string" ? req : req.url;
+        for (const store of stores.values()) if (store.has(key)) return store.get(key)!.clone();
+        return undefined;
+      },
     },
   };
 }
@@ -66,6 +72,8 @@ function loadWorker(fetchImpl: (req: FakeRequest) => Promise<Response>) {
   const listeners: Record<string, (e: unknown) => void> = {};
   const caches = makeCaches();
   let fetchCalls = 0;
+  const timers = new Map<number, () => void>();
+  let timerId = 0;
   const sandbox = {
     self: {
       addEventListener: (type: string, fn: (e: unknown) => void) => {
@@ -84,7 +92,16 @@ function loadWorker(fetchImpl: (req: FakeRequest) => Promise<Response>) {
     Math,
     Number,
     Promise,
+    Response,
     console,
+    // Timers the test fires by hand, so a 5 s stall is simulated instantly.
+    setTimeout: (fn: () => void) => {
+      timers.set(++timerId, fn);
+      return timerId;
+    },
+    clearTimeout: (id: number) => {
+      timers.delete(id);
+    },
   };
   vm.runInNewContext(SW_SOURCE, sandbox);
 
@@ -103,7 +120,18 @@ function loadWorker(fetchImpl: (req: FakeRequest) => Promise<Response>) {
   return {
     dispatch,
     tileStore: () => caches.stores.get(TILE_CACHE_NAME) ?? new Map<string, Response>(),
+    shellStore: () =>
+      [...caches.stores.entries()].find(([name]) => name.startsWith("mineguard-shell-"))?.[1] ??
+      new Map<string, Response>(),
     fetchCalls: () => fetchCalls,
+    /** Fire every pending timer (i.e. "the time limit has now elapsed"). */
+    fireTimers: () => {
+      for (const [id, fn] of [...timers]) {
+        timers.delete(id);
+        fn();
+      }
+    },
+    pendingTimers: () => timers.size,
   };
 }
 
@@ -219,5 +247,111 @@ describe("tileCrossOrigin (tiles must be readable to be cacheable)", () => {
   test("an unknown third-party host is left in default mode (it may not send CORS headers)", () => {
     expect(tileCrossOrigin("https://tiles.example.org/{z}/{x}/{y}.png", page)).toBeUndefined();
     expect(tileCrossOrigin("https://tiles.example.org/{z}/{x}/{y}.png", undefined)).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The app shell: network-first, but a stalled network must not hold the page
+// hostage (a phone on weak data stared at a blank screen while a good cached
+// shell sat unused).
+// ---------------------------------------------------------------------------
+describe("service worker navigation (executed)", () => {
+  const NAV = { url: `${ORIGIN}/`, mode: "navigate", destination: "document" };
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  const text = async (res: Response | null) => (res ? await res.text() : null);
+
+  /** A fetch the test settles by hand. */
+  function deferredFetch() {
+    let resolve!: (r: Response) => void;
+    let reject!: (e: unknown) => void;
+    const p = new Promise<Response>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { fetch: () => p, resolve, reject };
+  }
+
+  test("when the network answers, the page comes from the network and the shell is refreshed", async () => {
+    const w = loadWorker(async () => new Response("fresh shell"));
+    const res = await w.dispatch(NAV);
+    expect(await text(res)).toBe("fresh shell");
+    await flush();
+    expect(await w.shellStore().get("./index.html")?.text()).toBe("fresh shell");
+  });
+
+  test("a STALLED network falls back to the cached shell after the time limit — and still refreshes the cache when it finally answers", async () => {
+    // One worker: the first visit succeeds (seeding the cache), the second stalls.
+    let mode: "ok" | "stall" = "ok";
+    let release!: (r: Response) => void;
+    const w = loadWorker(() =>
+      mode === "ok"
+        ? Promise.resolve(new Response("old shell"))
+        : new Promise<Response>((r) => {
+            release = r;
+          }),
+    );
+    expect(await text(await w.dispatch(NAV))).toBe("old shell");
+    await flush();
+
+    mode = "stall";
+    const pending = w.dispatch(NAV);
+    w.fireTimers(); // the time limit elapses with no answer
+    expect(await text(await pending)).toBe("old shell"); // shown instead of a blank page
+
+    release(new Response("new shell")); // the network eventually answers…
+    await flush();
+    await flush();
+    expect(await w.shellStore().get("./index.html")?.text()).toBe("new shell"); // …and refreshes the cache
+  });
+
+  test("with NO cached shell there is nothing to fall back to, so it keeps waiting for the network", async () => {
+    const net = deferredFetch();
+    const w = loadWorker(net.fetch);
+    let settled = false;
+    const pending = w.dispatch(NAV).then((r) => {
+      settled = true;
+      return r;
+    });
+    w.fireTimers();
+    await flush();
+    expect(settled).toBe(false); // not resolved with `undefined`
+    net.resolve(new Response("first ever shell"));
+    expect(await text(await pending)).toBe("first ever shell");
+  });
+
+  test("an offline failure serves the cached shell; with nothing cached it is a real error", async () => {
+    let online = true;
+    const w = loadWorker(async () => {
+      if (!online) throw new TypeError("offline");
+      return new Response("shell");
+    });
+    expect(await text(await w.dispatch(NAV))).toBe("shell");
+    await flush();
+    online = false;
+    expect(await text(await w.dispatch(NAV))).toBe("shell");
+
+    const empty = loadWorker(async () => {
+      throw new TypeError("offline");
+    });
+    const res = (await empty.dispatch(NAV)) as Response;
+    expect(res.type).toBe("error");
+  });
+
+  test("a server error page is shown to the user but never becomes the cached shell", async () => {
+    let status = 200;
+    const w = loadWorker(async () => new Response(status === 200 ? "good shell" : "Bad Gateway", { status }));
+    expect(await text(await w.dispatch(NAV))).toBe("good shell");
+    await flush();
+    status = 502;
+    const res = (await w.dispatch(NAV)) as Response;
+    expect(res.status).toBe(502);
+    await flush();
+    expect(await w.shellStore().get("./index.html")?.text()).toBe("good shell");
+  });
+
+  test("an answered request leaves no timer behind", async () => {
+    const w = loadWorker(async () => new Response("shell"));
+    await w.dispatch(NAV);
+    expect(w.pendingTimers()).toBe(0);
   });
 });

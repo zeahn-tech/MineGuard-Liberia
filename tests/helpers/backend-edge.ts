@@ -449,6 +449,12 @@ class WireQuery {
     return this;
   }
 
+  /** Parity with supabase-js (`.abortSignal()`): the in-process Postgres has no
+   *  socket to cancel, so the signal is accepted and not acted on. */
+  abortSignal(_signal: AbortSignal) {
+    return this;
+  }
+
   /** PostgREST Range header: `Range: from-to` (inclusive) → LIMIT/OFFSET.
    *  SEC-4's paged reads (pagedRows/allRows) depend on this — it is how
    *  the app fetches past the row cap instead of silently truncating. */
