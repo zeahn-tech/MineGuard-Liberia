@@ -101,6 +101,42 @@ design:**
 Rollback: redeploy the previous known-good artifact (Pages keeps deployment
 history) and, for data-level incidents, the restore path below.
 
+## Making someone an administrator [ADDED 2026-10-13]
+
+**Symptom:** an account that should be an administrator opens the **operator**
+screen. **Cause:** the app routes by `public.profiles.role`; a profile whose role
+is `operator` goes to `#/operate`, an `admin` goes to `#/portal` (confirmed in
+the real app). MineGuard has no `users.system_role` / `platform_admin` — SQL
+written for another application's schema (e.g. `update public.users set
+system_role = 'platform_admin' …`) changes nothing here, and, run in a different
+Supabase project, changes *that* project's data instead. Always confirm the
+dashboard URL contains the project ref from `src/lib/supabase.ts`
+(`ewukneoblhogtreeekqc`) before running anything.
+
+Procedure:
+
+1. The person signs in to MineGuard once — **Create account** on the Staff
+   sign-in page if they have none. That creates their row in `public.profiles`.
+2. In the SQL Editor of the **MineGuard project**, check the current state:
+   ```sql
+   select id, email, role, scope, county, operator_name, profile_complete
+     from public.profiles
+    where lower(email) = lower('person@example.org');
+   ```
+   No row = step 1 was not done (or this is the wrong project).
+3. Run `supabase/maintenance/promote_to_admin.sql` after editing its single
+   email line (or via `bun scripts/db-sql.ts supabase/maintenance/promote_to_admin.sql`).
+   It sets `role = 'admin'`, `scope = 'national'`, clears `county` /
+   `operator_name` (which also removes an operator's organisation link), and
+   marks the profile complete. It returns the updated row; **zero rows means no
+   profile matched** and nothing changed. It is recorded in the audit trail and
+   is safe to run twice. (`tests/admin-promotion.test.ts` runs it against the real
+   schema.)
+4. The person **signs out and back in** (the role is read at sign-in).
+
+After the first admin exists, further roles are managed in the app itself
+(Users page → set role), not in SQL.
+
 ## Phones, weak connections, and "Still loading your account" [HARDENED 2026-10-13]
 
 **Reproduced** in a real browser (headless Chromium, phone viewport, the built

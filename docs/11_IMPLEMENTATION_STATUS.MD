@@ -3,7 +3,7 @@
 ## Quality gate [2026-10-11]
 
 **Status:** GREEN — `tsc -b` 0 errors, `eslint .` 0 errors / 0 warnings,
-`vite build` OK, `bun test` 575 pass / 4 skip (live-DB tests, need a real
+`vite build` OK, `bun test` 582 pass / 4 skip (live-DB tests, need a real
 project) / 0 fail.
 
 - **Data layer restored.** The 2026-10-09 "Rebuild backend.ts" reconstruction
@@ -103,6 +103,12 @@ project) / 0 fail.
   start over". Also: the service worker's navigation is bounded (5 s, then the
   cached shell; v1.2.0) and a stale shell after a deploy reloads once
   (`chunk-recovery`). Details and a diagnosis table: doc 14.
+- **"Promoted to admin but still on the operator screen" (2026-10-13).** The
+  SQL used another application's schema (`users.system_role`); MineGuard routes
+  by `profiles.role` (operator -> `#/operate`, admin -> `#/portal`, verified in
+  the real app). Added `supabase/maintenance/promote_to_admin.sql` (single email
+  edit, tested on the real schema incl. org-link clearing and audit) and the
+  procedure in doc 14.
 - **Test hygiene.** The scale suite's 5,000-row teardown ran minutes under
   row triggers and was silently abandoned at the default hook timeout,
   leaving its fixture in the shared per-process DB; teardown now skips row
