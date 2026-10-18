@@ -652,8 +652,9 @@ const RPC_SPECS: Record<string, RpcSpec> = {
   mg_command_center_stats: { fn: "mg_command_center_stats", args: [] },
   // SEC-4 v2 (migration 0014): scale surfaces — SECURITY INVOKER aggregation
   // and keyset pages. Named args only (PostgREST named-notation contract).
-  mg_risk_scores: { fn: "mg_risk_scores", args: [] },
-  mg_risk_explanation: { fn: "mg_risk_explanation", args: ["p_site_id"] },
+  // 0019 (RSK-1/2): both take the optional (version, as_of) config selectors.
+  mg_risk_scores: { fn: "mg_risk_scores", args: ["p_version", "p_as_of"] },
+  mg_risk_explanation: { fn: "mg_risk_explanation", args: ["p_site_id", "p_version", "p_as_of"] },
   mg_incidents_page: { fn: "mg_incidents_page", args: ["p_before", "p_before_id", "p_limit"] },
   mg_inspections_page: { fn: "mg_inspections_page", args: ["p_before", "p_before_id", "p_limit"] },
   mg_compliance_page: { fn: "mg_compliance_page", args: ["p_before", "p_before_id", "p_limit"] },

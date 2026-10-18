@@ -59,16 +59,18 @@ describe("migrations apply to a clean database", () => {
       );
       // 14 domain tables + evidence_url_audit (0006) + 0010's four
       // (organizations, admin_areas, site_assignments, permissions) + 0015's
-      // two GIS boundary tables (admin_boundaries, site_boundaries).
-      expect(Number(scalar(tables))).toBe(21);
+      // two GIS boundary tables (admin_boundaries, site_boundaries) + 0019's
+      // risk_config_versions.
+      expect(Number(scalar(tables))).toBe(22);
 
       const rls = await one(
         run,
         `select count(*) from pg_tables
           where schemaname = 'public' and rowsecurity = true`,
       );
-      // every table above has RLS, including 0015's two boundary tables
-      expect(Number(scalar(rls))).toBe(21);
+      // every table above has RLS, including 0015's two boundary tables and
+      // 0019's risk_config_versions
+      expect(Number(scalar(rls))).toBe(22);
 
       const guards = await one(
         run,
@@ -454,8 +456,9 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
     expect(Number(trig.rows[0]?.touch)).toBe(11);
     // …and organizations + site_assignments join the audit trail: exactly one
     // row per mutation, one trigger per table. 0015 adds the two boundary
-    // tables (admin_boundaries, site_boundaries) to the trail.
-    expect(Number(trig.rows[0]?.audit)).toBe(14);
+    // tables (admin_boundaries, site_boundaries) to the trail; 0019 adds
+    // risk_config_versions (one audit row per published version).
+    expect(Number(trig.rows[0]?.audit)).toBe(15);
     // "audit append" (0001) stays gone; only the staff-read policy remains.
     const pol = await db.query<{ n: string }>(
       `select count(*)::text as n from pg_policies
@@ -646,10 +649,10 @@ describe("0010 organizations, scopes & permissions (SEC-5/SITE-1)", () => {
     const first = await snapshot();
     await db.exec(sql);
     expect(await snapshot()).toEqual(first);
-    // The matrix seeds exactly once (10 admin + 4 supervisor + 3 inspector
-    // + 1 operator) — the unique constraint is the backstop, the count is
-    // the drift alarm.
-    expect(Number(first.perms)).toBe(18);
+    // The matrix seeds exactly once (11 admin — 0019 adds risk.config.write —
+    // + 4 supervisor + 3 inspector + 1 operator) — the unique constraint is
+    // the backstop, the count is the drift alarm.
+    expect(Number(first.perms)).toBe(19);
     // The scope enum stands at its six values: the rename-and-repoint
     // sequence skips straight through on re-run (no seven-value creep, no
     // resurrection of the three-value predecessor).
@@ -734,8 +737,12 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_is_staff()",
     "mg_operator_name()",
     "mg_profile()",
-    "mg_risk_explanation(uuid)",
-    "mg_risk_scores()",
+    // 0019: risk config reader/builder + the (version, as_of) readers that
+    // replaced the 0014 zero-config signatures.
+    "mg_risk_build(jsonb, jsonb, integer)",
+    "mg_risk_config_at(timestamp with time zone)",
+    "mg_risk_explanation(uuid, integer, timestamp with time zone)",
+    "mg_risk_scores(integer, timestamp with time zone)",
     "mg_role()",
     // 0015 (GIS): pure definer validator the boundary CHECK constraints call.
     "mg_valid_geojson_polygon(jsonb)",

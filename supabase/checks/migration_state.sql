@@ -38,6 +38,9 @@ select migration, applied
     ('0016 boundary hardening (no client DELETE)',
        case when to_regclass('public.admin_boundaries') is null then false
             else not has_table_privilege('authenticated', 'public.admin_boundaries', 'DELETE') end),
+    ('0019 configurable risk (versioned weights, server-side scoring)',
+       to_regclass('public.risk_config_versions') is not null
+       and exists (select 1 from fns where proname = 'mg_risk_build')),
     ('0018 boundaries published to Realtime',
        exists (
          select 1 from pg_publication_tables

@@ -73,3 +73,10 @@ this session — each is its own gap with its own verification gate.
 The platform's credibility rests on records being attributable to accountable
 humans. AI assistance must strengthen, never dilute, that chain of
 responsibility.
+
+### Update (Session 7)
+
+The explainer now reads the published risk configuration (`mg_risk_explanation`,
+migration 0019) instead of the `RISK_WEIGHTS` constant, and reports the `configVersion`
+it was built under. Its points are the database-built factors, so explanation, score and
+config cannot drift; cite-or-abstain and the no-write rule are unchanged.

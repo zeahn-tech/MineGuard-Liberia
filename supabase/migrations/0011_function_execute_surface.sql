@@ -182,7 +182,9 @@ begin
              'mg_risk_explanation', 'mg_incidents_page',
              'mg_inspections_page', 'mg_compliance_page',
              -- 0015 (GIS): pure definer validator evaluated by boundary CHECKs
-             'mg_valid_geojson_polygon')
+             'mg_valid_geojson_polygon',
+             -- 0019 (risk config): SECURITY INVOKER builder + config reader
+             'mg_risk_build', 'mg_risk_config_at')
   loop
     execute format(
       'grant execute on function public.%I(%s) to authenticated',
@@ -204,7 +206,8 @@ begin
              'mg_command_center_stats', 'mg_risk_scores',
              'mg_risk_explanation', 'mg_incidents_page',
              'mg_inspections_page', 'mg_compliance_page',
-             'mg_valid_geojson_polygon'
+             'mg_valid_geojson_polygon',
+             'mg_risk_build', 'mg_risk_config_at'
            ]) as u(proname)
      where not exists (
              select 1

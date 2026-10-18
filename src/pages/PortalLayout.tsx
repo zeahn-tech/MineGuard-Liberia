@@ -41,6 +41,7 @@ import {
   MessageSquareWarning,
   RefreshCw,
   ScrollText,
+  Scale,
   ShieldCheck,
   ShieldEllipsis,
   UserCog,
@@ -77,6 +78,7 @@ const NAV: { to: string; label: string; icon: typeof Map; adminOnly?: boolean }[
   { to: "/portal/environment", label: "Environment", icon: Leaf },
   { to: "/portal/community", label: "Community Reports", icon: MessageSquareWarning },
   { to: "/portal/audit", label: "Audit Log", icon: ScrollText },
+  { to: "/portal/risk-config", label: "Risk Model", icon: Scale },
   { to: "/portal/templates", label: "Templates", icon: ClipboardList },
   { to: "/portal/security", label: "Account Security", icon: ShieldEllipsis },
 ];

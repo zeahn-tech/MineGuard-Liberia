@@ -12,9 +12,18 @@
 // Weights are configurable by the program owner (doc 04) — never hardcoded
 // law; a score is decision support only and never determines guilt or
 // triggers enforcement (doc 08 hard prohibition 3).
+//
+// SESSION 7 (RSK-1/RSK-2): the weights now live in the database
+// (risk_config_versions, migration 0019) and the SCORE IS COMPUTED THERE
+// (mg_risk_build). This module remains for two jobs only:
+//   * the fallback path of a deployment that has not applied 0019, which
+//     scores with LEGACY_RISK_CONFIG (= version 1), and
+//   * mapping the database's already-built factors onto record-id citations.
+// Both paths keep the invariant score ≡ Σ factor points under ANY config.
 // ---------------------------------------------------------------------------
 
 import { canAccessSite } from "./types";
+import { LEGACY_RISK_CONFIG, type RiskConfigSettings } from "./risk-config";
 import type {
   CorrectiveAction,
   EnvironmentalObservation,
@@ -24,17 +33,19 @@ import type {
   UserProfile,
 } from "./types";
 
-/** Configurable weights — tuned by the program owner, not hardcoded law. */
+/** Version 1's weights (the pre-configurable constants). NOT consulted when
+ *  the database computes the score — kept as the legacy fallback's source and
+ *  as the named reference the version-1 regression tests compare against. */
 export const RISK_WEIGHTS = {
-  criticalFinding: 10,
-  highFinding: 6,
-  mediumFinding: 3,
-  lowFinding: 1,
-  repeatFinding: 4,
-  overdueCA: 8,
-  fatality: 15,
-  seriousIncident: 7,
-  envAlert: 5,
+  criticalFinding: LEGACY_RISK_CONFIG.weights.criticalFinding,
+  highFinding: LEGACY_RISK_CONFIG.weights.highFinding,
+  mediumFinding: LEGACY_RISK_CONFIG.weights.mediumFinding,
+  lowFinding: LEGACY_RISK_CONFIG.weights.lowFinding,
+  repeatFinding: LEGACY_RISK_CONFIG.weights.repeatFinding,
+  overdueCA: LEGACY_RISK_CONFIG.weights.overdueCA,
+  fatality: LEGACY_RISK_CONFIG.weights.fatality,
+  seriousIncident: LEGACY_RISK_CONFIG.weights.seriousIncident,
+  envAlert: LEGACY_RISK_CONFIG.weights.envAlert,
 } as const;
 
 export type RiskFactor = {
@@ -67,6 +78,9 @@ export type RiskInputCounts = {
   fatalityIncidents: number;
   seriousIncidents: number;
   envAlerts: number;
+  /** Corrective actions closed after their due date, within the config's
+   *  look-back window (the historical-compliance input). */
+  lateClosedCAs: number;
 };
 
 /** Which recorded kind a factor grounds in — internal tag used to attach the
@@ -80,9 +94,22 @@ type FactorKind =
   | "overdueCAs"
   | "fatalities"
   | "seriousIncidents"
-  | "envAlerts";
+  | "envAlerts"
+  | "lateClosedCAs";
 
 type TaggedFactor = RiskFactor & { kind: FactorKind };
+
+/** Historical-compliance predicate — mirrors mg_risk_scores: closed/verified,
+ *  closed after the due date, inside the look-back window. */
+function isLateClosed(c: CorrectiveAction, windowStart: number, now: number): boolean {
+  return (
+    (c.status === "closed" || c.status === "verified") &&
+    typeof c.closedAt === "number" &&
+    c.closedAt > c.dueAt &&
+    c.closedAt >= windowStart &&
+    c.closedAt <= now
+  );
+}
 
 /** Reduce the raw record lists (one site's inputs) to the count aggregates. */
 export function countsFromInputs(
@@ -94,6 +121,7 @@ export function countsFromInputs(
     observations: EnvironmentalObservation[];
   },
   now: number,
+  lookbackDays: number = LEGACY_RISK_CONFIG.lookbackDays,
 ): RiskInputCounts {
   const siteFindings = inputs.findings.filter((f) => f.siteId === siteId);
   const counts: RiskInputCounts = {
@@ -103,6 +131,7 @@ export function countsFromInputs(
     fatalityIncidents: 0,
     seriousIncidents: 0,
     envAlerts: 0,
+    lateClosedCAs: 0,
   };
   for (const f of siteFindings) {
     if (f.severity === "critical") counts.critical += 1;
@@ -118,6 +147,11 @@ export function countsFromInputs(
       c.dueAt < now
     )
       counts.overdueCAs += 1;
+  }
+  const windowStart = now - lookbackDays * 86_400_000;
+  for (const c of inputs.correctiveActions) {
+    if (c.siteId === siteId && isLateClosed(c, windowStart, now))
+      counts.lateClosedCAs += 1;
   }
   for (const i of inputs.incidents) {
     if (i.siteId !== siteId) continue;
@@ -143,7 +177,9 @@ export function countsFromInputs(
  *  counts path leaves them empty; the list path attaches them by kind. */
 function buildFactorsFromCounts(
   c: RiskInputCounts,
+  config: RiskConfigSettings = LEGACY_RISK_CONFIG,
 ): { score: number; factors: TaggedFactor[] } {
+  const W = config.weights;
   const factors: TaggedFactor[] = [];
   let points = 0;
   // INVARIANT: score ≡ Σ factor points. Every factor adds its points
@@ -159,31 +195,38 @@ function buildFactorsFromCounts(
   };
 
   if (c.critical)
-    push("criticalFindings", `${c.critical} critical finding(s)`, c.critical * RISK_WEIGHTS.criticalFinding);
+    push("criticalFindings", `${c.critical} critical finding(s)`, c.critical * W.criticalFinding);
   if (c.high)
-    push("highFindings", `${c.high} high finding(s)`, c.high * RISK_WEIGHTS.highFinding);
+    push("highFindings", `${c.high} high finding(s)`, c.high * W.highFinding);
   if (c.medium)
-    push("mediumFindings", `${c.medium} medium finding(s)`, c.medium * RISK_WEIGHTS.mediumFinding);
+    push("mediumFindings", `${c.medium} medium finding(s)`, c.medium * W.mediumFinding);
   if (c.low)
-    push("lowFindings", `${c.low} low finding(s)`, c.low * RISK_WEIGHTS.lowFinding);
+    push("lowFindings", `${c.low} low finding(s)`, c.low * W.lowFinding);
 
   const repeatFactor =
     c.findingsTotal > 3
-      ? RISK_WEIGHTS.repeatFinding * Math.floor(c.findingsTotal / 4)
+      ? W.repeatFinding * Math.floor(c.findingsTotal / 4)
       : 0;
   if (repeatFactor) push("repeatFindings", "Repeat findings at site", repeatFactor);
 
   if (c.overdueCAs)
-    push("overdueCAs", `${c.overdueCAs} overdue corrective action(s)`, c.overdueCAs * RISK_WEIGHTS.overdueCA);
+    push("overdueCAs", `${c.overdueCAs} overdue corrective action(s)`, c.overdueCAs * W.overdueCA);
 
   if (c.fatalityIncidents)
-    push("fatalities", `${c.fatalityIncidents} fatality incident(s)`, c.fatalityIncidents * RISK_WEIGHTS.fatality);
+    push("fatalities", `${c.fatalityIncidents} fatality incident(s)`, c.fatalityIncidents * W.fatality);
 
   if (c.seriousIncidents)
-    push("seriousIncidents", `${c.seriousIncidents} serious incident(s)`, c.seriousIncidents * RISK_WEIGHTS.seriousIncident);
+    push("seriousIncidents", `${c.seriousIncidents} serious incident(s)`, c.seriousIncidents * W.seriousIncident);
 
   if (c.envAlerts)
-    push("envAlerts", `${c.envAlerts} verified environmental alert(s)`, c.envAlerts * RISK_WEIGHTS.envAlert);
+    push("envAlerts", `${c.envAlerts} verified environmental alert(s)`, c.envAlerts * W.envAlert);
+
+  if (c.lateClosedCAs)
+    push(
+      "lateClosedCAs",
+      `${c.lateClosedCAs} corrective action(s) closed late in the last ${config.lookbackDays} days`,
+      c.lateClosedCAs * W.lateClosedCA,
+    );
 
   return { score: points, factors };
 }
@@ -204,9 +247,11 @@ export function factorsFromCountsAndIds(
     fatalityIds: string[];
     seriousIncidentIds: string[];
     envAlertIds: string[];
+    lateClosedCaIds?: string[];
   },
+  config: RiskConfigSettings = LEGACY_RISK_CONFIG,
 ): { score: number; factors: RiskFactor[] } {
-  const { score, factors } = buildFactorsFromCounts(c);
+  const { score, factors } = buildFactorsFromCounts(c, config);
   const byKind: Record<FactorKind, string[]> = {
     criticalFindings: ids.criticalIds,
     highFindings: ids.highIds,
@@ -217,6 +262,7 @@ export function factorsFromCountsAndIds(
     fatalities: ids.fatalityIds,
     seriousIncidents: ids.seriousIncidentIds,
     envAlerts: ids.envAlertIds,
+    lateClosedCAs: ids.lateClosedCaIds ?? [],
   };
   return {
     score,
@@ -228,13 +274,54 @@ export function factorsFromCountsAndIds(
   };
 }
 
+/** The factor keys the database builder (mg_risk_build) emits, mapped to the
+ *  record-id array that grounds each. */
+const ID_ARRAY_BY_KEY: Record<FactorKind, string> = {
+  criticalFindings: "criticalIds",
+  highFindings: "highIds",
+  mediumFindings: "mediumIds",
+  lowFindings: "lowIds",
+  repeatFindings: "allFindingIds",
+  overdueCAs: "overdueCaIds",
+  fatalities: "fatalityIds",
+  seriousIncidents: "seriousIncidentIds",
+  envAlerts: "envAlertIds",
+  lateClosedCAs: "lateClosedCaIds",
+};
+
+/** Adopt a score the DATABASE already built (mg_risk_scores /
+ *  mg_risk_explanation): the factors are taken as computed — never
+ *  re-multiplied here, so the server's config is the only weight source —
+ *  with the cite-or-abstain record ids attached by factor key. */
+export function factorsFromBuilt(
+  built: { score: unknown; factors: unknown },
+  ids?: Record<string, string[]>,
+): { score: number; factors: RiskFactor[] } {
+  const list = Array.isArray(built.factors) ? built.factors : [];
+  const factors: RiskFactor[] = list.map((raw) => {
+    const f = raw as { key?: string; label?: string; points?: unknown };
+    const arr = f.key ? ids?.[ID_ARRAY_BY_KEY[f.key as FactorKind]] : undefined;
+    return {
+      label: String(f.label ?? ""),
+      points: Number(f.points ?? 0),
+      recordIds: arr ?? [],
+    };
+  });
+  // The identity is re-derived, not trusted: the score IS the sum of the
+  // factors the caller can see.
+  return { score: factors.reduce((n, f) => n + f.points, 0), factors };
+}
+
 /** Public (counts-path) build: the same factors without the internal kind tag
  *  and without record IDs — mg_risk_scores feeds this directly. */
-export function factorsFromCounts(c: RiskInputCounts): {
+export function factorsFromCounts(
+  c: RiskInputCounts,
+  config: RiskConfigSettings = LEGACY_RISK_CONFIG,
+): {
   score: number;
   factors: RiskFactor[];
 } {
-  const { score, factors } = buildFactorsFromCounts(c);
+  const { score, factors } = buildFactorsFromCounts(c, config);
   return {
     score,
     factors: factors.map(({ kind: _kind, ...f }) => f),
@@ -254,12 +341,15 @@ export function computeRiskFactors(
     observations: EnvironmentalObservation[];
   },
   now: number = Date.now(),
+  config: RiskConfigSettings = LEGACY_RISK_CONFIG,
 ): { score: number; factors: RiskFactor[] } {
   const siteId = site._id;
   const siteFindings = inputs.findings.filter((f) => f.siteId === siteId);
   const { score, factors } = buildFactorsFromCounts(
-    countsFromInputs(siteId, inputs, now),
+    countsFromInputs(siteId, inputs, now, config.lookbackDays),
+    config,
   );
+  const windowStart = now - config.lookbackDays * 86_400_000;
 
   // Attach the cite-or-abstain anchors: per kind, the record IDs the factor
   // is grounded in (the exact predicates countsFromInputs reduced).
@@ -277,6 +367,9 @@ export function computeRiskFactors(
           c.status !== "verified" &&
           c.dueAt < now,
       )
+      .map((c) => c._id),
+    lateClosedCAs: inputs.correctiveActions
+      .filter((c) => c.siteId === siteId && isLateClosed(c, windowStart, now))
       .map((c) => c._id),
     fatalities: inputs.incidents
       .filter((i) => i.siteId === siteId && i.type === "fatality")

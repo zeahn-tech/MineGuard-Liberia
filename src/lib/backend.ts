@@ -27,11 +27,14 @@ import {
 } from "./supabase";
 import { validateTemplateSections } from "./template-schema";
 import {
+  validateRiskSettings,
+  type RiskConfigVersion,
+  type RiskWeights,
+} from "./risk-config";
+import {
   computeRiskFactors,
-  factorsFromCounts,
-  factorsFromCountsAndIds,
+  factorsFromBuilt,
   type RiskFactor,
-  type RiskInputCounts,
 } from "./risk-model";
 import { sha256Hex } from "./sha256";
 
@@ -853,9 +856,10 @@ function explanationSentences(factors: RiskFactor[]): {
   }));
 }
 
-/** mg_risk_explanation payload → the explainer response: the count aggregates
- *  rebuild the factors through the shared builder (factorsFromCountsAndIds)
- *  and the id arrays become the per-sentence citations. */
+/** mg_risk_explanation payload → the explainer response. The factors are the
+ *  ones the DATABASE built under the selected config version (mg_risk_build);
+ *  the id arrays become the per-sentence citations. Nothing here multiplies a
+ *  weight — the config is read, never re-derived. */
 function explanationFromRow(row: AnyRow): {
   siteId: string;
   generatedAt: number;
@@ -864,30 +868,27 @@ function explanationFromRow(row: AnyRow): {
   citations: string[];
   sentences: { factor: string; points: number; recordIds: string[]; text: string }[];
   disclaimer: string;
+  configVersion: number | null;
+  configEffectiveFrom: number | null;
 } {
-  const counts: RiskInputCounts = {
-    findingsTotal: numOf(row.findingsTotal),
-    low: numOf(row.lowFindings),
-    medium: numOf(row.mediumFindings),
-    high: numOf(row.highFindings),
-    critical: numOf(row.criticalFindings),
-    overdueCAs: numOf(row.overdueCAs),
-    fatalityIncidents: numOf(row.fatalityIncidents),
-    seriousIncidents: numOf(row.seriousIncidents),
-    envAlerts: numOf(row.envAlerts),
-  };
-  const { score, factors } = factorsFromCountsAndIds(counts, {
-    allFindingIds: strArr(row.allFindingIds),
-    lowIds: strArr(row.lowIds),
-    mediumIds: strArr(row.mediumIds),
-    highIds: strArr(row.highIds),
-    criticalIds: strArr(row.criticalIds),
-    overdueCaIds: strArr(row.overdueCaIds),
-    fatalityIds: strArr(row.fatalityIds),
-    seriousIncidentIds: strArr(row.seriousIncidentIds),
-    envAlertIds: strArr(row.envAlertIds),
-  });
+  const { score, factors } = factorsFromBuilt(
+    { score: row.score, factors: row.factors },
+    {
+      allFindingIds: strArr(row.allFindingIds),
+      lowIds: strArr(row.lowIds),
+      mediumIds: strArr(row.mediumIds),
+      highIds: strArr(row.highIds),
+      criticalIds: strArr(row.criticalIds),
+      overdueCaIds: strArr(row.overdueCaIds),
+      lateClosedCaIds: strArr(row.lateClosedCaIds),
+      fatalityIds: strArr(row.fatalityIds),
+      seriousIncidentIds: strArr(row.seriousIncidentIds),
+      envAlertIds: strArr(row.envAlertIds),
+    },
+  );
   const citations = [...new Set(factors.flatMap((f) => f.recordIds))].sort();
+  const configVersion = row.configVersion == null ? null : numOf(row.configVersion);
+  const configEffectiveFrom = toMsOrNull(row.configEffectiveFrom) ?? null;
   // Cite-or-abstain: with no factors there is nothing to explain — abstain
   // rather than invent a narrative.
   if (factors.length === 0) {
@@ -899,6 +900,8 @@ function explanationFromRow(row: AnyRow): {
       citations: [],
       sentences: [],
       disclaimer: AI_DISCLAIMER,
+      configVersion,
+      configEffectiveFrom,
     };
   }
   return {
@@ -909,6 +912,21 @@ function explanationFromRow(row: AnyRow): {
     citations,
     sentences: explanationSentences(factors),
     disclaimer: AI_DISCLAIMER,
+    configVersion,
+    configEffectiveFrom,
+  };
+}
+
+function mapRiskConfigVersion(r: AnyRow): RiskConfigVersion {
+  return {
+    id: String(r.id),
+    version: numOf(r.version),
+    weights: r.weights as RiskWeights,
+    lookbackDays: numOf(r.historical_lookback_days),
+    effectiveFrom: toMsOrNull(r.effective_from) ?? 0,
+    changeNote: String(r.change_note ?? ""),
+    createdBy: r.created_by == null ? null : String(r.created_by),
+    createdAt: toMsOrNull(r.created_at) ?? 0,
   };
 }
 
@@ -1895,43 +1913,58 @@ export const api = {
       return (await getSite(args.siteId)) ?? site;
     },
 
-    riskScores: () =>
-      live<Record<string, { score: number; factors: { label: string; points: number }[] }>>(
+    /** Risk indicator per visible site. With no argument the version in force
+     *  now is used; `version` recomputes under that published version (how an
+     *  old score is reproduced). SERVER-COMPUTED: mg_risk_scores (SECURITY
+     *  INVOKER, migration 0019) selects the config, counts the inputs under
+     *  the caller's RLS visibility and builds score + factors in the
+     *  database — the client multiplies nothing. */
+    riskScores: (args?: { version?: number }) =>
+      live<
+        Record<
+          string,
+          {
+            score: number;
+            factors: { label: string; points: number }[];
+            configVersion?: number;
+          }
+        >
+      >(
         async () => {
           const user = await requireAuthed(true);
           if (!user.role) return {};
-          // SEC-4 v2 — AGGREGATE IN THE DATABASE: mg_risk_scores (SECURITY
-          // INVOKER, migration 0014) reduces the five input tables to ONE
-          // count-aggregate row per visible site; the client rebuilds the
-          // exact factor breakdown from RISK_WEIGHTS through the SAME factor
-          // builder the fallback uses. No O(n) rows on the wire at any table
-          // size, and the scope is the caller's RLS visibility — the same
-          // policies the fallback's paged reads go through.
-          const { data, error } = await supabase.rpc("mg_risk_scores");
+          const { data, error } = await supabase.rpc("mg_risk_scores", {
+            p_version: args?.version ?? null,
+            p_as_of: null,
+          });
           if (!error && Array.isArray(data)) {
             const byId: Record<
               string,
-              { score: number; factors: RiskFactor[] }
+              { score: number; factors: RiskFactor[]; configVersion?: number }
             > = {};
             for (const raw of data as AnyRow[]) {
-              const counts: RiskInputCounts = {
-                findingsTotal: numOf(raw.findingsTotal),
-                low: numOf(raw.lowFindings),
-                medium: numOf(raw.mediumFindings),
-                high: numOf(raw.highFindings),
-                critical: numOf(raw.criticalFindings),
-                overdueCAs: numOf(raw.overdueCAs),
-                fatalityIncidents: numOf(raw.fatalityIncidents),
-                seriousIncidents: numOf(raw.seriousIncidents),
-                envAlerts: numOf(raw.envAlerts),
+              const { score, factors } = factorsFromBuilt({
+                score: raw.score,
+                factors: raw.factors,
+              });
+              byId[String(raw.siteId)] = {
+                score,
+                factors,
+                configVersion: numOf(raw.configVersion),
               };
-              byId[String(raw.siteId)] = factorsFromCounts(counts);
             }
             return byId;
           }
-          // Fallback (lineage without migration 0014): the original
-          // full-input computation — exact at any size because every input
-          // read pages; only the wire cost differs. Loud about why.
+          // A requested version cannot be honoured without the database
+          // config — say so rather than silently scoring under other weights.
+          if (args?.version != null) {
+            throw error
+              ? backendError(error)
+              : new Error("RISK_CONFIG_UNAVAILABLE");
+          }
+          // Fallback (lineage without migration 0019): the original full-input
+          // computation under LEGACY_RISK_CONFIG (= version 1) — exact at any
+          // size because every input read pages; only the wire cost differs.
           console.warn(
             "[backend] mg_risk_scores unavailable — client-side aggregation fallback:",
             error ? error.message ?? String(error) : "unexpected payload",
@@ -1961,8 +1994,61 @@ export const api = {
           }
           return byId;
         },
-        ["sites", "findings", "corrective_actions", "incidents", "environmental_observations"],
+        ["sites", "findings", "corrective_actions", "incidents", "environmental_observations", "risk_config_versions"],
       ),
+  },
+
+  // ------------------------------------------------------------ riskConfig
+  // RSK-1: the versioned, effective-dated weights. READ by any account with a
+  // role (RLS); PUBLISHED only by administrators (RLS + the database guard —
+  // this layer checks again so the refusal is a plain error, not a 42501).
+  // Versions are append-only: "editing" the weights means publishing a new
+  // version; the database assigns the number, the author and the timestamp.
+  riskConfig: {
+    list: () =>
+      live<RiskConfigVersion[]>(async () => {
+        const user = await requireAuthed(true);
+        if (!user.role) return [];
+        const { data, error } = await supabase
+          .from("risk_config_versions")
+          .select("*")
+          .order("version", { ascending: false });
+        if (error) throw backendError(error);
+        return (data as AnyRow[]).map(mapRiskConfigVersion);
+      }, ["risk_config_versions"]),
+
+    publish: async (args: {
+      weights: RiskWeights;
+      lookbackDays: number;
+      changeNote: string;
+      /** epoch ms; omitted = effective immediately */
+      effectiveFrom?: number;
+    }): Promise<RiskConfigVersion> => {
+      await requireAdminUser();
+      const problem = validateRiskSettings({
+        weights: args.weights,
+        lookbackDays: args.lookbackDays,
+      });
+      if (problem) throw new Error(`INVALID_RISK_CONFIG: ${problem}`);
+      const note = args.changeNote.trim();
+      if (note.length < 3) throw new Error("INVALID_RISK_CONFIG: a change note is required");
+      const row: Record<string, unknown> = {
+        weights: args.weights,
+        historical_lookback_days: args.lookbackDays,
+        change_note: note,
+      };
+      if (args.effectiveFrom != null) row.effective_from = iso(args.effectiveFrom);
+      const id = await insertReturningId("risk_config_versions", row);
+      notifyLocalWrite("risk_config_versions");
+      const back = await supabase
+        .from("risk_config_versions")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+      if (back.error) throw backendError(back.error);
+      if (!back.data) throw new Error("NOT_FOUND");
+      return mapRiskConfigVersion(back.data as AnyRow);
+    },
   },
 
   // ---------------------------------------------------------------- ai
@@ -1998,7 +2084,7 @@ export const api = {
   // no autonomous decisions (nothing to decide), no authorization bypass
   // (same core), no out-of-scope leakage (same core).
   ai: {
-    explainRiskScore: (args: { siteId: string }) =>
+    explainRiskScore: (args: { siteId: string; version?: number }) =>
       live<{
         siteId: string;
         generatedAt: number;
@@ -2007,6 +2093,10 @@ export const api = {
         citations: string[];
         sentences: { factor: string; points: number; recordIds: string[]; text: string }[];
         disclaimer: string;
+        /** The published risk-config version the explanation was built under
+         *  (null on a lineage without migration 0019). */
+        configVersion: number | null;
+        configEffectiveFrom: number | null;
       } | null>(async () => {
         const user = await requireAuthed();
         if (!user.role) return null; // no AI narrative for role-less accounts
@@ -2018,9 +2108,15 @@ export const api = {
         // null-mask as before ("not found OR out of scope → same null").
         const { data, error } = await supabase.rpc("mg_risk_explanation", {
           p_site_id: args.siteId,
+          p_version: args.version ?? null,
+          p_as_of: null,
         });
         if (!error && data && typeof data === "object") {
           return explanationFromRow(data as AnyRow);
+        }
+        if (!error && data == null) return null; // not found OR out of scope
+        if (args.version != null) {
+          throw error ? backendError(error) : new Error("RISK_CONFIG_UNAVAILABLE");
         }
         // Fallback (lineage without migration 0014): the original path —
         // same scoped reads as the old riskScores; re-derive server-side.
@@ -2060,6 +2156,8 @@ export const api = {
             citations: [],
             sentences: [],
             disclaimer: AI_DISCLAIMER,
+            configVersion: null,
+            configEffectiveFrom: null,
           };
         }
         return {
@@ -2070,8 +2168,10 @@ export const api = {
           citations,
           sentences: explanationSentences(factors),
           disclaimer: AI_DISCLAIMER,
+          configVersion: null,
+          configEffectiveFrom: null,
         };
-      }, ["sites", "findings", "corrective_actions", "incidents", "environmental_observations"]),
+      }, ["sites", "findings", "corrective_actions", "incidents", "environmental_observations", "risk_config_versions"]),
   },
 
   // ----------------------------------------------------------- inspections

@@ -2697,3 +2697,29 @@ project owner (documented in doc 14).
 Activate the Firebase project (Firestore + auth providers + rules deploy), run
 the first-admin bootstrap, then proceed to the evidence attachment UI (doc 07)
 and first test suites (doc 13).
+
+## Session 7 [2026-10-18 — Configurable risk engine (RSK-1, RSK-2)]
+
+- **Migration 0019** — `risk_config_versions`: append-only, numbered, effective-dated
+  weight sets. Admin-only publish (`risk.config.write`), no UPDATE/DELETE for anyone
+  (trigger blocks the owner too), exact ten-weight validation (integers 0..1000),
+  server-assigned version/author/time, new versions never in the past and strictly after
+  the latest, one audit row per publish (0009 trigger). Version 1 = the pre-Session-7
+  weights with the new historical weight at 0 (adopting 0019 changes no score).
+- **Server-side computation** — `mg_risk_build` is the single factor builder (score =
+  sum of emitted factor points by construction); `mg_risk_scores(version, as_of)` and
+  `mg_risk_explanation(site, version, as_of)` replace the 0014 zero-config signatures and
+  read the same config. The client no longer multiplies weights; `risk-model.ts` is the
+  fallback for lineages without 0019 (legacy config) and record-id citation mapping.
+- **Historical compliance** — corrective actions closed after their due date within the
+  version's look-back window (`lateClosedCA` weight, `lookbackDays`).
+- **UI** — Portal → Risk Model (`/portal/risk-config`): config in force, admin publish
+  form with live diff, version history with per-version diffs, scores under any version.
+- **Tests** — `tests/risk-config.test.ts` (property tests: score = sum of factors under
+  random configs; old scores byte-identical by version; RLS/append-only/audit),
+  `tests/risk-config-api.test.ts` (data layer end to end). Pins updated: tables 22,
+  audit triggers 15, permissions 19, authenticated function allowlist.
+- **Known limits** — reproducibility covers the configuration; record status history is
+  not retained, so an old moment's score is not rebuilt from today's records. A wrong
+  future-dated version can only be superseded by a later one. Do not re-apply 0014 after
+  0019 (it recreates the old overloads).
