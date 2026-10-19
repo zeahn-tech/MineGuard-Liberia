@@ -2724,6 +2724,64 @@ and first test suites (doc 13).
   future-dated version can only be superseded by a later one. Do not re-apply 0014 after
   0019 (it recreates the old overloads).
 
+## Session 9 [2026-10-19 — Notifications, command-center trends, reporting (NTF-1, §19, §1)]
+
+**Status:** IMPLEMENTED. Full suite: 665 pass / 4 skip (live-DB) / 0 fail;
+`tsc -b`, `eslint .`, `vite build` clean. Apply `0021_notifications_trends_reporting.sql`
+(idempotent; needs 0010/0012/0019).
+
+**1. Persisted notifications (NTF-1).** New table `public.notifications`
+(per-user; RLS `user_id = auth.uid()` for select/insert/update — deliberately
+no admin read policy). Content is still *derived* from records the caller can
+read; what is new is stored read / dismissed / resolved state.
+`mg_notifications_sync(jsonb)` (SECURITY INVOKER) stores each derived item once
+per `(user, source_key)` and resolves deadline items no longer true. The list
+the UI gets is the **derived set joined to stored state minus dismissed**, so a
+reassigned scope or closed CA can never resurface from storage. Guard trigger:
+user_id server-assigned, content immutable, the three stamps one-way, no client
+DELETE, `link_to` restricted to in-app paths. Due-soon → overdue is a new
+(unread, urgent) notification; decisions older than 30 days are history.
+Bell: unread badge, mark read / mark all read, dismiss / dismiss all.
+*Not changed:* email / push / SMS stay NOT IMPLEMENTED (REQUIRES
+GOVERNMENT/OWNER CONFIRMATION); retention purge of old rows is PROPOSED (the
+migration owner can purge; clients cannot).
+
+**2. Trends (§19).** `mg_trend_series` (day/week/month, UTC, zero-filled,
+≤400 buckets) and `mg_trend_geo` (per-county window vs the preceding equal
+window, with delta and % change; `null` % when the earlier window was empty),
+over an allowlisted metric set (incidents, fatalities, inspections submitted,
+findings, critical findings, environmental observations, community reports) via
+one event source `mg_trend_events`. SECURITY INVOKER — RLS is the authorization.
+UI: `TrendsPanel` on the Command Center (chart + "Show as table" text
+equivalent + county table). No client fallback by design (a second
+implementation of printed figures would diverge).
+
+**3. Summary report (§1).** `mg_summary_report(from,to)` + page
+`/portal/reports` ("Summary Report"): period activity, position as of
+generation time, per-county table, top-10 risk indicators (same configurable
+risk model as the rest of the app). Print / Save-as-PDF via the browser and CSV
+export. Banner **NOT AN OFFICIAL DOCUMENT** and the full disclaimer footer are
+on screen, in print and as the last CSV row; tests fail if any drops it.
+No server PDF generator, signature, seal or reference number (PROPOSED,
+REQUIRES GOVERNMENT/OWNER CONFIRMATION — letterhead/format is the adopting
+institution's decision).
+
+**Files:** `supabase/migrations/0021_…sql`, `src/lib/reporting.ts`,
+`src/components/TrendsPanel.tsx`, `src/pages/Reports.tsx`,
+`src/lib/backend.ts` (notification derive/persist split; `stats.trendSeries /
+trendGeo / summaryReport`; `records.mark…/dismiss…Notification(s)`),
+`NotificationBell.tsx`, `PortalLayout.tsx` (nav + print chrome), `CommandCenter.tsx`;
+0011 allowlist + GAP-0 pins extended; `tests/trends-reporting.test.ts` [NEW],
+persistence block in `tests/notifications.test.ts`, bridge `.is()` + RPC specs.
+
+**Honest limits:** trends bucket in UTC (Liberia is UTC+0, so no offset);
+county names are the free-text values on sites / reports, so differently
+spelled counties would appear as separate rows; the report summarises what the
+generating account can see, not a national total unless the account is
+national-scope; operators have no report page (their portal is unchanged).
+
+---
+
 ## Session 8 [2026-10-19 — AI assistance (AI-1)]
 
 **Owner decision outstanding: model provider.** Per the brief, interfaces + deterministic

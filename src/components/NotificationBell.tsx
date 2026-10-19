@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import { Button } from "@/components/ui/button";
-import { useQuery } from "@/lib/backend-react";
+import { useMutation, useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import {
   AlertTriangle,
@@ -19,7 +19,9 @@ import {
   BellOff,
   ClipboardList,
   Info,
+  CheckCheck,
   Loader2,
+  X,
   MessageSquareWarning,
 } from "lucide-react";
 import { useState } from "react";
@@ -35,8 +37,16 @@ export default function NotificationBell() {
   const notifQ = useQuery(api.records.listNotifications);
   const [open, setOpen] = useState(false);
 
+  const markRead = useMutation(api.records.markNotificationRead);
+  const markAllRead = useMutation(api.records.markAllNotificationsRead);
+  const dismiss = useMutation(api.records.dismissNotification);
+  const dismissAll = useMutation(api.records.dismissAllNotifications);
+
   const notifs = notifQ ?? [];
-  const urgent = notifs.filter((n) => n.severity === "urgent").length;
+  // The badge counts what has not been read yet; read items stay listed
+  // (dimmed) until dismissed — state is stored per account (migration 0021).
+  const unread = notifs.filter((n) => !n.read);
+  const urgent = unread.filter((n) => n.severity === "urgent").length;
 
   return (
     <div className="relative">
@@ -48,18 +58,18 @@ export default function NotificationBell() {
         onKeyDown={(e) => {
           if (e.key === "Escape") setOpen(false);
         }}
-        aria-label={`Notifications${notifs.length > 0 ? ` (${notifs.length})` : ""}`}
+        aria-label={`Notifications${unread.length > 0 ? ` (${unread.length} unread)` : ""}`}
         aria-expanded={open}
         aria-haspopup="true"
       >
         <Bell className="size-4" strokeWidth={1.5} />
-        {notifs.length > 0 && (
+        {unread.length > 0 && (
           <span
             className={`absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-semibold ${
               urgent > 0 ? "bg-destructive text-destructive-foreground" : "bg-primary text-primary-foreground"
             }`}
           >
-            {notifs.length}
+            {unread.length}
           </span>
         )}
       </Button>
@@ -74,6 +84,26 @@ export default function NotificationBell() {
             <div className="flex items-center justify-between border-b border-border px-3 py-2">
               <p className="kicker text-[10px]">Notifications</p>
               {notifQ === undefined && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+              {notifs.length > 0 && (
+                <span className="flex items-center gap-2">
+                  {unread.length > 0 && (
+                    <button
+                      type="button"
+                      className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+                      onClick={() => void markAllRead()}
+                    >
+                      <CheckCheck className="size-3" /> Mark all read
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="text-[10px] text-muted-foreground hover:text-foreground"
+                    onClick={() => void dismissAll()}
+                  >
+                    Dismiss all
+                  </button>
+                </span>
+              )}
               {notifQ !== undefined && notifs.length === 0 && (
                 <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
                   <BellOff className="size-3" /> nothing needs attention
@@ -90,11 +120,17 @@ export default function NotificationBell() {
               {notifs.map((n) => {
                 const Icon = KIND_ICON[n.kind];
                 return (
-                  <Link
+                  <div
                     key={n.id}
+                    className={`relative border-b border-border/60 transition-colors last:border-0 hover:bg-accent/50 ${n.read ? "opacity-60" : ""}`}
+                  >
+                  <Link
                     to={n.linkTo}
-                    onClick={() => setOpen(false)}
-                    className="block border-b border-border/60 px-3 py-2.5 transition-colors last:border-0 hover:bg-accent/50"
+                    onClick={() => {
+                      if (!n.read) void markRead(n.notificationId);
+                      setOpen(false);
+                    }}
+                    className="block px-3 py-2.5 pr-8"
                   >
                     <div className="flex items-start gap-2">
                       {n.severity === "urgent" ? (
@@ -105,7 +141,12 @@ export default function NotificationBell() {
                         <Info className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.5} />
                       )}
                       <div className="min-w-0">
-                        <p className="text-xs font-medium leading-snug">{n.title}</p>
+                        <p className="text-xs font-medium leading-snug">
+                          {!n.read && (
+                            <span className="mr-1 inline-block size-1.5 rounded-full bg-primary align-middle" aria-label="unread" />
+                          )}
+                          {n.title}
+                        </p>
                         {n.body && (
                           <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
                             {n.body}
@@ -118,6 +159,15 @@ export default function NotificationBell() {
                       </div>
                     </div>
                   </Link>
+                  <button
+                    type="button"
+                    aria-label={`Dismiss: ${n.title}`}
+                    className="absolute right-1.5 top-2 rounded p-1 text-muted-foreground hover:text-foreground"
+                    onClick={() => void dismiss(n.notificationId)}
+                  >
+                    <X className="size-3" />
+                  </button>
+                  </div>
                 );
               })}
             </div>

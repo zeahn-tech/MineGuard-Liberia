@@ -29,6 +29,7 @@ const Community = lazy(() => import("./pages/Community.tsx"));
 const CommunitySubmit = lazy(() => import("./pages/CommunitySubmit.tsx"));
 const CommunityTrack = lazy(() => import("./pages/CommunityTrack.tsx"));
 const Audit = lazy(() => import("./pages/Audit.tsx"));
+const Reports = lazy(() => import("./pages/Reports.tsx"));
 const RiskConfig = lazy(() => import("./pages/RiskConfig.tsx"));
 const Security = lazy(() => import("./pages/Security.tsx"));
 const TemplateList = lazy(() =>
@@ -144,6 +145,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="environment/:observationId" element={<ObservationDetail />} />
               <Route path="community" element={<Community />} />
               <Route path="audit" element={<Audit />} />
+              <Route path="reports" element={<Reports />} />
               <Route path="risk-config" element={<RiskConfig />} />
               <Route path="boundaries" element={<Boundaries />} />
               <Route path="templates" element={<TemplateList />} />

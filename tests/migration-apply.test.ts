@@ -60,8 +60,8 @@ describe("migrations apply to a clean database", () => {
       // 14 domain tables + evidence_url_audit (0006) + 0010's four
       // (organizations, admin_areas, site_assignments, permissions) + 0015's
       // two GIS boundary tables (admin_boundaries, site_boundaries) + 0019's
-      // risk_config_versions + 0020's ai_request_log.
-      expect(Number(scalar(tables))).toBe(23);
+      // risk_config_versions + 0020's ai_request_log + 0021's notifications.
+      expect(Number(scalar(tables))).toBe(24);
 
       const rls = await one(
         run,
@@ -69,8 +69,8 @@ describe("migrations apply to a clean database", () => {
           where schemaname = 'public' and rowsecurity = true`,
       );
       // every table above has RLS, including 0015's two boundary tables and
-      // 0019's risk_config_versions + 0020's ai_request_log
-      expect(Number(scalar(rls))).toBe(23);
+      // 0019's risk_config_versions + 0020's ai_request_log + 0021's notifications
+      expect(Number(scalar(rls))).toBe(24);
 
       const guards = await one(
         run,
@@ -735,6 +735,8 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_is_admin()",
     "mg_is_reviewer()",
     "mg_is_staff()",
+    // 0021 (Session 9): notification sync
+    "mg_notifications_sync(jsonb)",
     "mg_operator_name()",
     "mg_profile()",
     // 0019: risk config reader/builder + the (version, as_of) readers that
@@ -744,6 +746,11 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_risk_explanation(uuid, integer, timestamp with time zone)",
     "mg_risk_scores(integer, timestamp with time zone)",
     "mg_role()",
+    // 0021 (Session 9): summary report + trend source/geo/series (invoker)
+    "mg_summary_report(date, date)",
+    "mg_trend_events(text)",
+    "mg_trend_geo(text, date, date)",
+    "mg_trend_series(text, text, date, date)",
     // 0015 (GIS): pure definer validator the boundary CHECK constraints call.
     "mg_valid_geojson_polygon(jsonb)",
     "provision_user_by_email(text, text, text, text, text)",

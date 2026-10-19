@@ -255,12 +255,17 @@ describe("notification: scoping and no-leak", () => {
 describe("delivery-channel classification (v1 scope guard)", () => {
   const backendSrc = readFileSync(join(import.meta.dir, "..", "src", "lib", "backend.ts"), "utf8");
 
-  test("notifications are derived at request time — no notifications table exists", async () => {
+  test("the notifications table stores state only — no address, phone or device token column", async () => {
     setIdentity(f.admin);
-    const tables = await adminSql(
-      `select table_name from information_schema.tables where table_schema = 'public' and table_name ilike '%notif%'`,
-    );
-    expect(tables.length).toBe(0);
+    const cols = (await adminSql(
+      `select column_name from information_schema.columns
+        where table_schema = 'public' and table_name = 'notifications'`,
+    )) as { column_name: string }[];
+    const names = cols.map((c) => c.column_name).sort();
+    expect(names).toEqual([
+      "body", "created_at", "dismissed_at", "event_at", "id", "kind", "link_to",
+      "read_at", "resolved_at", "severity", "source_key", "title", "user_id",
+    ]);
   });
 
   test("no push/email/SMS channel is wired into the product (REQUIRES CONFIRMATION gate)", () => {
@@ -273,5 +278,124 @@ describe("delivery-channel classification (v1 scope guard)", () => {
   test("the UI states the in-app-only scope to the user", () => {
     const bellSrc = readFileSync(join(import.meta.dir, "..", "src", "components", "NotificationBell.tsx"), "utf8");
     expect(bellSrc).toContain("In-app notifications only");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SESSION 9 (NTF-1) — PERSISTED read / dismiss state (migration 0021)
+// ---------------------------------------------------------------------------
+describe("NTF-1: persisted notifications with read/dismiss state", () => {
+  async function seedOverdueCA(): Promise<string> {
+    const rows = await adminSql(
+      `insert into public.corrective_actions (finding_id, site_id, description, status, due_at, opened_by_id)
+       values ('${f.findingA}', '${f.siteA}', 'NTF-1 overdue fixture', 'open', now() - interval '2 days', '${f.opA}')
+       returning id`,
+    );
+    return String(rows[0].id);
+  }
+
+  test("a derived item is stored once, starts unread, and read state persists", async () => {
+    const ca = await seedOverdueCA();
+    setIdentity(f.opA);
+    const first1 = (await first(api.records.listNotifications()))!;
+    const n = first1.find((x) => x.id === `ca-${ca}`)!;
+    expect(n.read).toBe(false);
+    expect(n.notificationId).not.toBe(n.id);
+
+    await api.records.markNotificationRead(n.notificationId);
+    const again = (await first(api.records.listNotifications()))!;
+    expect(again.find((x) => x.id === `ca-${ca}`)?.read).toBe(true);
+
+    // exactly one stored row for the item despite two list calls
+    const stored = await adminSql(
+      `select count(*)::int as c from public.notifications where user_id = '${f.opA}' and source_key like 'ca-${ca}%'`,
+    );
+    expect(stored[0].c).toBe(1);
+    await adminSql(`delete from public.corrective_actions where id = '${ca}'`);
+  });
+
+  test("dismissed notifications stay dismissed and never resurface", async () => {
+    const ca = await seedOverdueCA();
+    setIdentity(f.opA);
+    const list = (await first(api.records.listNotifications()))!;
+    const n = list.find((x) => x.id === `ca-${ca}`)!;
+    await api.records.dismissNotification(n.notificationId);
+    const after = (await first(api.records.listNotifications()))!;
+    expect(after.some((x) => x.id === `ca-${ca}`)).toBe(false);
+    const after2 = (await first(api.records.listNotifications()))!;
+    expect(after2.some((x) => x.id === `ca-${ca}`)).toBe(false);
+    await adminSql(`delete from public.corrective_actions where id = '${ca}'`);
+  });
+
+  test("a deadline that stops being true is resolved in storage", async () => {
+    const ca = await seedOverdueCA();
+    setIdentity(f.opA);
+    await first(api.records.listNotifications());
+    // condition no longer true (the CA is gone from the caller's view)
+    await adminSql(`delete from public.corrective_actions where id = '${ca}'`);
+    await first(api.records.listNotifications());
+    const rows = await adminSql(
+      `select resolved_at is not null as resolved from public.notifications
+        where user_id = '${f.opA}' and source_key = 'ca-${ca}:overdue'`,
+    );
+    expect(rows[0].resolved).toBe(true);
+    await adminSql(`delete from public.corrective_actions where id = '${ca}'`);
+  });
+
+  test("an inbox is private: other accounts (even admins) cannot read or change it", async () => {
+    const ca = await seedOverdueCA();
+    setIdentity(f.opA);
+    const list = (await first(api.records.listNotifications()))!;
+    const n = list.find((x) => x.id === `ca-${ca}`)!;
+
+    setIdentity(f.admin);
+    const { data } = await (await import("../src/lib/supabase")).supabase
+      .from("notifications").select("id").eq("id", n.notificationId);
+    expect((data ?? []).length).toBe(0);
+    // marking someone else's notification read affects nothing
+    await api.records.markNotificationRead(n.notificationId);
+    const row = await adminSql(`select read_at from public.notifications where id = '${n.notificationId}'`);
+    expect(row[0].read_at).toBeNull();
+    await adminSql(`delete from public.corrective_actions where id = '${ca}'`);
+  });
+
+  test("guard: content is immutable, state is one-way, clients cannot delete or forge a recipient", async () => {
+    const ca = await seedOverdueCA();
+    setIdentity(f.opA);
+    const list = (await first(api.records.listNotifications()))!;
+    const n = list.find((x) => x.id === `ca-${ca}`)!;
+    const { supabase } = await import("../src/lib/supabase");
+
+    const edit = await supabase.from("notifications").update({ title: "tampered" }).eq("id", n.notificationId);
+    expect(edit.error).toBeTruthy();
+
+    await api.records.markNotificationRead(n.notificationId);
+    const before = await adminSql(`select read_at from public.notifications where id = '${n.notificationId}'`);
+    const clear = await supabase.from("notifications").update({ read_at: null }).eq("id", n.notificationId);
+    void clear;
+    const after = await adminSql(`select read_at from public.notifications where id = '${n.notificationId}'`);
+    expect(String(after[0].read_at)).toBe(String(before[0].read_at)); // cannot be un-read
+
+    const del = await supabase.from("notifications").delete().eq("id", n.notificationId);
+    expect(del.error).toBeTruthy();
+
+    const forged = await supabase.from("notifications").insert({
+      user_id: f.admin, source_key: "forged", kind: "ca_deadline", severity: "info",
+      title: "x", body: "", link_to: "/portal", event_at: new Date().toISOString(),
+    });
+    void forged;
+    const landed = await adminSql(`select user_id from public.notifications where source_key = 'forged'`);
+    expect(landed.every((r) => r.user_id === f.opA)).toBe(true);
+    await adminSql(`delete from public.notifications where source_key = 'forged'`);
+    await adminSql(`delete from public.corrective_actions where id = '${ca}'`);
+  });
+
+  test("link_to must be an in-app path (no external URL can be stored)", async () => {
+    setIdentity(f.opA);
+    const { supabase } = await import("../src/lib/supabase");
+    const r = await supabase.rpc("mg_notifications_sync", {
+      p_items: [{ source_key: "ext", kind: "report_status", severity: "info", title: "t", body: "", link_to: "https://evil.example", event_at: new Date().toISOString() }],
+    });
+    expect(r.error).toBeTruthy();
   });
 });

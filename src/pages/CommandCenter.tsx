@@ -9,6 +9,7 @@ import {
   subscribeQueue,
 } from "@/lib/offline-queue";
 import { useEffect, useState } from "react";
+import TrendsPanel from "@/components/TrendsPanel";
 import { ArrowRight, ShieldAlert, TriangleAlert } from "lucide-react";
 
 // NOTE: the demo-data seed is an explicit admin action ("Load demo data"
@@ -115,6 +116,8 @@ export default function CommandCenter() {
           when connectivity returns.
         </div>
       )}
+
+      <TrendsPanel />
 
       {/* Stat row */}
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-sm border border-border bg-border md:grid-cols-4">

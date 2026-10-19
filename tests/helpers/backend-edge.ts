@@ -444,6 +444,12 @@ class WireQuery {
     return this;
   }
 
+  // Session 9: PostgREST `is.null` filter (notification read/dismiss state).
+  is(col: string, val: null | boolean) {
+    this.wheres.push(`${col} is ${val === null ? "null" : val ? "true" : "false"}`);
+    return this;
+  }
+
   gte(col: string, val: unknown) {
     this.wheres.push(`${col} >= ${lit(val)}`);
     return this;
@@ -684,6 +690,11 @@ const RPC_SPECS: Record<string, RpcSpec> = {
   mg_incidents_page: { fn: "mg_incidents_page", args: ["p_before", "p_before_id", "p_limit"] },
   mg_inspections_page: { fn: "mg_inspections_page", args: ["p_before", "p_before_id", "p_limit"] },
   mg_compliance_page: { fn: "mg_compliance_page", args: ["p_before", "p_before_id", "p_limit"] },
+  // 0021 (Session 9): notification sync, trends, summary report.
+  mg_notifications_sync: { fn: "mg_notifications_sync", args: ["p_items"] },
+  mg_trend_series: { fn: "mg_trend_series", args: ["p_metric", "p_bucket", "p_from", "p_to"] },
+  mg_trend_geo: { fn: "mg_trend_geo", args: ["p_metric", "p_from", "p_to"] },
+  mg_summary_report: { fn: "mg_summary_report", args: ["p_from", "p_to"] },
 };
 
 async function execRpc(

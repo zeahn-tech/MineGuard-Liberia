@@ -111,7 +111,12 @@ dedupe, sync status indicator, auto-sync on reconnect. Covers inspections,
 incidents and environmental observations, plus offline evidence byte queuing
 (IndexedDB) for attachments.
 
-### Notifications [PARTIALLY IMPLEMENTED — minimal in-app v1, 2026-09-27]
+### Notifications [PARTIALLY IMPLEMENTED — in-app, persisted read/dismiss state (Session 9); delivery channels not implemented]
+> **Session 9 update:** derived content is now stored per user with read /
+> dismissed / resolved state (migration 0021, doc 11 §Session 9). The v1 text
+> below that says "no notifications table" and lists persistence as PROPOSED is
+> superseded for in-app state; email / push / SMS remain NOT IMPLEMENTED.
+
 In-app notifications derived at request time from records the caller can
 already see — no notifications table, no delivery infrastructure, no cost.
 Two v1 event classes: corrective-action deadlines in the caller's scope
@@ -136,7 +141,7 @@ Delivery channels — CLASSIFICATION:
 - A future persisted-notification table (read receipts, per-user dismissal)
   is PROPOSED, same confirmation gate.
 
-Government reporting exports [PARTIALLY IMPLEMENTED — CSV v1; PDF PROPOSED]
+Government reporting exports [PARTIALLY IMPLEMENTED — CSV v1 + printable summary report (Session 9, not an official document); server PDF PROPOSED]
 CSV exports (§9, first format) are serialized client-side from rows the
 requesting user's existing authorization already returned — there is no
 export endpoint, service role, or RPC, so an export cannot exceed what the

@@ -34,6 +34,7 @@ import {
   Landmark,
   LayoutDashboard,
   Layers,
+  FileText,
   Leaf,
   LogOut,
   Map,
@@ -77,6 +78,7 @@ const NAV: { to: string; label: string; icon: typeof Map; adminOnly?: boolean }[
   { to: "/portal/incidents", label: "Incidents", icon: HeartPulse },
   { to: "/portal/environment", label: "Environment", icon: Leaf },
   { to: "/portal/community", label: "Community Reports", icon: MessageSquareWarning },
+  { to: "/portal/reports", label: "Summary Report", icon: FileText },
   { to: "/portal/audit", label: "Audit Log", icon: ScrollText },
   { to: "/portal/risk-config", label: "Risk Model", icon: Scale },
   { to: "/portal/templates", label: "Templates", icon: ClipboardList },
@@ -271,7 +273,7 @@ export default function PortalLayout() {
       </a>
       <div className="mx-auto flex min-h-screen w-full max-w-[1400px]">
         {/* Sidebar */}
-        <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar md:flex">
+        <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar md:flex print:!hidden">
           <div className="flex items-center gap-2 border-b border-border px-4 py-5">
             <ShieldCheck className="size-6 text-foreground" strokeWidth={1.5} />
             <div>
@@ -328,7 +330,7 @@ export default function PortalLayout() {
 
         {/* Main */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur">
+          <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur print:hidden">
             <div className="flex items-center gap-3 px-4 py-3 md:px-6">
               <button
                 onClick={() => setMobileNavOpen(true)}

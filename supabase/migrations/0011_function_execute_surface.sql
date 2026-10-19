@@ -184,7 +184,11 @@ begin
              -- 0015 (GIS): pure definer validator evaluated by boundary CHECKs
              'mg_valid_geojson_polygon',
              -- 0019 (risk config): SECURITY INVOKER builder + config reader
-             'mg_risk_build', 'mg_risk_config_at')
+             'mg_risk_build', 'mg_risk_config_at',
+             -- 0021 (Session 9): SECURITY INVOKER notification sync, trend
+             -- event source / series / geo, and the summary report
+             'mg_notifications_sync', 'mg_trend_events', 'mg_trend_series',
+             'mg_trend_geo', 'mg_summary_report')
   loop
     execute format(
       'grant execute on function public.%I(%s) to authenticated',
@@ -207,7 +211,9 @@ begin
              'mg_risk_explanation', 'mg_incidents_page',
              'mg_inspections_page', 'mg_compliance_page',
              'mg_valid_geojson_polygon',
-             'mg_risk_build', 'mg_risk_config_at'
+             'mg_risk_build', 'mg_risk_config_at',
+             'mg_notifications_sync', 'mg_trend_events', 'mg_trend_series',
+             'mg_trend_geo', 'mg_summary_report'
            ]) as u(proname)
      where not exists (
              select 1

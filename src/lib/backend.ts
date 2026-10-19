@@ -37,6 +37,16 @@ import {
   type RiskFactor,
 } from "./risk-model";
 import { sha256Hex } from "./sha256";
+import {
+  mapSummaryReport,
+  mapTrendGeo,
+  mapTrendSeries,
+  type SummaryReport,
+  type TrendBucket,
+  type TrendGeo,
+  type TrendMetric,
+  type TrendSeries,
+} from "./reporting";
 
 /** doc 08: AI output is labeled as assistance — this label ships with every
  *  AI payload so no surface can present it as fact without the marker. */
@@ -1666,6 +1676,171 @@ export async function signOut() {
 // API SURFACE — identical shape to the previous layer
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// NOTIFICATIONS (§1, Session 9 NTF-1) — derive, then persist state.
+//
+// CONTENT is still derived at request time from records the caller can read
+// (RLS + the client mirror), exactly as in v1. STATE (read / dismissed) is
+// persisted per user in public.notifications (migration 0021):
+//   * mg_notifications_sync stores each derived item once per source_key and
+//     resolves deadline items that are no longer true;
+//   * the list returned is the DERIVED set joined to the stored state, minus
+//     dismissed items — so nothing the caller can no longer see (reassigned
+//     scope, closed CA) can resurface from storage;
+//   * a lineage without 0021 degrades to the v1 derived list (everything
+//     unread, nothing persisted) with a console warning.
+// Delivery channels (email/push/SMS) remain NOT IMPLEMENTED.
+// ---------------------------------------------------------------------------
+
+type DerivedNotification = {
+  id: string;
+  kind: "ca_deadline" | "ca_decision" | "report_status";
+  /** Deadline notifications are state; the state is part of the stored key so
+   *  due-soon → overdue is a NEW (unread, urgent) notification. */
+  state?: "overdue" | "soon";
+  severity: "info" | "warning" | "urgent";
+  title: string;
+  body: string;
+  linkTo: string;
+  at: number;
+};
+
+export type NotificationItem = DerivedNotification & {
+  /** Persisted row id (equals `id` when persistence is unavailable). */
+  notificationId: string;
+  read: boolean;
+};
+
+const clip = (v: string, n: number) => (v.length > n ? v.slice(0, n - 1) + "…" : v);
+const notifKey = (d: DerivedNotification) => (d.state ? `${d.id}:${d.state}` : d.id);
+
+async function persistNotifications(derived: DerivedNotification[]): Promise<NotificationItem[]> {
+  const fallback = () =>
+    derived.map((d) => ({ ...d, notificationId: d.id, read: false }));
+  if (derived.length === 0) {
+    // Still sync so resolved deadline rows are closed out.
+    await supabase.rpc("mg_notifications_sync", { p_items: [] });
+    return [];
+  }
+  const capped = derived.slice(0, 500);
+  const { error: syncError } = await supabase.rpc("mg_notifications_sync", {
+    p_items: capped.map((d) => ({
+      source_key: notifKey(d),
+      kind: d.kind,
+      severity: d.severity,
+      title: clip(d.title, 300),
+      body: clip(d.body, 1000),
+      link_to: d.linkTo,
+      event_at: new Date(d.at).toISOString(),
+    })),
+  });
+  if (syncError) {
+    console.warn("[backend] mg_notifications_sync unavailable — derived notifications only:", syncError.message ?? String(syncError));
+    return fallback();
+  }
+  const rows = await allRows<AnyRow>("notifications");
+  const byKey = new Map(rows.map((r) => [r.source_key as string, r]));
+  const out: NotificationItem[] = [];
+  for (const d of capped) {
+    const row = byKey.get(notifKey(d));
+    if (!row || row.dismissed_at) continue;
+    out.push({ ...d, notificationId: row.id as string, read: Boolean(row.read_at) });
+  }
+  return out;
+}
+
+async function deriveNotifications(user: UserProfile): Promise<DerivedNotification[]> {
+    const now = Date.now();
+    const DAY = 86_400_000;
+    const out: DerivedNotification[] = [];
+
+    // 1. Corrective-action deadlines in the caller's scope. For operators
+    //    this is their tenant's obligations; for staff their own scope —
+    //    the same scoped feeds the portal pages use.
+    const [caRaw, findingRaw, siteRaw] = await Promise.all([
+      allRows<AnyRow>("corrective_actions"),
+      allRows<AnyRow>("findings"),
+      allRows<AnyRow>("sites"),
+    ]);
+    const findings = new Map(findingRaw.map((r) => [r.id as string, mapFinding(r)]));
+    const sites = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
+    for (const r of caRaw) {
+      const ca = mapCA(r);
+      if (ca.status !== "open" && ca.status !== "in_progress") continue;
+      const site = sites.get(ca.siteId);
+      if (!site || !canAccessSite(user, site)) continue;
+      const finding = findings.get(ca.findingId);
+      const dueMs = ca.dueAt - now;
+      const isOverdue = dueMs < 0;
+      if (!isOverdue && dueMs > 3 * DAY) continue; // due-soon window: ≤3d
+      const siteLabel = `${site.code} ${site.name}`;
+      out.push({
+        id: `ca-${ca._id}`,
+        kind: "ca_deadline",
+        state: isOverdue ? "overdue" : "soon",
+        severity: isOverdue ? "urgent" : "warning",
+        title: isOverdue
+          ? `Overdue corrective action at ${siteLabel}`
+          : `Corrective action due soon at ${siteLabel}`,
+        body: `${finding?.title ?? "Compliance finding"} — ${ca.description}`,
+        linkTo: user.role === ROLES.OPERATOR ? "/operate/corrective-actions" : `/portal/sites/${site._id}`,
+        at: ca.dueAt,
+      });
+    }
+
+    // 2. Reviewer decisions on corrective actions the caller opened —
+    //    the operator learns their response was verified/closed/escalated.
+    if (user.role === ROLES.OPERATOR && user.operatorName) {
+      for (const r of caRaw) {
+        const ca = mapCA(r);
+        if (ca.openedById !== user.uid) continue;
+        if (ca.status !== "verified" && ca.status !== "closed" && ca.status !== "escalated") continue;
+        // Persisted inbox: decisions older than 30 days are history (the audit
+        // log serves it), not notifications.
+        if (now - (ca.closedAt ?? ca.dueAt) > 30 * DAY) continue;
+        const site = sites.get(ca.siteId);
+        if (!site) continue;
+        out.push({
+          id: `cad-${ca._id}`,
+          kind: "ca_decision",
+          severity: ca.status === "escalated" ? "urgent" : "info",
+          title:
+            ca.status === "escalated"
+              ? `Corrective action ESCALATED at ${site.code} ${site.name}`
+              : `Corrective action ${ca.status} at ${site.code} ${site.name}`,
+          body: ca.description,
+          linkTo: "/operate/corrective-actions",
+          at: ca.closedAt ?? ca.dueAt,
+        });
+      }
+    }
+
+    // 3. Community-report status changes — staff queue only (RLS-scoped).
+    if (isStaffRole(user.role)) {
+      const repRaw = await allRows<AnyRow>("community_reports");
+      for (const r of repRaw) {
+        const rep = mapReport(r);
+        if (rep.status === "submitted") continue; // untouched — not news
+        const reviewedAt = rep.reviewedAt ?? rep.createdAt;
+        if (now - reviewedAt > 7 * DAY) continue; // recent window only
+        out.push({
+          id: `rep-${rep._id}`,
+          kind: "report_status",
+          severity: rep.status === "verified" ? "info" : "warning",
+          title: `Community report ${rep.trackingCode} → ${rep.status.replace("_", " ")}`,
+          body: rep.description,
+          linkTo: "/portal/community",
+          at: reviewedAt,
+        });
+      }
+    }
+
+    // Urgent first, then newest.
+    const sevRank = { urgent: 0, warning: 1, info: 2 } as const;
+    out.sort((a, b) => sevRank[a.severity] - sevRank[b.severity] || b.at - a.at);
+    return out;
+}
+
 export const api = {
   // ----------------------------------------------------------------- users
   users: {
@@ -3175,117 +3350,113 @@ export const api = {
     // and are classified REQUIRES GOVERNMENT/OWNER CONFIRMATION in docs/01.
 
     listNotifications: () =>
-      live<
-        {
-          id: string;
-          kind: "ca_deadline" | "ca_decision" | "report_status";
-          severity: "info" | "warning" | "urgent";
-          title: string;
-          body: string;
-          linkTo: string;
-          at: number;
-        }[]
-      >(async () => {
+      live<NotificationItem[]>(async () => {
         const user = await requireAuthed(true);
         if (!user.role) return [];
-        const now = Date.now();
-        const DAY = 86_400_000;
-        const out: {
-          id: string;
-          kind: "ca_deadline" | "ca_decision" | "report_status";
-          severity: "info" | "warning" | "urgent";
-          title: string;
-          body: string;
-          linkTo: string;
-          at: number;
-        }[] = [];
+        const derived = await deriveNotifications(user);
+        return persistNotifications(derived);
+      }, ["corrective_actions", "findings", "sites", "community_reports", "notifications"]),
 
-        // 1. Corrective-action deadlines in the caller's scope. For operators
-        //    this is their tenant's obligations; for staff their own scope —
-        //    the same scoped feeds the portal pages use.
-        const [caRaw, findingRaw, siteRaw] = await Promise.all([
-          allRows<AnyRow>("corrective_actions"),
-          allRows<AnyRow>("findings"),
-          allRows<AnyRow>("sites"),
-        ]);
-        const findings = new Map(findingRaw.map((r) => [r.id as string, mapFinding(r)]));
-        const sites = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
-        for (const r of caRaw) {
-          const ca = mapCA(r);
-          if (ca.status !== "open" && ca.status !== "in_progress") continue;
-          const site = sites.get(ca.siteId);
-          if (!site || !canAccessSite(user, site)) continue;
-          const finding = findings.get(ca.findingId);
-          const dueMs = ca.dueAt - now;
-          const isOverdue = dueMs < 0;
-          if (!isOverdue && dueMs > 3 * DAY) continue; // due-soon window: ≤3d
-          const siteLabel = `${site.code} ${site.name}`;
-          out.push({
-            id: `ca-${ca._id}`,
-            kind: "ca_deadline",
-            severity: isOverdue ? "urgent" : "warning",
-            title: isOverdue
-              ? `Overdue corrective action at ${siteLabel}`
-              : `Corrective action due soon at ${siteLabel}`,
-            body: `${finding?.title ?? "Compliance finding"} — ${ca.description}`,
-            linkTo: user.role === ROLES.OPERATOR ? "/operate/corrective-actions" : `/portal/sites/${site._id}`,
-            at: ca.dueAt,
-          });
-        }
-
-        // 2. Reviewer decisions on corrective actions the caller opened —
-        //    the operator learns their response was verified/closed/escalated.
-        if (user.role === ROLES.OPERATOR && user.operatorName) {
-          for (const r of caRaw) {
-            const ca = mapCA(r);
-            if (ca.openedById !== user.uid) continue;
-            if (ca.status !== "verified" && ca.status !== "closed" && ca.status !== "escalated") continue;
-            const site = sites.get(ca.siteId);
-            if (!site) continue;
-            out.push({
-              id: `cad-${ca._id}`,
-              kind: "ca_decision",
-              severity: ca.status === "escalated" ? "urgent" : "info",
-              title:
-                ca.status === "escalated"
-                  ? `Corrective action ESCALATED at ${site.code} ${site.name}`
-                  : `Corrective action ${ca.status} at ${site.code} ${site.name}`,
-              body: ca.description,
-              linkTo: "/operate/corrective-actions",
-              at: ca.closedAt ?? ca.dueAt,
-            });
-          }
-        }
-
-        // 3. Community-report status changes — staff queue only (RLS-scoped).
-        if (isStaffRole(user.role)) {
-          const repRaw = await allRows<AnyRow>("community_reports");
-          for (const r of repRaw) {
-            const rep = mapReport(r);
-            if (rep.status === "submitted") continue; // untouched — not news
-            const reviewedAt = rep.reviewedAt ?? rep.createdAt;
-            if (now - reviewedAt > 7 * DAY) continue; // recent window only
-            out.push({
-              id: `rep-${rep._id}`,
-              kind: "report_status",
-              severity: rep.status === "verified" ? "info" : "warning",
-              title: `Community report ${rep.trackingCode} → ${rep.status.replace("_", " ")}`,
-              body: rep.description,
-              linkTo: "/portal/community",
-              at: reviewedAt,
-            });
-          }
-        }
-
-        // Urgent first, then newest.
-        const sevRank = { urgent: 0, warning: 1, info: 2 } as const;
-        out.sort((a, b) => sevRank[a.severity] - sevRank[b.severity] || b.at - a.at);
-        return out;
-      }, ["corrective_actions", "findings", "sites", "community_reports"]),
+    /** Mark one notification read (own inbox only — RLS + guard). */
+    markNotificationRead: async (notificationId: string) => {
+      await requireAuthed();
+      const { error } = await supabase
+        .from("notifications")
+        .update({ read_at: new Date().toISOString() })
+        .eq("id", notificationId)
+        .is("read_at", null);
+      if (error) throw backendError(error);
+      notifyLocalWrite("notifications");
+    },
+    markAllNotificationsRead: async () => {
+      await requireAuthed();
+      const { error } = await supabase
+        .from("notifications")
+        .update({ read_at: new Date().toISOString() })
+        .is("read_at", null)
+        .is("dismissed_at", null);
+      if (error) throw backendError(error);
+      notifyLocalWrite("notifications");
+    },
+    /** Dismiss one notification: it stays dismissed across reloads/devices. */
+    dismissNotification: async (notificationId: string) => {
+      await requireAuthed();
+      const { error } = await supabase
+        .from("notifications")
+        .update({ dismissed_at: new Date().toISOString() })
+        .eq("id", notificationId)
+        .is("dismissed_at", null);
+      if (error) throw backendError(error);
+      notifyLocalWrite("notifications");
+    },
+    dismissAllNotifications: async () => {
+      await requireAuthed();
+      const { error } = await supabase
+        .from("notifications")
+        .update({ dismissed_at: new Date().toISOString() })
+        .is("dismissed_at", null);
+      if (error) throw backendError(error);
+      notifyLocalWrite("notifications");
+    },
   },
 
   // ----------------------------------------------------------------- stats
   stats: {
+    // ------------------------------------------------ Session 9: trends + report
+    // Time-series and per-county trends and the summary report are computed
+    // IN SQL (migration 0021, SECURITY INVOKER): every figure is limited to
+    // rows the caller's RLS already shows. There is no client fallback — a
+    // client-side recount would be a second, divergent implementation of
+    // figures that end up in a printed report; a lineage without 0021 shows
+    // an honest error instead.
+    trendSeries: (args: { metric: TrendMetric; bucket: TrendBucket; from?: string; to?: string }) =>
+      live<TrendSeries | null>(
+        async () => {
+          const user = await requireAuthed(true);
+          if (!user.role) return null;
+          const { data, error } = await supabase.rpc("mg_trend_series", {
+            p_metric: args.metric,
+            p_bucket: args.bucket,
+            p_from: args.from ?? null,
+            p_to: args.to ?? null,
+          });
+          if (error) throw backendError(error);
+          return mapTrendSeries(data);
+        },
+        ["incidents", "inspections", "findings", "environmental_observations", "community_reports"],
+      ),
+
+    trendGeo: (args: { metric: TrendMetric; from?: string; to?: string }) =>
+      live<TrendGeo | null>(
+        async () => {
+          const user = await requireAuthed(true);
+          if (!user.role) return null;
+          const { data, error } = await supabase.rpc("mg_trend_geo", {
+            p_metric: args.metric,
+            p_from: args.from ?? null,
+            p_to: args.to ?? null,
+          });
+          if (error) throw backendError(error);
+          return mapTrendGeo(data);
+        },
+        ["incidents", "inspections", "findings", "environmental_observations", "community_reports", "sites"],
+      ),
+
+    summaryReport: (args: { from?: string; to?: string }) =>
+      live<SummaryReport | null>(
+        async () => {
+          const user = await requireAuthed(true);
+          if (!user.role) return null;
+          const { data, error } = await supabase.rpc("mg_summary_report", {
+            p_from: args.from ?? null,
+            p_to: args.to ?? null,
+          });
+          if (error) throw backendError(error);
+          return mapSummaryReport(data);
+        },
+        ["incidents", "inspections", "findings", "corrective_actions", "environmental_observations", "community_reports", "sites"],
+      ),
+
     commandCenter: () =>
       live<CommandCenterStats>(async () => {
         const user = await requireAuthed(true);

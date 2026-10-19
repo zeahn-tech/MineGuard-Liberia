@@ -400,3 +400,12 @@ deploy job never ran and the broken state persisted.
    With them unset the function is fully functional on its deterministic path.
 5. Review `select * from ai_request_log order by created_at desc` (administrators see
    all rows; others see their own). `injection_flagged = true` rows deserve a look.
+
+## Deploying notifications, trends and the summary report [Session 9]
+1. Apply `supabase/migrations/0021_notifications_trends_reporting.sql` (idempotent; needs
+   0010, 0012 and 0019). Re-running 0011 afterwards is safe — its allowlist carries the
+   new functions.
+2. Verify with `supabase/checks/migration_state.sql` (row `0021 …` reads `true`).
+3. No secrets, Edge Functions or provider accounts are involved. Notification rows hold
+   in-app text only; retention/purge of old rows is an open owner decision (run as the
+   migration owner — clients cannot delete).

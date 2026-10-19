@@ -125,7 +125,7 @@ describe("supabase/checks/migration_state.sql (the read-only 'what is applied?' 
     const db = await wrongProject();
     const res = await db.query(check);
     const state = stateOf(res.rows as Array<{ migration: string; applied: boolean }>);
-    expect(Object.keys(state)).toEqual(["0001", "0010", "0012", "0013", "0014", "0015", "0016", "0018", "0019"]);
+    expect(Object.keys(state)).toEqual(["0001", "0010", "0012", "0013", "0014", "0015", "0016", "0018", "0019", "0021"]);
     expect(Object.values(state).every((v) => v === false)).toBe(true);
     await db.close();
   });
@@ -134,7 +134,7 @@ describe("supabase/checks/migration_state.sql (the read-only 'what is applied?' 
     const rows = (await adminSql(check)) as Array<{ migration: string; applied: boolean }>;
     expect(stateOf(rows)).toEqual({
       "0001": true, "0010": true, "0012": true, "0013": true,
-      "0014": true, "0015": true, "0016": true, "0018": true, "0019": true,
+      "0014": true, "0015": true, "0016": true, "0018": true, "0019": true, "0021": true,
     });
   });
 

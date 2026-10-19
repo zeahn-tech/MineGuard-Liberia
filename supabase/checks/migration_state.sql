@@ -41,6 +41,10 @@ select migration, applied
     ('0019 configurable risk (versioned weights, server-side scoring)',
        to_regclass('public.risk_config_versions') is not null
        and exists (select 1 from fns where proname = 'mg_risk_build')),
+    ('0021 notifications, trends, summary report',
+       to_regclass('public.notifications') is not null
+       and exists (select 1 from fns where proname = 'mg_notifications_sync')
+       and exists (select 1 from fns where proname = 'mg_summary_report')),
     ('0018 boundaries published to Realtime',
        exists (
          select 1 from pg_publication_tables
