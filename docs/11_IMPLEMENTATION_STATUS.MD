@@ -123,6 +123,6 @@ Details per session are in the archive.
 
 ## 8. Final counts for this session
 
-`bun test` 688 pass / 4 skip / 0 fail (692 tests, 40 files; 27 new in
+`bun test` 688 pass / 4 skip / 0 fail (692 tests, 40 files; 23 new in
 `production-cleanliness`). Playwright 124 pass. `tsc -b` and `eslint .` clean.
 Session ledger references to the archive are by section title, not line number.
