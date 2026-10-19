@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input";
 import { SiteLocationPicker } from "@/components/SiteLocationPicker";
 import { sourceLabel } from "@/lib/gis";
 import { draftFromSite, parsePositionInput, type PositionDraft, EMPTY_POSITION_DRAFT } from "@/lib/site-position";
-import type { Id } from "@/lib/compat-types";
+import type { Id } from "@/lib/entity-types";
 import { RiskAiPanel } from "../components/RiskAiPanel";
 import { useNow } from "@/hooks/use-now";
 

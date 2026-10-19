@@ -131,8 +131,6 @@ jobs:
 
       - name: Build (production flags)
         run: bun run build
-        env:
-          DISABLE_VLY_PLUGIN: "1"
           # Production build: demo seeding compiled out of the UI.
           VITE_MINEGUARD_ENV: production
 

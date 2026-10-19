@@ -17,7 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { Doc, Id } from "@/lib/compat-types";
+import type { Doc, Id } from "@/lib/entity-types";
 import { isStaffRole } from "@/lib/types";
 import EvidenceSection from "@/components/EvidenceSection";
 

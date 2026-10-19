@@ -2,7 +2,7 @@
 // SHARED DOMAIN TYPES + AUTHORIZATION MODEL (client-side mirror)
 //
 // These types and helpers mirror the server-side authorization rules that are
-// enforced in Firestore security rules (firestore.rules). The client-side
+// enforced by Postgres RLS + guard triggers (supabase/migrations). The client-side
 // checks exist only to shape the UI and give immediate feedback; the RULES
 // are the real authorization boundary.
 // ---------------------------------------------------------------------------
@@ -385,11 +385,11 @@ export function isStaffRole(role?: Role | string | null): boolean {
 }
 
 /**
- * The single source of truth for per-user LIST scoping. Firestore evaluates
- * `list` rules per returned document AND rejects a query whose safety it
- * cannot prove — so the data layer must constrain its queries with exactly the
- * constraint this returns (doc 04 gap 5: county/operator list scoping is now
- * enforced by the rules, not merely by client-side filtering).
+ * The single source of truth for per-user LIST scoping. Postgres RLS filters
+ * every list per row; the data layer additionally constrains its queries with
+ * exactly the constraint this returns so the client never asks for rows the
+ * policies would hide (county/operator list scoping is enforced by RLS, not
+ * merely by client-side filtering).
  *
  *   "all"      admin / national scope — unconstrained (rules allow any doc)
  *   { field }  county-scoped staff (county) or operator (operatorName)

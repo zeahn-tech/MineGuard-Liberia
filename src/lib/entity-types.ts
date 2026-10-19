@@ -1,9 +1,8 @@
 // ---------------------------------------------------------------------------
-// TYPE COMPATIBILITY SHIMS
+// ENTITY TYPE ALIASES
 //
-// The codebase was migrated from Convex to Firebase. Convex branded `Id<T>`
-// types are now plain strings (Firestore document IDs), and `Doc<T>` maps to
-// the corresponding domain interface in @/lib/types.
+// `Id<T>` is the Postgres uuid primary key as a plain string; `Doc<T>` maps a
+// collection name to its domain interface in ./types.
 // ---------------------------------------------------------------------------
 
 import type {
@@ -19,7 +18,7 @@ import type {
   UserProfile,
 } from "./types";
 
-// Convex `Id<"collection">` — now just a Firestore document ID string.
+// `Id<"collection">` — the row's uuid primary key, as a string.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export type Id<T extends string> = string;
 
@@ -36,5 +35,5 @@ export interface DocMap {
   evidence: Evidence;
 }
 
-// Convex `Doc<"collection">` — maps to the domain interface.
+// `Doc<"collection">` — the domain interface for that collection.
 export type Doc<T extends keyof DocMap> = DocMap[T];

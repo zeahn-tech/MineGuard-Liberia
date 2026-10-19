@@ -7,10 +7,7 @@ import eslintConfigPrettier from "eslint-config-prettier/flat";
 
 export default tseslint.config(
   {
-    // `dist` is build output; vly-toolbar-readonly.tsx is a platform-managed,
-    // read-only file ("DO NOT MODIFY" in its header) — linting it would only
-    // ever produce findings nobody is allowed to fix.
-    ignores: ["dist", "vly-toolbar-readonly.tsx"],
+    ignores: ["dist"],
   },
   {
     extends: [

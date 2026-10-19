@@ -44,7 +44,7 @@ import {
   upsertDraft,
   type LocalDraft,
 } from "@/lib/offline-queue";
-import type { Doc } from "@/lib/compat-types";
+import type { Doc } from "@/lib/entity-types";
 
 type TemplateDoc = Doc<"inspectionTemplates">;
 type SiteDoc = Doc<"sites">;

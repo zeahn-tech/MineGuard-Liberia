@@ -1,4 +1,3 @@
-import { vlyPlugin } from "@vly-ai/integrations";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
@@ -17,13 +16,7 @@ export default defineConfig(({ command }) => {
     (command === "build" && repoName ? `/${repoName}/` : "/");
 
   return {
-    // vlyPlugin is optional in non-Freebuff environments (e.g. GitHub CI);
-    // it is only loaded when installed.
-    plugins: [
-      react(),
-      tailwindcss(),
-      ...(process.env.DISABLE_VLY_PLUGIN === "1" ? [] : [vlyPlugin()]),
-    ],
+    plugins: [react(), tailwindcss()],
     base,
     resolve: {
       alias: {
@@ -66,7 +59,6 @@ export default defineConfig(({ command }) => {
               "@radix-ui/react-toggle-group",
               "@radix-ui/react-tooltip",
             ],
-            "framer-motion": ["framer-motion"],
             charts: ["recharts"],
             forms: ["react-hook-form", "@hookform/resolvers", "zod"],
             maps: ["leaflet", "react-leaflet"],
@@ -89,16 +81,11 @@ export default defineConfig(({ command }) => {
         "react-dom/client",
         "react-router",
         "@supabase/supabase-js",
-        "framer-motion",
       ],
     },
     server: {
       host: true,
       port: 5173,
-      // HMR MUST stay disabled on Freebuff Web: the managed preview proxy
-      // cannot carry the HMR websocket, and the injected react-refresh client
-      // aborts app startup (blank preview). Edits are picked up on reload.
-      hmr: false,
     },
   };
 });

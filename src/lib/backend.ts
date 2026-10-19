@@ -423,7 +423,8 @@ async function actorLabel(user: UserProfile): Promise<string> {
  *  client-supplied), entity, timestamp and before/after diff in the SAME
  *  transaction as the write — so a client crash can neither lose nor forge a
  *  row. audit_log INSERT/UPDATE/DELETE is revoked from all client roles.
- *  This helper now only leaves a console trace of what the UI intended. */
+ *  This helper now only leaves a DEV-ONLY console trace of what the UI
+ *  intended — nothing is written to the console in a production build. */
 async function logAudit(entry: {
   actorId?: string;
   actorLabel: string;
@@ -432,6 +433,7 @@ async function logAudit(entry: {
   entityId?: string;
   summary: string;
 }) {
+  if (!import.meta.env?.DEV) return;
   console.debug(
     "[audit:breadcrumb]",
     entry.action,
