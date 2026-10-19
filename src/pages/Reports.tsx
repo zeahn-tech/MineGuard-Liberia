@@ -117,7 +117,13 @@ export default function Reports() {
 
           <section aria-labelledby="rep-county">
             <h3 id="rep-county" className="kicker mb-2">By county</h3>
-            <div className="overflow-x-auto">
+            {/* Scrollable region: focusable + named so keyboard users can scroll it (WCAG 2.1.1). */}
+            <div
+              className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+              tabIndex={0}
+              role="region"
+              aria-labelledby="rep-county"
+            >
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs text-muted-foreground">

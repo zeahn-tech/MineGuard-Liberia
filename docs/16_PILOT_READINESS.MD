@@ -4,7 +4,36 @@
 platform core with honest gaps. Per the master directive, readiness claims
 require evidence across the dimensions below.
 
-## Readiness board
+## Session 10 readiness evidence matrix (2026-10-19)
+
+Legend: **Proven** = exercised against a real engine/browser with a repeatable
+test or record · **Partial** = real evidence, but not at the level the claim needs ·
+**Unproven** = no evidence in this build. Where this matrix and the older board
+below differ, this matrix is newer.
+
+| Dimension | Proven | Partial / Unproven |
+|---|---|---|
+| Functionality | 5 core flows render, navigate and validate in a real browser at 320/375/768/1440 (`e2e/core-flows.e2e.ts`); 688 unit/SQL tests | Browser flows use a **stubbed** backend; no end-to-end run against a live project in this session |
+| Security | Production-cleanliness guard; no dev overlay/telemetry; dev-only console output; secrets scan of tracked files | **`.env.keys` private key is in git history — rotate.** No penetration test; MFA/recovery not exercised against live Auth here |
+| Authorization | RLS/permission/scope suites on real Postgres semantics (PGlite), incl. cross-tenant and cross-county leakage | Not re-verified on the live project; Edge Function (Deno) entry not executed |
+| Integrity | Audit append-only, server-assigned fields, versioned risk config (tests + restore drill: 54 policies/52 triggers preserved) | Risk history reproducible by config version only |
+| Offline | Queue/sync/tile-worker unit suites | **No real offline test in a browser or on a device** (service worker blocked in e2e) |
+| Sync | Idempotent clientRef + conflict handling in tests | No multi-device or flaky-network field test |
+| Media | Evidence pipeline + URL revocation in tests | Camera capture not exercised on real hardware |
+| Performance | Lighthouse 80 perf (simulated mobile, sandbox; FCP 3.4 s, LCP 4.1 s, ~207 KiB unused JS); doc 17 DB baseline | **No real-device or real-network measurement**; first-load JS size is a known improvement area |
+| Accessibility | axe-core WCAG 2.0–2.2 A/AA incl. contrast: 24 routes × 4 viewports clean after 9 fixes; keyboard: skip link, Enter on rows, dialog Esc + focus return; Lighthouse a11y 100 | **No screen reader (NVDA/JAWS/VoiceOver/TalkBack) was run**; automated tools find only part of WCAG; no user testing; "mobile QA" is emulated Chromium, not physical phones |
+| Deployment | Production build OK; PWA installability checks pass (Lighthouse 100); workflows exist | Pipelines **not executed** this session; e2e not wired into CI |
+| Recovery | Local drill on Postgres 16: all 21 migrations + seed, dump/restore, counts and schema objects identical, 0 restore errors (`drills/restore-drill-2026-10-19.txt`); 2026-09-28 rehearsal | Not the production backup artifact; PITR not exercised |
+| Testing | 688 pass / 4 skip / 0 fail; 124 browser tests | 4 live-DB tests skipped; stubbed-network browser tests |
+
+### Still unproven (plain statement)
+
+The system has **not** been shown to work end to end on the live Supabase
+project in this session, on physical phones, on a field network, with a screen
+reader, or under real concurrent load. The pilot decisions in the section below
+remain open.
+
+## Readiness board (earlier summary)
 
 | Dimension | State | Evidence / gap |
 |-----------|-------|----------------|

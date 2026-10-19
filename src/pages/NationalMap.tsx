@@ -254,7 +254,7 @@ export default function NationalMap() {
                 type="button"
                 aria-pressed={on}
                 className={`layer-toggle rounded-full border px-3 py-1 text-xs transition ${
-                  on ? "bg-background border-border shadow-sm" : "border-border bg-transparent opacity-60 hover:opacity-100"
+                  on ? "bg-background border-border shadow-sm" : "border-dashed border-border bg-transparent text-muted-foreground hover:bg-accent"
                 }`}
                 onClick={() => toggleLayer(cfg.id, on)}
                 title={count === 0 && !loading ? "No records loaded for this layer yet" : undefined}
@@ -360,7 +360,12 @@ export default function NationalMap() {
             {items.map(({ layer, items: chunk }) => (
               <LayerGroup key={layer}>
                 {chunk.map((it) => (
-                  <Marker key={it.feature.id} position={[it.feature.lat, it.feature.lng]} icon={markerIcon(it)}>
+                  <Marker
+                    key={it.feature.id}
+                    position={[it.feature.lat, it.feature.lng]}
+                    icon={markerIcon(it)}
+                    title={it.cluster ? `${it.count} records — ${it.feature.label}` : it.feature.label}
+                  >
                     <Popup>
                       <strong>{it.feature.label}</strong>
                       <br />

@@ -232,7 +232,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
   return (
     <div className="flex min-h-screen flex-col bg-background paper-grain">
-      <div className="flex-1">
+      <main id="main-content" className="flex-1">
         <div className="mx-auto flex h-full w-full max-w-md flex-col justify-center px-4 py-16">
           <Link to="/" className="mb-8 flex items-center justify-center gap-2">
             <ShieldCheck className="size-6" strokeWidth={1.5} />
@@ -245,7 +245,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               <form onSubmit={handleNewPassword}>
                 <CardHeader className="pb-2 text-center">
                   <p className="kicker">Account recovery</p>
-                  <CardTitle className="display mt-1 text-2xl">Set a new password</CardTitle>
+                  <CardTitle role="heading" aria-level={1} className="display mt-1 text-2xl">Set a new password</CardTitle>
                   <CardDescription>
                     Choose a new password for your account. The recovery link
                     signed you in once for exactly this purpose.
@@ -285,7 +285,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               <div>
                 <CardHeader className="pb-2 text-center">
                   <p className="kicker">Two-factor verification</p>
-                  <CardTitle className="display mt-1 text-2xl">Enter authenticator code</CardTitle>
+                  <CardTitle role="heading" aria-level={1} className="display mt-1 text-2xl">Enter authenticator code</CardTitle>
                   <CardDescription>
                     Your account requires a second factor. Enter the 6-digit code
                     from your authenticator app to finish signing in.
@@ -336,7 +336,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               <div>
                 <CardHeader className="pb-2 text-center">
                   <p className="kicker">Account recovery</p>
-                  <CardTitle className="display mt-1 text-2xl">Reset your password</CardTitle>
+                  <CardTitle role="heading" aria-level={1} className="display mt-1 text-2xl">Reset your password</CardTitle>
                   <CardDescription>
                     Enter your account email. If it exists and email delivery is
                     configured for the project, a recovery link is sent.
@@ -386,7 +386,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             <Tabs defaultValue="signin">
               <CardHeader className="pb-2 text-center">
                 <p className="kicker">Authorized personnel</p>
-                <CardTitle className="display mt-1 text-2xl">
+                <CardTitle role="heading" aria-level={1} className="display mt-1 text-2xl">
                   Staff sign-in
                 </CardTitle>
                 <CardDescription>
@@ -547,7 +547,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             government adoption.
           </p>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

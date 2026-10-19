@@ -66,6 +66,7 @@ export default function Landing() {
           <div className="border-t border-foreground/20" />
         </div>
       </header>
+      <main id="main-content">
 
       {/* Hero */}
       <section className="mx-auto max-w-6xl px-4 pb-14 pt-16 md:px-8 md:pt-24">
@@ -187,6 +188,7 @@ export default function Landing() {
         </div>
       </section>
 
+      </main>
       <footer className="border-t border-border">
         <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-8 text-xs text-muted-foreground md:flex-row md:items-center md:justify-between md:px-8">
           <span>

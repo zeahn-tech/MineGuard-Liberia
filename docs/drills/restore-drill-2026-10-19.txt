@@ -1,0 +1,31 @@
+=== SOURCE 2026-10-19T18:10:26Z (postgres (PostgreSQL) 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)) ===
+rowcount|admin_boundaries|151
+rowcount|audit_log|153
+rowcount|auth.users|2
+rowcount|community_reports|1
+rowcount|inspection_templates|1
+rowcount|inspections|1
+rowcount|profiles|2
+rowcount|risk_config_versions|1
+rowcount|sites|2
+schema|policies|54
+schema|routines|126
+schema|tables|24
+schema|triggers|52
+=== RESTORED ===
+rowcount|admin_boundaries|151
+rowcount|audit_log|153
+rowcount|auth.users|2
+rowcount|community_reports|1
+rowcount|inspection_templates|1
+rowcount|inspections|1
+rowcount|profiles|2
+rowcount|risk_config_versions|1
+rowcount|sites|2
+schema|policies|54
+schema|routines|126
+schema|tables|24
+schema|triggers|52
+restore_errors_other_than_already_exists|0
+dump_bytes|846764
+RESULT|PASS|source and restored counts identical
