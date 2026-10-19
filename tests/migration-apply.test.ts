@@ -60,8 +60,8 @@ describe("migrations apply to a clean database", () => {
       // 14 domain tables + evidence_url_audit (0006) + 0010's four
       // (organizations, admin_areas, site_assignments, permissions) + 0015's
       // two GIS boundary tables (admin_boundaries, site_boundaries) + 0019's
-      // risk_config_versions.
-      expect(Number(scalar(tables))).toBe(22);
+      // risk_config_versions + 0020's ai_request_log.
+      expect(Number(scalar(tables))).toBe(23);
 
       const rls = await one(
         run,
@@ -69,8 +69,8 @@ describe("migrations apply to a clean database", () => {
           where schemaname = 'public' and rowsecurity = true`,
       );
       // every table above has RLS, including 0015's two boundary tables and
-      // 0019's risk_config_versions
-      expect(Number(scalar(rls))).toBe(22);
+      // 0019's risk_config_versions + 0020's ai_request_log
+      expect(Number(scalar(rls))).toBe(23);
 
       const guards = await one(
         run,

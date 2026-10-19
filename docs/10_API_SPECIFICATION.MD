@@ -76,3 +76,18 @@ the React layer (`src/lib/backend-react.ts`) exposes them with Convex
 |----------|------|------|-------|
 | `seedIfEmpty` | mutation | admin | Synthetic demo data only when DB empty |
 | `checkSeeded` | query | staff | Site count |
+
+## ai-assist (Edge Function) [Session 8 — AI-1]
+`POST /functions/v1/ai-assist` — JWT required (verify-JWT on). Body: `{capability, ...params}`.
+Response: the AI envelope (`label`, `capability`, `mode`, `abstained`, `abstainReason`, `claims[]`
+each with `citations`, `citations[]`, `data`, `notices[]`). Errors: `400 BAD_REQUEST`,
+`401 UNAUTHENTICATED`, `403 FORBIDDEN` (no role), `502 QUERY_FAILED`, `503 LOG_UNAVAILABLE`.
+| Capability | Params | Auth |
+|---|---|---|
+| `nl_search` | `query` (≤ 500 chars) | any role; RLS-scoped |
+| `site_summary` | `siteId` | any role; out-of-scope ⇒ abstain |
+| `trend_notes` | `siteId?`, `months?` (3–24) | any role; RLS-scoped |
+| `inspection_priorities` | `limit?` (1–25) | any role; RLS-scoped |
+| `executive_briefing` | — | any role; RLS-scoped |
+| `document_analysis` | `text` (≤ 20,000 chars) | any role; reads no records |
+Client wrapper: `askAiAssistant()` in `src/lib/ai-assist.ts`.

@@ -2,6 +2,22 @@
 
 Short records of the significant choices made in this build, with rationale.
 
+## ADR-12 — AI assistance: deterministic first, model only as a wording layer [2026-10-19]
+**Decision:** AI-1 ships as a Supabase Edge Function whose every capability has a
+deterministic implementation; a model provider (none approved) may only (a) reword
+statements already computed from scoped records and (b) propose a search filter that is
+re-validated against the same allowlist. Retrieval runs on the caller's JWT — the
+function holds no service-role key. One append-only table (`ai_request_log`) is the only
+thing it writes, and a failed log write withholds the answer.
+**Rationale:** the platform's credibility rests on attributable records (doc 08). If the
+facts, numbers and citations are produced by code the model cannot reach, a manipulated
+model or a poisoned record cannot fabricate evidence or widen scope — the worst a model
+can do is word a true sentence badly, and the gate rejects wording that changes a number,
+adds an identifier, or reaches a legal conclusion. This also lets the feature be useful,
+auditable and testable before the owner's provider decision.
+**Consequences:** summaries state counts and dates, not narrative about free-text bodies,
+until a provider is approved and evaluated. Query text is not stored (hash + length only).
+
 ## ADR-11 — Explicit `EXECUTE` management on the public schema (no PUBLIC fallback) [2026-09-25]
 **Decision:** `0002_grants_and_storage.sql` revokes `EXECUTE` on all functions
 in schema `public` from `PUBLIC` before granting it to `anon`/`authenticated`,

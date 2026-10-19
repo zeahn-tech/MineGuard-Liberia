@@ -388,3 +388,15 @@ deploy job never ran and the broken state persisted.
   the data layer (see doc 04, gap 5).
 - Backup artifacts live in the repository's Actions storage — acceptable for
   pilot; object-storage offload is the owner decision noted above.
+
+## Deploying the AI assistant [Session 8 — AI-1]
+1. Apply `supabase/migrations/0020_ai_request_log.sql` (idempotent; needs 0010 and 0009).
+2. `supabase functions deploy ai-assist` — keep **verify JWT on** (the default). The
+   function needs only `SUPABASE_URL` and `SUPABASE_ANON_KEY`, which the platform injects.
+   Do **not** give it a service-role key.
+3. Optional: `AI_ALLOWED_ORIGIN` secret to restrict CORS to the deployed site origin.
+4. Provider secrets (`AI_PROVIDER_APPROVED`, `AI_PROVIDER_ID`, `AI_PROVIDER_API_KEY`) are
+   **not to be set** until the owner approves a provider and a reviewed adapter is added.
+   With them unset the function is fully functional on its deterministic path.
+5. Review `select * from ai_request_log order by created_at desc` (administrators see
+   all rows; others see their own). `injection_flagged = true` rows deserve a look.

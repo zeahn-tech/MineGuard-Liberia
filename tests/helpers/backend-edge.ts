@@ -433,6 +433,32 @@ class WireQuery {
     return this;
   }
 
+  // Session 8 (AI-1): the AI search executor needs these PostgREST filters.
+  neq(col: string, val: unknown) {
+    this.wheres.push(`${col} <> ${lit(val)}`);
+    return this;
+  }
+
+  in(col: string, vals: unknown[]) {
+    this.wheres.push(vals.length ? `${col} in (${vals.map(lit).join(", ")})` : "false");
+    return this;
+  }
+
+  gte(col: string, val: unknown) {
+    this.wheres.push(`${col} >= ${lit(val)}`);
+    return this;
+  }
+
+  lte(col: string, val: unknown) {
+    this.wheres.push(`${col} <= ${lit(val)}`);
+    return this;
+  }
+
+  ilike(col: string, pattern: string) {
+    this.wheres.push(`${col} ilike ${lit(pattern)}`);
+    return this;
+  }
+
   order(col: string, opts?: { ascending?: boolean }) {
     const dir = opts?.ascending === false ? "desc" : "asc";
     // supabase-js ACCUMULATES successive .order() calls into one ORDER BY —

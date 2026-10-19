@@ -2723,3 +2723,26 @@ and first test suites (doc 13).
   not retained, so an old moment's score is not rebuilt from today's records. A wrong
   future-dated version can only be superseded by a later one. Do not re-apply 0014 after
   0019 (it recreates the old overloads).
+
+## Session 8 [2026-10-19 — AI assistance (AI-1)]
+
+**Owner decision outstanding: model provider.** Per the brief, interfaces + deterministic
+fallback are implemented; provider-backed items are marked REQUIRES GOVERNMENT
+CONFIRMATION / PROPOSED in doc 08 and stay inactive.
+
+- **Migration 0020** — `ai_request_log`: append-only, session-attributed, RLS (own rows; admin all),
+  query stored as hash + length only. Pins updated: tables 23, RLS 23.
+- **Edge Function `ai-assist`** (+ `_shared/ai/*`) — `nl_search`, `site_summary`, `trend_notes`,
+  `inspection_priorities`, `executive_briefing`, `document_analysis`; caller-JWT retrieval under
+  RLS, cite-or-abstain, no write path, label on every payload, injection detection + fencing,
+  provider seam with an empty adapter registry and a wording-only narration gate.
+- **Client** — `src/lib/ai-assist.ts` (`askAiAssistant`). No UI page added (PROPOSED).
+- **Tests** — `tests/ai-assist.test.ts` (37): cross-tenant/cross-county/role-less leakage for
+  every capability, cite-or-abstain, prompt-injection (attack strings, hostile stub provider),
+  structured-filter allowlist, no-write snapshot + source contracts, logging (append-only,
+  attribution, withheld-on-log-failure), labelling, provider gating. Test bridge gained
+  `neq/in/gte/lte/ilike`.
+- **Not verified here** — the Deno entry point (`ai-assist/index.ts`) is not executed by the
+  suite (no Deno runtime in CI); the handler it calls is. Deploy and smoke-test per doc 14.
+- **Known limits** — no per-user rate limit; the log has no retention policy; summaries state
+  counts/dates only; keyword-based question parsing covers English phrasing only.
