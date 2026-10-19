@@ -177,7 +177,7 @@ export default function CommandCenter() {
           <div>
             <div className="flex items-baseline justify-between border-b border-border pb-2">
               <h2 className="display text-lg">Under review</h2>
-              <Link to="/portal/inspections" className="text-xs text-muted-foreground hover:text-foreground">
+              <Link to="/portal/inspections" className="inline-flex min-h-6 items-center text-xs text-muted-foreground hover:text-foreground">
                 All inspections →
               </Link>
             </div>
@@ -189,7 +189,7 @@ export default function CommandCenter() {
           <div>
             <div className="flex items-baseline justify-between border-b border-border pb-2">
               <h2 className="display text-lg">Community reports awaiting triage</h2>
-              <Link to="/portal/community" className="text-xs text-muted-foreground hover:text-foreground">
+              <Link to="/portal/community" className="inline-flex min-h-6 items-center text-xs text-muted-foreground hover:text-foreground">
                 Triage queue →
               </Link>
             </div>

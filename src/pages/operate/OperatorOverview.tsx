@@ -178,7 +178,7 @@ export default function OperatorOverview() {
           )}
           <div className="grid gap-3 sm:grid-cols-2">
             {(sitesQ ?? []).map((s) => (
-              <Link key={s._id} to={`/operate/sites/${s._id}`} className="block">
+              <Link key={s._id} to={`/operate/sites/${s._id}`} className="block min-w-0">
                 <div className="flex h-full items-center gap-3 rounded border border-border bg-muted/30 p-3 transition-colors hover:bg-muted/60">
                   <Building2 className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
                   <div className="min-w-0">
@@ -187,7 +187,7 @@ export default function OperatorOverview() {
                       {s.code} · {s.county} · {s.status.replace("_", " ")}
                     </p>
                   </div>
-                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                  <span className="ml-auto text-right text-xs text-muted-foreground">
                     {(s.openActions ?? 0) === 0
                       ? "no open actions"
                       : `${s.openActions} open action(s)`}

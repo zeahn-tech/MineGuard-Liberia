@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useKeysetPage, useMutation, useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
@@ -72,6 +72,9 @@ export default function Inspections() {
   const navigate = useNavigate();
   const [localDrafts, setLocalDrafts] = useState<LocalDraft[]>([]);
   const [open, setOpen] = useState(false);
+  // The dialog is controlled (no Radix trigger), so focus must be returned to
+  // the opener by hand or keyboard users land back at the top of the page.
+  const newBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const refresh = () => setLocalDrafts(readDrafts());
@@ -97,7 +100,7 @@ export default function Inspections() {
           </p>
         </div>
         {isStaff && (
-          <Button onClick={() => setOpen(true)} disabled={!templates?.length}>
+          <Button ref={newBtnRef} onClick={() => setOpen(true)} disabled={!templates?.length}>
             <FilePlus2 className="size-4" /> New inspection
           </Button>
         )}
@@ -240,6 +243,7 @@ export default function Inspections() {
           sites={sites ?? []}
           templates={(templates ?? []) as TemplateDoc[]}
           onClose={() => setOpen(false)}
+          returnFocusTo={newBtnRef}
         />
       )}
     </div>
@@ -250,10 +254,12 @@ function NewInspectionDialog({
   sites,
   templates,
   onClose,
+  returnFocusTo,
 }: {
   sites: (SiteDoc & { openActions?: number })[];
   templates: TemplateDoc[];
   onClose: () => void;
+  returnFocusTo: RefObject<HTMLElement | null>;
 }) {
   const navigate = useNavigate();
   const [siteId, setSiteId] = useState("");
@@ -290,7 +296,13 @@ function NewInspectionDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="paper">
+      <DialogContent
+        className="paper"
+        onCloseAutoFocus={(e) => {
+          e.preventDefault();
+          returnFocusTo.current?.focus();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>New field inspection</DialogTitle>
           <DialogDescription>

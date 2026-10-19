@@ -373,15 +373,18 @@ export default function PortalLayout() {
                   <button
                     onClick={handleSyncNow}
                     disabled={syncing}
+                    aria-label="Queue synced — tap to sync again"
                     className="flex items-center gap-1.5 rounded-sm border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent"
                   >
                     <RefreshCw className={`size-3.5 ${syncing ? "animate-spin" : ""}`} />
-                    Queue synced
+                    {/* icon-only on phones: the full label overflowed 320px */}
+                    <span className="hidden sm:inline">Queue synced</span>
                   </button>
                 )}
               </div>
             </div>
-          </header>            <main id="main-content" tabIndex={-1} className="flex-1 px-4 py-6 md:px-8 md:py-8">
+          </header>
+          <main id="main-content" tabIndex={-1} className="flex-1 px-4 py-6 md:px-8 md:py-8">
             <Outlet />
           </main>
 

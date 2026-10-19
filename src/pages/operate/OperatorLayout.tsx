@@ -244,9 +244,15 @@ export default function OperatorLayout() {
                 className="text-muted-foreground"
                 onClick={() => void handleSyncNow()}
                 disabled={syncing}
+                aria-label={pendingCount > 0 ? `Sync ${pendingCount} queued` : "Sync"}
               >
                 <RefreshCw className={`size-3.5 ${syncing ? "animate-spin" : ""}`} />
-                {pendingCount > 0 ? `${pendingCount} queued` : "Sync"}
+                {/* icon-only on phones when nothing is queued (320px overflow) */}
+                {pendingCount > 0 ? (
+                  `${pendingCount} queued`
+                ) : (
+                  <span className="hidden sm:inline">Sync</span>
+                )}
               </Button>
               <QueueManagerButton
                 label={`Queue${pendingCount > 0 ? ` · ${pendingCount}` : ""}`}

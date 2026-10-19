@@ -25,3 +25,4 @@ src/convex/_generated
 
 # local backup output
 backups/
+e2e/.artifacts/

@@ -116,11 +116,11 @@ export default function CommunitySubmit() {
     <div className="min-h-screen bg-background paper-grain">
       <header className="border-b border-border">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4 md:px-8">
-          <Link to="/" className="flex items-center gap-2">
+          <Link to="/" className="flex min-h-9 items-center gap-2">
             <ShieldCheck className="size-5" strokeWidth={1.5} />
             <span className="display text-base">MineGuard Liberia</span>
           </Link>
-          <Link to="/report/track" className="text-sm text-muted-foreground hover:text-foreground">
+          <Link to="/report/track" className="inline-flex min-h-9 items-center text-sm text-muted-foreground hover:text-foreground">
             Track a report
           </Link>
         </div>
