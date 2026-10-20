@@ -614,6 +614,11 @@ function EvidenceCard({ ev }: { ev: Evidence }) {
   const isVideo = ev.mimeType.startsWith("video/");
   const isAudio = ev.mimeType.startsWith("audio/");
   const previewable = isImage || isVideo || isAudio;
+  const retry = () => {
+    setState("loading");
+    setMediaFailed(false);
+    setAttempt((n) => n + 1);
+  };
 
   const mint = useCallback(async (): Promise<string | null> => {
     try {
@@ -630,8 +635,6 @@ function EvidenceCard({ ev }: { ev: Evidence }) {
   // without a tap. Always ends in "ready" or "error" — never an endless spinner.
   useEffect(() => {
     let cancelled = false;
-    setState("loading");
-    setMediaFailed(false);
     void mint().then((u) => {
       if (!cancelled) setState(u ? "ready" : "error");
     });
@@ -687,7 +690,7 @@ function EvidenceCard({ ev }: { ev: Evidence }) {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setAttempt((n) => n + 1)}
+                onClick={() => retry()}
               >
                 <RefreshCw className="size-3.5" /> Try again
               </Button>
@@ -731,7 +734,7 @@ function EvidenceCard({ ev }: { ev: Evidence }) {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setAttempt((n) => n + 1)}
+                onClick={() => retry()}
               >
                 <RefreshCw className="size-3.5" /> Reload
               </Button>
