@@ -128,12 +128,16 @@ describe("keyboard access (defects A3, A4, A7 fixed)", () => {
     expect(src).toContain("onKeyDown=");
   });
 
-  test("notification bell exposes expanded state and Escape-to-close; click-away is aria-hidden", () => {
-    const src = read("src/components/NotificationBell.tsx");
-    expect(src).toContain("aria-expanded={open}");
-    expect(src).toContain('aria-haspopup="true"');
-    expect(src).toContain('if (e.key === "Escape") setOpen(false);');
-    expect(src).toContain('aria-hidden="true"');
+  test("notification bell is a Radix popover: portaled, collision-aware, with built-in aria-expanded / Escape / click-away", () => {
+    const src = read("src/components/NotificationBellView.tsx");
+    // Radix supplies aria-expanded, aria-haspopup, Escape-to-close, click-away
+    // and focus return; the hand-rolled absolute panel (which rendered off-screen
+    // on phones and in the desktop sidebar) must not come back.
+    expect(src).toContain("<PopoverTrigger asChild>");
+    expect(src).toContain("collisionPadding");
+    expect(src).toContain("max-w-[calc(100vw-1rem)]");
+    expect(src).not.toContain("absolute right-0 z-50");
+    expect(src).not.toContain('className="fixed inset-0 z-40"');
   });
 });
 

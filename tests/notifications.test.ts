@@ -276,7 +276,7 @@ describe("delivery-channel classification (v1 scope guard)", () => {
   });
 
   test("the UI states the in-app-only scope to the user", () => {
-    const bellSrc = readFileSync(join(import.meta.dir, "..", "src", "components", "NotificationBell.tsx"), "utf8");
+    const bellSrc = readFileSync(join(import.meta.dir, "..", "src", "components", "NotificationBellView.tsx"), "utf8");
     expect(bellSrc).toContain("In-app notifications only");
   });
 });

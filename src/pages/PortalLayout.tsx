@@ -323,7 +323,7 @@ export default function PortalLayout() {
               <LogOut className="size-3.5" /> Sign out
             </Button>
             <div className="mt-2 border-t border-border pt-2">
-              <NotificationBell />
+              <NotificationBell side="top" align="start" />
             </div>
           </div>
         </aside>
@@ -420,7 +420,7 @@ export default function PortalLayout() {
           side="left"
           className="w-72 bg-sidebar p-0 sm:max-w-[18rem]"
         >
-          <SheetHeader className="border-b border-border px-4 py-5 text-left">
+          <SheetHeader className="shrink-0 border-b border-border px-4 py-5 text-left">
             <SheetTitle className="flex items-center gap-2 text-sm">
               <ShieldCheck className="size-5" strokeWidth={1.5} />
               <span className="display">MineGuard</span>
@@ -435,13 +435,13 @@ export default function PortalLayout() {
               {user?.role ?? "unassigned"} · {user?.scope ?? "—"}
             </SheetDescription>
           </SheetHeader>
-          <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-4">
+          <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 py-4">
             <NavLinks
               items={navItems}
               onNavigate={() => setMobileNavOpen(false)}
             />
           </nav>
-          <div className="space-y-2 border-t border-border p-3">
+          <div className="shrink-0 space-y-2 border-t border-border bg-sidebar p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             {user && user.profileComplete !== true && (
               <Button
                 variant="outline"
