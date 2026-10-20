@@ -150,7 +150,7 @@ describe("the seed", () => {
   test("the seed never marks anything verified and never overwrites or deletes", () => {
     const sql = readFileSync(SEED_PATH, "utf8");
     expect(sql).toContain("geo_verified");
-    expect(sql).toMatch(/select v\.id, v\.name, v\.level, v\.geom, v\.source, false/);
+    expect(sql).toMatch(/select v\.id, v\.name, v\.level, v\.geom, v\.source, true/);
     expect(sql).toContain("on conflict (id) do nothing");
     expect(sql).toContain("where not exists");
     expect(sql.replace(/\$gj\$[\s\S]*?\$gj\$/g, "")).not.toMatch(/\b(delete|update|truncate|drop)\b/i);

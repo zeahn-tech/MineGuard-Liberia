@@ -1151,7 +1151,7 @@ describe("official county/district boundaries seed", () => {
     );
   });
 
-  test("applies: 15 counties + 136 districts pass the database's own geometry CHECK, loaded UNVERIFIED with attribution", async () => {
+  test("applies: 15 counties + 136 districts pass the database's own geometry CHECK, loaded VERIFIED with attribution", async () => {
     await wipe();
     await adminExec(SEED);
     expect(await seeded()).toEqual([
@@ -1163,7 +1163,7 @@ describe("official county/district boundaries seed", () => {
               count(*) filter (where created_by is not null)::int as authored
          from public.admin_boundaries where source like '${ATTRIBUTION}%'`,
     )) as Array<{ verified: number; authored: number }>;
-    expect(flags).toEqual({ verified: 0, authored: 0 });
+    expect(flags).toEqual({ verified: 151, authored: 0 });
   });
 
   test("re-running the seed is a no-op (nothing duplicated, nothing changed)", async () => {
@@ -1181,7 +1181,7 @@ describe("official county/district boundaries seed", () => {
     const official = admin.adminBoundaries.filter((b) => b.source.startsWith(ATTRIBUTION));
     expect(official.filter((b) => b.level === "county")).toHaveLength(15);
     expect(official.filter((b) => b.level === "district")).toHaveLength(136);
-    expect(official.every((b) => b.geoVerified === false)).toBe(true);
+    expect(official.every((b) => b.geoVerified === true)).toBe(true);
 
     setIdentity(f.county); // staff inspector
     expect((await feed()).adminBoundaries.filter((b) => b.source.startsWith(ATTRIBUTION))).toHaveLength(151);
@@ -1206,6 +1206,29 @@ describe("official county/district boundaries seed", () => {
       { level: "county", n: 14 }, // every county except the one already there
       { level: "district", n: 136 },
     ]);
+  });
+
+  test("migration 0022 verifies already-loaded geoBoundaries rows and leaves hand-loaded unverified rows alone", async () => {
+    await wipe();
+    await adminExec(SEED);
+    // Simulate a database seeded before this change: official rows unverified.
+    await adminSql(`update public.admin_boundaries set geo_verified = false where source like '${ATTRIBUTION}%'`);
+    await adminSql(
+      `insert into public.admin_boundaries (name, level, geometry_geojson, source)
+       values ('Handmade', 'county', '${POLY(-9.8, 6.1)}'::jsonb, 'manual load (seed test)')`,
+    );
+    const MIGRATION = readFileSync(join(ROOT, "supabase/migrations/0022_verify_geoboundaries_admin_areas.sql"), "utf8");
+    await adminExec(MIGRATION);
+    await adminExec(MIGRATION); // idempotent
+    const [official] = (await adminSql(
+      `select count(*) filter (where geo_verified)::int as verified, count(*)::int as total
+         from public.admin_boundaries where source like '${ATTRIBUTION}%'`,
+    )) as Array<{ verified: number; total: number }>;
+    expect(official).toEqual({ verified: 151, total: 151 });
+    const [mine] = (await adminSql(
+      `select geo_verified from public.admin_boundaries where source = 'manual load (seed test)'`,
+    )) as Array<{ geo_verified: boolean }>;
+    expect(mine.geo_verified).toBe(false);
   });
 
   test("on a database without the boundary tables the seed stops with a plain explanation", async () => {

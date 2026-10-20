@@ -563,6 +563,7 @@ export function BoundaryLoader({
             ) : (
               <div className="grid gap-6 md:grid-cols-2">
                 <LoadedList
+                  emptyText="No administrative areas loaded yet."
                   title={`Administrative areas (${adminBoundaries.length})`}
                   items={adminBoundaries.map((b) => ({
                     key: b._id,
@@ -572,6 +573,7 @@ export function BoundaryLoader({
                   }))}
                 />
                 <LoadedList
+                  emptyText="No site outlines loaded yet. Site outlines have no public source: load a surveyed or licence-boundary GeoJSON using the Site outlines tab above."
                   title={`Site outlines (${siteBoundaries.length})`}
                   items={siteBoundaries.map((b) => {
                     const site = siteList.find((s) => s._id === b.siteId);
@@ -689,8 +691,10 @@ function DataSourcesHelp() {
 function LoadedList({
   title,
   items,
+  emptyText = "None.",
 }: {
   title: string;
+  emptyText?: string;
   items: {
     key: string;
     primary: string;
@@ -702,7 +706,7 @@ function LoadedList({
     <div>
       <h3 className="text-sm font-medium">{title}</h3>
       {items.length === 0 ? (
-        <p className="mt-1 text-xs text-muted-foreground">None.</p>
+        <p className="mt-1 text-xs text-muted-foreground">{emptyText}</p>
       ) : (
         <ul className="mt-1 divide-y divide-border border border-border text-sm">
           {items.map((i) => (

@@ -112,7 +112,7 @@ export function buildSql(rows: Row[]): string {
 -- Not CC BY 4.0. Attribution is stored as each boundary's source.
 --
 -- Loads ${counts} from geoBoundaries (gbOpen, simplified), as published:
--- geometry and names unchanged, loaded UNVERIFIED (geo_verified = false).
+-- geometry and names unchanged, loaded VERIFIED (geo_verified = true; owner-confirmed authoritative source).
 --
 -- Safe to run more than once, and safe next to boundaries an administrator
 -- already loaded by hand:
@@ -134,7 +134,7 @@ begin
 end $$;
 
 insert into public.admin_boundaries (id, name, level, geometry_geojson, source, geo_verified)
-select v.id, v.name, v.level, v.geom, v.source, false
+select v.id, v.name, v.level, v.geom, v.source, true
   from (values
 ${values}
   ) as v(id, name, level, geom, source)
