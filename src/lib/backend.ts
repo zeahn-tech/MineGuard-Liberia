@@ -1322,6 +1322,7 @@ function live<T>(
       };
 
       const run = async () => {
+        if (cancelled) return;
         if (inFlight) {
           dirty = true;
           return;
@@ -1356,7 +1357,10 @@ function live<T>(
             attempts += 1;
             const delay = Math.min(30_000, 1_000 * 2 ** Math.min(attempts, 5));
             // A re-run is already queued (`dirty`): don't also schedule a backoff.
-            if (!dirty) {
+            // `cb(undefined)` above may itself have unsubscribed (a one-shot
+            // reader): scheduling a retry then would leak a loop that keeps
+            // reading for a subscriber that no longer exists.
+            if (!dirty && !cancelled) {
               retryTimer = setTimeout(() => {
                 retryTimer = null;
                 void run();
