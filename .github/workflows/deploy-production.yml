@@ -130,9 +130,10 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Build (production flags)
-        run: bun run build
-          # Production build: demo seeding compiled out of the UI.
+        # Production build: demo seeding compiled out of the UI.
+        env:
           VITE_MINEGUARD_ENV: production
+        run: bun run build
 
       - name: Production sanity — seed button absent, build complete
         run: |

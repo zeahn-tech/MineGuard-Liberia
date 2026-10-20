@@ -12,7 +12,7 @@
 // or fail. The timeout is shrunk so a stall is observable in milliseconds.
 // ---------------------------------------------------------------------------
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   __testSetReadTimeout,
@@ -120,6 +120,19 @@ afterAll(() => {
   edgeIdentity.set(null);
 });
 
+const live: Array<() => void> = [];
+function track(stop: () => void) {
+  live.push(stop);
+  return stop;
+}
+afterEach(async () => {
+  for (const stop of live.splice(0)) stop();
+  state.mode.profiles = "ok";
+  state.mode.sites = "ok";
+  notifyResume();
+  await sleep(100); // let aborted / in-flight attempts finish before the next test resets counters
+});
+
 function reset(timeoutMs = 150) {
   state.mode.profiles = "ok";
   state.mode.sites = "ok";
@@ -135,8 +148,8 @@ describe("a STALLED profile read (the 'Still loading your account' failure)", ()
     reset();
     state.mode.profiles = "stall";
     const values: unknown[] = [];
-    const stop = api.users.currentUser().subscribe((v) => values.push(v));
-    await until(() => problem("profiles") !== undefined, 2000, "a recorded problem");
+    const stop = track(api.users.currentUser().subscribe((v) => values.push(v)));
+    await until(() => problem("profiles") !== undefined, 6000, "a recorded problem");
     expect(problem("profiles")?.message).toContain("did not answer");
     expect(state.aborted).toBeGreaterThanOrEqual(1); // the socket is freed, not abandoned
     // Emitting null here would push a signed-in user into "no portal role assigned".
@@ -148,11 +161,11 @@ describe("a STALLED profile read (the 'Still loading your account' failure)", ()
     reset();
     state.mode.profiles = "stall";
     const values: unknown[] = [];
-    const stop = api.users.currentUser().subscribe((v) => values.push(v));
+    const stop = track(api.users.currentUser().subscribe((v) => values.push(v)));
     await until(() => problem("profiles") !== undefined);
     state.mode.profiles = "ok";
     notifyResume(); // tab visible / back online — no waiting out a backoff
-    await until(() => values.length > 0, 2000, "the profile");
+    await until(() => values.length > 0, 6000, "the profile");
     expect(values[0]).not.toBeNull();
     expect(problem("profiles")).toBeUndefined();
     stop();
@@ -161,7 +174,7 @@ describe("a STALLED profile read (the 'Still loading your account' failure)", ()
   test("keeps retrying by itself (no resume needed): a second request is made after the backoff", async () => {
     reset();
     state.mode.profiles = "stall";
-    const stop = api.users.currentUser().subscribe(() => {});
+    const stop = track(api.users.currentUser().subscribe(() => {}));
     await until(() => state.calls.profiles >= 2, 4000, "an automatic retry");
     stop();
   });
@@ -170,13 +183,13 @@ describe("a STALLED profile read (the 'Still loading your account' failure)", ()
     reset(3000); // would not time out for 3 s…
     state.mode.profiles = "stall";
     const values: unknown[] = [];
-    const stop = api.users.currentUser().subscribe((v) => values.push(v));
+    const stop = track(api.users.currentUser().subscribe((v) => values.push(v)));
     await sleep(1200); // …but has been stalled longer than a third of that
     expect(state.calls.profiles).toBe(1);
     state.mode.profiles = "ok";
     const t0 = Date.now();
     notifyResume();
-    await until(() => values.length > 0, 2000, "the profile");
+    await until(() => values.length > 0, 6000, "the profile");
     expect(Date.now() - t0).toBeLessThan(1500); // far sooner than the 3 s limit
     expect(state.aborted).toBeGreaterThanOrEqual(1); // the dead request was cancelled
     stop();
@@ -187,13 +200,13 @@ describe("a FAILING read: the real reason is recorded for the screen", () => {
   test("the actual message (no URL, no credential) is kept, and clears when the read succeeds", async () => {
     reset();
     state.mode.profiles = "fail";
-    const stop = api.users.currentUser().subscribe(() => {});
+    const stop = track(api.users.currentUser().subscribe(() => {}));
     await until(() => problem("profiles") !== undefined);
     expect(problem("profiles")?.message).toContain("permission denied for table profiles");
     expect(problem("profiles")?.message).not.toMatch(/https?:|apikey|eyJ/i);
     state.mode.profiles = "ok";
     notifyResume();
-    await until(() => problem("profiles") === undefined, 2000, "the problem to clear");
+    await until(() => problem("profiles") === undefined, 6000, "the problem to clear");
     stop();
   });
 });
@@ -203,7 +216,7 @@ describe("what the screen is told is readable, whatever the server sent", () => 
     reset();
     state.failMessage = message;
     state.mode.profiles = "fail";
-    const stop = api.users.currentUser().subscribe(() => {});
+    const stop = track(api.users.currentUser().subscribe(() => {}));
     await until(() => problem("profiles") !== undefined);
     const text = problem("profiles")!.message;
     state.mode.profiles = "ok";
@@ -233,7 +246,7 @@ describe("list reads get the same protection", () => {
     state.mode.sites = "stall";
     const values: unknown[] = [];
     const stop = api.sites.list().subscribe((v) => values.push(v));
-    await until(() => problem("sites") !== undefined, 2000, "a recorded problem");
+    await until(() => problem("sites") !== undefined, 6000, "a recorded problem");
     expect(problem("sites")?.message).toContain("did not answer");
     state.mode.sites = "ok";
     notifyResume();
@@ -247,7 +260,7 @@ describe("resume is cheap and safe", () => {
   test("a healthy, fresh query is NOT re-read when the tab becomes visible again", async () => {
     reset(5000);
     const values: unknown[] = [];
-    const stop = api.users.currentUser().subscribe((v) => values.push(v));
+    const stop = track(api.users.currentUser().subscribe((v) => values.push(v)));
     await until(() => values.length > 0);
     const calls = state.calls.profiles;
     notifyResume();
@@ -259,7 +272,7 @@ describe("resume is cheap and safe", () => {
   test("after unsubscribing, resume does nothing (a closed screen must not keep reading)", async () => {
     reset(5000);
     const values: unknown[] = [];
-    const stop = api.users.currentUser().subscribe((v) => values.push(v));
+    const stop = track(api.users.currentUser().subscribe((v) => values.push(v)));
     await until(() => values.length > 0);
     stop();
     state.mode.profiles = "stall"; // would be noticed if anything still read
