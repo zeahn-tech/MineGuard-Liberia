@@ -31,7 +31,9 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import CameraCapture, { type CameraCaptureResult } from "@/components/CameraCapture";
+import CameraCapture, {
+  type CameraCaptureResult,
+} from "@/components/CameraCapture";
 import {
   Dialog,
   DialogContent,
@@ -41,7 +43,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Camera, CloudOff, FileText, ImageIcon, Paperclip, Upload } from "lucide-react";
+import {
+  Camera,
+  CloudOff,
+  ExternalLink,
+  FileText,
+  ImageIcon,
+  Loader2,
+  Paperclip,
+  RefreshCw,
+  Upload,
+} from "lucide-react";
 import type { Evidence } from "@/lib/types";
 import {
   enqueuePendingEvidence,
@@ -76,7 +88,8 @@ const BATCH_STATUS_LABEL: Record<BatchStatus, string> = {
 /** True when a failure looks like a connectivity problem (retryable) rather
  *  than a policy denial (storage/unauthorized) — only the former is queued. */
 function isNetworkError(e: unknown): boolean {
-  if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
+  if (typeof navigator !== "undefined" && navigator.onLine === false)
+    return true;
   const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
   // Deliberately narrow: only clearly-connectivity signals are considered
   // retryable. A policy denial (storage/unauthorized) or a missing bucket must
@@ -168,7 +181,9 @@ export default function EvidenceSection({
 
   /** A camera frame joins the batch exactly like a picked file. */
   const onCameraCaptured = (result: CameraCaptureResult) => {
-    const asFile = new File([result.blob], result.fileName, { type: result.mimeType });
+    const asFile = new File([result.blob], result.fileName, {
+      type: result.mimeType,
+    });
     setBatch((prev) => [
       ...prev,
       {
@@ -241,7 +256,11 @@ export default function EvidenceSection({
         const digest = await sha256Hex(file);
         if (typeof navigator !== "undefined" && navigator.onLine === false) {
           // The upload mutation takes `file`; the queue stores bytes as `blob`.
-          await enqueuePendingEvidence({ ...meta, blob: file, sha256: digest ?? undefined });
+          await enqueuePendingEvidence({
+            ...meta,
+            blob: file,
+            sha256: digest ?? undefined,
+          });
           setStatus(item.key, "queued");
           queued++;
         } else {
@@ -262,7 +281,11 @@ export default function EvidenceSection({
           // the file is marked failed — never reported as saved (OFF-2).
           try {
             const digest = await sha256Hex(file);
-            await enqueuePendingEvidence({ ...meta, blob: file, sha256: digest ?? undefined });
+            await enqueuePendingEvidence({
+              ...meta,
+              blob: file,
+              sha256: digest ?? undefined,
+            });
             setStatus(item.key, "queued");
             queued++;
           } catch (qErr) {
@@ -288,9 +311,7 @@ export default function EvidenceSection({
     await refreshPending();
 
     if (uploaded > 0 && queued === 0 && failed === 0) {
-      toast.success(
-        `${uploaded} file${uploaded > 1 ? "s" : ""} attached`,
-      );
+      toast.success(`${uploaded} file${uploaded > 1 ? "s" : ""} attached`);
     } else if (uploaded > 0 || queued > 0) {
       toast.info(
         `${uploaded} uploaded, ${queued} saved on device` +
@@ -308,7 +329,8 @@ export default function EvidenceSection({
   };
 
   const batchRunning =
-    saving || batch.some((b) => b.status === "pending" || b.status === "uploading");
+    saving ||
+    batch.some((b) => b.status === "pending" || b.status === "uploading");
   const batchFinished = batch.length > 0 && !batchRunning;
 
   const total = (evidence?.length ?? 0) + pending.length;
@@ -335,7 +357,7 @@ export default function EvidenceSection({
       )}
 
       {evidence === undefined ? (
-        <p className="py-4 text-sm text-muted-foreground">Loading…</p>
+        <ListLoading onRetry={() => setNonce((n) => n + 1)} />
       ) : total === 0 ? (
         <p className="py-4 text-sm text-muted-foreground">
           No evidence attached yet.
@@ -442,7 +464,10 @@ export default function EvidenceSection({
                 {batch
                   .filter((b) => b.status === "uploading" && b.total)
                   .map((b) => {
-                    const pct = Math.min(100, Math.round(((b.loaded ?? 0) / (b.total ?? 1)) * 100));
+                    const pct = Math.min(
+                      100,
+                      Math.round(((b.loaded ?? 0) / (b.total ?? 1)) * 100),
+                    );
                     return (
                       <div key={`p-${b.key}`}>
                         <div className="flex justify-between text-[10px] text-muted-foreground">
@@ -468,7 +493,11 @@ export default function EvidenceSection({
             {/* While a batch is in flight neither button is actionable: closing
                 mid-upload would orphan the progress rows, and a second Upload
                 click would double-send the same files. */}
-            <Button variant="outline" onClick={resetDialog} disabled={batchRunning}>
+            <Button
+              variant="outline"
+              onClick={resetDialog}
+              disabled={batchRunning}
+            >
               {batchFinished ? "Close" : "Cancel"}
             </Button>
             <Button
@@ -501,7 +530,9 @@ function PendingCard({ item }: { item: PendingEvidence }) {
           )}
         </span>
         <span className="min-w-0">
-          <span className="block truncate text-sm font-medium">{item.fileName}</span>
+          <span className="block truncate text-sm font-medium">
+            {item.fileName}
+          </span>
           <span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
             <CloudOff className="size-3" /> Queued for upload
           </span>
@@ -516,43 +547,200 @@ function PendingCard({ item }: { item: PendingEvidence }) {
   );
 }
 
+/** "Loading…" that cannot spin forever: after STALL_MS it says so and offers
+ *  a retry (a fresh scoped read) instead of leaving the person guessing. */
+const STALL_MS = 15_000;
+function ListLoading({ onRetry }: { onRetry: () => void }) {
+  const [stalled, setStalled] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setStalled(true), STALL_MS);
+    return () => window.clearTimeout(t);
+  }, []);
+  if (!stalled)
+    return (
+      <p
+        className="flex items-center gap-2 py-4 text-sm text-muted-foreground"
+        role="status"
+      >
+        <Loader2 className="size-4 animate-spin" /> Loading…
+      </p>
+    );
+  return (
+    <div className="py-4 text-sm text-muted-foreground" role="alert">
+      <p>Evidence is taking too long to load. Check your connection.</p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="mt-2"
+        onClick={onRetry}
+      >
+        <RefreshCw className="size-3.5" /> Try again
+      </Button>
+    </div>
+  );
+}
+
+const URL_TTL_MS = 100_000; // signed links live 120 s server-side; refresh before that
+const MINT_TIMEOUT_MS = 20_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = window.setTimeout(() => reject(new Error("TIMEOUT")), ms);
+    p.then(
+      (v) => {
+        window.clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        window.clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
+
+type Minted = { url: string; at: number };
+
 function EvidenceCard({ ev }: { ev: Evidence }) {
   const getUrl = useMutation(api.evidence.getUrl);
-  const [url, setUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const load = async () => {
-    if (loading || url) return;
-    setLoading(true);
-    try {
-      const u = await getUrl(ev._id);
-      if (u) {
-        setUrl(u);
-        window.open(u, "_blank", "noopener");
-      } else {
-        toast.error("File unavailable (access denied or missing).");
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+  const getUrlRef = useLatest(getUrl);
+  const [minted, setMinted] = useState<Minted | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [mediaFailed, setMediaFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   const isImage = ev.mimeType.startsWith("image/");
+  const isVideo = ev.mimeType.startsWith("video/");
+  const isAudio = ev.mimeType.startsWith("audio/");
+  const previewable = isImage || isVideo || isAudio;
+
+  const mint = useCallback(async (): Promise<string | null> => {
+    try {
+      const u = await withTimeout(getUrlRef.current(ev._id), MINT_TIMEOUT_MS);
+      if (!u) return null;
+      setMinted({ url: u, at: Date.now() });
+      return u;
+    } catch {
+      return null;
+    }
+  }, [ev._id, getUrlRef]);
+
+  // Mint a signed link as soon as the card appears so the preview shows
+  // without a tap. Always ends in "ready" or "error" — never an endless spinner.
+  useEffect(() => {
+    let cancelled = false;
+    setState("loading");
+    setMediaFailed(false);
+    void mint().then((u) => {
+      if (!cancelled) setState(u ? "ready" : "error");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [mint, attempt]);
+
+  // Links expire after ~2 minutes: re-mint on demand rather than reuse a dead one.
+  const openFile = async () => {
+    let url = minted && Date.now() - minted.at < URL_TTL_MS ? minted.url : null;
+    if (!url) {
+      setState("loading");
+      url = await mint();
+      setState(url ? "ready" : "error");
+    }
+    if (!url) {
+      toast.error("File unavailable (access denied, missing or offline).");
+      return;
+    }
+    // Same-tab navigation target via a real anchor click: unlike window.open
+    // after an await, mobile browsers do not treat this as a blocked popup.
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const url = minted?.url ?? null;
+  const caption = ev.caption ?? ev.fileName;
   return (
     <li className="border border-border p-3">
-      <button
-        type="button"
-        onClick={load}
-        className="group flex w-full items-start gap-3 text-left"
-        title="Open evidence file"
-      >
-        {isImage && url ? (
-          <img
-            src={url}
-            alt={ev.caption ?? ev.fileName}
-            className="size-12 shrink-0 border border-border object-cover"
-          />
-        ) : (
+      {previewable && (
+        <div className="mb-3 overflow-hidden border border-border bg-muted/40">
+          {state === "loading" && (
+            <div
+              className="flex h-32 items-center justify-center text-xs text-muted-foreground"
+              role="status"
+            >
+              <Loader2 className="mr-2 size-4 animate-spin" /> Loading preview…
+            </div>
+          )}
+          {state === "error" && (
+            <div
+              className="flex h-32 flex-col items-center justify-center gap-2 text-xs text-muted-foreground"
+              role="alert"
+            >
+              <span>Couldn&apos;t load this file.</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setAttempt((n) => n + 1)}
+              >
+                <RefreshCw className="size-3.5" /> Try again
+              </Button>
+            </div>
+          )}
+          {state === "ready" && url && !mediaFailed && isImage && (
+            <img
+              src={url}
+              alt={caption}
+              loading="lazy"
+              onError={() => setMediaFailed(true)}
+              className="max-h-72 w-full object-contain"
+            />
+          )}
+          {state === "ready" && url && !mediaFailed && isVideo && (
+            <video
+              src={url}
+              controls
+              playsInline
+              preload="metadata"
+              onError={() => setMediaFailed(true)}
+              className="max-h-72 w-full"
+            />
+          )}
+          {state === "ready" && url && !mediaFailed && isAudio && (
+            <audio
+              src={url}
+              controls
+              preload="metadata"
+              onError={() => setMediaFailed(true)}
+              className="w-full"
+            />
+          )}
+          {state === "ready" && mediaFailed && (
+            <div
+              className="flex h-24 flex-col items-center justify-center gap-2 text-xs text-muted-foreground"
+              role="alert"
+            >
+              <span>This file can&apos;t be previewed here.</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setAttempt((n) => n + 1)}
+              >
+                <RefreshCw className="size-3.5" /> Reload
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+      <div className="flex items-start gap-3">
+        {!previewable && (
           <span className="flex size-12 shrink-0 items-center justify-center border border-border bg-muted/40">
             {isImage ? (
               <ImageIcon className="size-5 text-muted-foreground" />
@@ -561,8 +749,8 @@ function EvidenceCard({ ev }: { ev: Evidence }) {
             )}
           </span>
         )}
-        <span className="min-w-0">
-          <span className="block truncate text-sm font-medium group-hover:underline">
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium">
             {ev.fileName}
           </span>
           <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -575,7 +763,16 @@ function EvidenceCard({ ev }: { ev: Evidence }) {
             </span>
           )}
         </span>
-      </button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => void openFile()}
+          title="Open evidence file"
+        >
+          <ExternalLink className="size-3.5" /> Open
+        </Button>
+      </div>
     </li>
   );
 }

@@ -319,7 +319,7 @@ describe("service worker navigation (executed)", () => {
     expect(await text(await pending)).toBe("first ever shell");
   });
 
-  test("an offline failure serves the cached shell; with nothing cached it is a real error", async () => {
+  test("an offline failure serves the cached shell; with nothing cached it is a readable offline page, not a browser dead end", async () => {
     let online = true;
     const w = loadWorker(async () => {
       if (!online) throw new TypeError("offline");
@@ -334,19 +334,30 @@ describe("service worker navigation (executed)", () => {
       throw new TypeError("offline");
     });
     const res = (await empty.dispatch(NAV)) as Response;
-    expect(res.type).toBe("error");
+    expect(res.type).not.toBe("error");
+    expect(res.status).toBe(503);
+    expect(await text(res)).toContain("Can't connect right now");
   });
 
-  test("a server error page is shown to the user but never becomes the cached shell", async () => {
+  test("a server error page is replaced by the cached shell and never becomes the cached shell", async () => {
     let status = 200;
     const w = loadWorker(async () => new Response(status === 200 ? "good shell" : "Bad Gateway", { status }));
     expect(await text(await w.dispatch(NAV))).toBe("good shell");
     await flush();
     status = 502;
+    // "Site not found" / 5xx from the host must not trap an installed app:
+    // the last good shell is served instead...
+    expect(await text(await w.dispatch(NAV))).toBe("good shell");
+    await flush();
+    expect(await w.shellStore().get("./index.html")?.text()).toBe("good shell");
+  });
+
+  test("a server error page with nothing cached is still shown (nothing better to serve)", async () => {
+    const w = loadWorker(async () => new Response("Bad Gateway", { status: 502 }));
     const res = (await w.dispatch(NAV)) as Response;
     expect(res.status).toBe(502);
     await flush();
-    expect(await w.shellStore().get("./index.html")?.text()).toBe("good shell");
+    expect(w.shellStore().get("./index.html")).toBeUndefined();
   });
 
   test("an answered request leaves no timer behind", async () => {

@@ -12,7 +12,7 @@
  * Version bump busts the cache on deploy.
  * ------------------------------------------------------------------------- */
 
-const VERSION = "v1.2.0";
+const VERSION = "v1.3.0";
 const CACHE = `mineguard-shell-${VERSION}`;
 
 // ---- Map tiles (GIS-5) — keep in sync with src/lib/map-tiles.ts (pinned by
@@ -146,7 +146,7 @@ self.addEventListener("activate", (event) => {
 });
 
 /** How long a page request may stall before the cached shell is shown instead. */
-const NAV_NETWORK_TIMEOUT_MS = 5000;
+const NAV_NETWORK_TIMEOUT_MS = 2500;
 
 /** Network-first for the app shell, but BOUNDED. A plain network-first fetch has
  *  no time limit: on a stalled mobile connection (weak signal, captive Wi-Fi,
@@ -159,6 +159,19 @@ const NAV_NETWORK_TIMEOUT_MS = 5000;
 function navigationResponse(req) {
   const cachedShell = () =>
     caches.match("./index.html").then((r) => r || caches.match("./"));
+  // Last resort when there is neither network nor a cached shell (first ever
+  // launch while offline): a readable page with a retry, never the browser's
+  // "site can't be reached" dead end.
+  const offlinePage = () =>
+    new Response(
+      '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+        "<title>MineGuard Liberia</title>" +
+        '<body style="font-family:system-ui,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:24px;text-align:center;background:#F0EEE6;color:#232019">' +
+        "<main><h1 style=\"font-size:1.25rem\">Can't connect right now</h1>" +
+        "<p>MineGuard needs a connection the first time it opens. Check your signal, then try again.</p>" +
+        '<p><button onclick="location.reload()" style="padding:10px 18px;font-size:1rem">Try again</button></p></main>',
+      { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } },
+    );
   return new Promise((resolve) => {
     let settled = false;
     const settle = (res) => {
@@ -179,10 +192,14 @@ function navigationResponse(req) {
         if (res.ok) {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put("./index.html", copy));
+          settle(res);
+          return;
         }
-        settle(res);
+        // The host answered with an error page ("site not found", 5xx):
+        // prefer the cached app shell over showing that dead end.
+        cachedShell().then((r) => settle(r || res));
       },
-      () => cachedShell().then((r) => settle(r || Response.error())),
+      () => cachedShell().then((r) => settle(r || offlinePage())),
     );
   });
 }

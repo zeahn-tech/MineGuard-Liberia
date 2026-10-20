@@ -4,7 +4,12 @@ import { Button } from "@/components/ui/button";
 import { getLoadProblems, subscribeLoadProblems } from "@/lib/backend";
 import { resetLocalSession } from "@/lib/supabase";
 import { Loader2 } from "lucide-react";
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import {
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { Navigate, useLocation } from "react-router";
 
 /** Full-screen gate while auth resolves. BOUNDED: if the profile query
@@ -18,7 +23,18 @@ import { Navigate, useLocation } from "react-router";
  *  there is a recovery that changes something: "Try again" only reloads into
  *  the same state, while "Sign out and start over" drops this device's session
  *  (stale refresh token, stuck auth lock) without touching queued field work. */
-export function AuthLoading({ slowAfterMs = 12_000 }: { slowAfterMs?: number }) {
+export function AuthLoading({
+  slowAfterMs = 12_000,
+  autoResetAfterMs = 6_000,
+}: {
+  slowAfterMs?: number;
+  /** A stored session whose profile still has not loaded after this long (while
+   *  ONLINE) is treated as unrestorable — the same thing the person did by hand
+   *  with "Sign out and start over": this device's session is dropped and the
+   *  sign-in screen opens by itself. Queued field work is untouched. Offline, it
+   *  keeps waiting: a real session on a dead connection must not be discarded. */
+  autoResetAfterMs?: number;
+}) {
   const [slow, setSlow] = useState(false);
   const [resetting, setResetting] = useState(false);
   const problems = useSyncExternalStore(subscribeLoadProblems, getLoadProblems);
@@ -27,9 +43,25 @@ export function AuthLoading({ slowAfterMs = 12_000 }: { slowAfterMs?: number }) 
     return () => clearTimeout(t);
   }, [slowAfterMs]);
 
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (typeof navigator !== "undefined" && navigator.onLine === false)
+        return;
+      void (async () => {
+        setResetting(true);
+        await resetLocalSession();
+        window.location.replace(
+          `${window.location.pathname}${window.location.search}#/auth`,
+        );
+        window.location.reload();
+      })();
+    }, autoResetAfterMs);
+    return () => clearTimeout(t);
+  }, [autoResetAfterMs]);
+
   if (!slow) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-background">
+      <main className="flex min-h-dvh items-center justify-center bg-background">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
       </main>
     );
@@ -39,18 +71,23 @@ export function AuthLoading({ slowAfterMs = 12_000 }: { slowAfterMs?: number }) 
   const startOver = async () => {
     setResetting(true);
     await resetLocalSession();
-    window.location.assign(`${window.location.pathname}${window.location.search}#/auth`);
+    window.location.assign(
+      `${window.location.pathname}${window.location.search}#/auth`,
+    );
     window.location.reload();
   };
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background p-6">
+    <main className="flex min-h-dvh items-center justify-center bg-background p-6">
       <div className="max-w-md text-center" role="alert">
         <p className="display text-lg">Still loading your account</p>
         <p className="mt-2 text-sm text-muted-foreground">
-          This is taking longer than usual. It keeps retrying in the background and will
-          continue by itself when the connection recovers.
+          This is taking longer than usual. It keeps retrying in the background
+          and will continue by itself when the connection recovers.
         </p>
-        <p className="mt-3 break-words text-xs text-muted-foreground" data-testid="auth-problem">
+        <p
+          className="mt-3 break-words text-xs text-muted-foreground"
+          data-testid="auth-problem"
+        >
           {reason
             ? `What we found: ${reason.message} (${reason.scope})`
             : "No answer from the server yet — check your connection."}
@@ -59,12 +96,17 @@ export function AuthLoading({ slowAfterMs = 12_000 }: { slowAfterMs?: number }) 
           <Button onClick={() => window.location.reload()} disabled={resetting}>
             Try again
           </Button>
-          <Button variant="outline" onClick={() => void startOver()} disabled={resetting}>
+          <Button
+            variant="outline"
+            onClick={() => void startOver()}
+            disabled={resetting}
+          >
             {resetting ? "Signing out…" : "Sign out and start over"}
           </Button>
         </div>
         <p className="mt-3 text-[11px] text-muted-foreground">
-          Signing out only affects this device. Work queued for upload stays on it.
+          Signing out only affects this device. Work queued for upload stays on
+          it.
         </p>
       </div>
     </main>
@@ -83,23 +125,20 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   if (!isAuthenticated) {
     const returnTo = `${location.pathname}${location.search}`;
     return (
-      <Navigate
-        to={`/auth?returnTo=${encodeURIComponent(returnTo)}`}
-        replace
-      />
+      <Navigate to={`/auth?returnTo=${encodeURIComponent(returnTo)}`} replace />
     );
   }
 
   if (!user?.role) {
     // A signed-in account with no assigned role has no portal surface at all.
     return (
-      <main className="flex min-h-screen items-center justify-center bg-background p-6">
+      <main className="flex min-h-dvh items-center justify-center bg-background p-6">
         <div className="max-w-md text-center">
           <p className="display text-lg">No portal role assigned</p>
           <p className="mt-2 text-sm text-muted-foreground">
-            This account is signed in but has not been assigned a platform
-            role. The program office assigns roles; until then there is no
-            surface to show.
+            This account is signed in but has not been assigned a platform role.
+            The program office assigns roles; until then there is no surface to
+            show.
           </p>
         </div>
       </main>
@@ -126,10 +165,7 @@ export function RequireStaff({ children }: { children: ReactNode }) {
   if (!isAuthenticated) {
     const returnTo = `${location.pathname}${location.search}`;
     return (
-      <Navigate
-        to={`/auth?returnTo=${encodeURIComponent(returnTo)}`}
-        replace
-      />
+      <Navigate to={`/auth?returnTo=${encodeURIComponent(returnTo)}`} replace />
     );
   }
 
@@ -140,7 +176,7 @@ export function RequireStaff({ children }: { children: ReactNode }) {
       return <Navigate to="/operate" replace />;
     }
     return (
-      <main className="flex min-h-screen items-center justify-center bg-background p-6">
+      <main className="flex min-h-dvh items-center justify-center bg-background p-6">
         <div className="max-w-md text-center">
           <p className="display text-lg">No staff surface for this account</p>
           <p className="mt-2 text-sm text-muted-foreground">
@@ -169,10 +205,7 @@ export function RequireOperator({ children }: { children: ReactNode }) {
   if (!isAuthenticated) {
     const returnTo = `${location.pathname}${location.search}`;
     return (
-      <Navigate
-        to={`/auth?returnTo=${encodeURIComponent(returnTo)}`}
-        replace
-      />
+      <Navigate to={`/auth?returnTo=${encodeURIComponent(returnTo)}`} replace />
     );
   }
 
