@@ -381,17 +381,17 @@ export default function EvidenceSection({
           else setOpen(true);
         }}
       >
-        <DialogContent className="paper">
-          <DialogHeader>
+        <DialogContent className="paper max-h-[calc(100dvh-2rem)] overflow-y-auto">
+          <DialogHeader className="min-w-0">
             <DialogTitle>Attach evidence</DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="break-words">
               Files upload immediately when online. Offline, they are saved on
               this device and uploaded automatically once you reconnect. Either
               way they are stored with your identity, the site, and a timestamp.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1.5">
+          <div className="min-w-0 space-y-3">
+            <div className="min-w-0 space-y-1.5">
               <Label>Files (max 25MB each)</Label>
               <Input
                 ref={fileRef}
@@ -401,7 +401,7 @@ export default function EvidenceSection({
                 disabled={batchRunning}
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="min-w-0 space-y-1.5">
               <Label>Camera</Label>
               {showCamera ? (
                 <CameraCapture
@@ -421,8 +421,10 @@ export default function EvidenceSection({
                 </Button>
               )}
             </div>
-            <div className="space-y-1.5">
-              <Label>Caption (optional — applies to every selected file)</Label>
+            <div className="min-w-0 space-y-1.5">
+              <Label className="block leading-snug">
+                Caption (optional — applies to every selected file)
+              </Label>
               <Input
                 value={caption}
                 onChange={(e) => setCaption(e.target.value)}
@@ -431,22 +433,22 @@ export default function EvidenceSection({
               />
             </div>
             {batch.length > 0 && (
-              <ul className="max-h-44 divide-y divide-border overflow-y-auto border border-border">
+              <ul className="max-h-44 min-w-0 divide-y divide-border overflow-y-auto border border-border">
                 {batch.map((b) => (
                   <li
                     key={b.key}
-                    className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs"
+                    className="flex min-w-0 items-center justify-between gap-2 px-3 py-1.5 text-xs"
                   >
                     <span className="min-w-0 truncate">{b.name}</span>
                     <span
                       className={
                         b.status === "done"
-                          ? "shrink-0 text-emerald-600 dark:text-emerald-400"
+                          ? "max-w-[55%] shrink-0 truncate text-emerald-600 dark:text-emerald-400"
                           : b.status === "failed"
-                            ? "shrink-0 text-destructive"
+                            ? "max-w-[55%] shrink-0 truncate text-destructive"
                             : b.status === "queued"
-                              ? "shrink-0 text-amber-600 dark:text-amber-400"
-                              : "shrink-0 text-muted-foreground"
+                              ? "max-w-[55%] shrink-0 truncate text-amber-600 dark:text-amber-400"
+                              : "max-w-[55%] shrink-0 truncate text-muted-foreground"
                       }
                       title={b.note}
                     >
@@ -460,7 +462,7 @@ export default function EvidenceSection({
                 file's real XHR progress events; queued/failed files carry no
                 bar because there are no bytes in flight for them. */}
             {batch.some((b) => b.status === "uploading" && b.total) && (
-              <div className="space-y-1.5">
+              <div className="min-w-0 space-y-1.5">
                 {batch
                   .filter((b) => b.status === "uploading" && b.total)
                   .map((b) => {
@@ -469,10 +471,10 @@ export default function EvidenceSection({
                       Math.round(((b.loaded ?? 0) / (b.total ?? 1)) * 100),
                     );
                     return (
-                      <div key={`p-${b.key}`}>
-                        <div className="flex justify-between text-[10px] text-muted-foreground">
-                          <span className="truncate">{b.name}</span>
-                          <span>
+                      <div key={`p-${b.key}`} className="min-w-0">
+                        <div className="flex min-w-0 justify-between gap-2 text-[10px] text-muted-foreground">
+                          <span className="min-w-0 truncate">{b.name}</span>
+                          <span className="shrink-0 whitespace-nowrap">
                             {pct}% · {((b.loaded ?? 0) / 1024).toFixed(0)}/
                             {((b.total ?? 0) / 1024).toFixed(0)} KB
                           </span>
