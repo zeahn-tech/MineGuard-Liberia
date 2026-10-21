@@ -121,9 +121,13 @@ function assertPositionProvenance(args: {
   geoAccuracyM?: number | null;
 }): void {
   if (args.geoSource !== undefined && !isSitePositionSource(args.geoSource))
-    throw new Error("INVALID_SOURCE: position source must be device_gps, map_pick or manual_entry.");
+    throw new Error(
+      "INVALID_SOURCE: position source must be device_gps, map_pick or manual_entry.",
+    );
   if (accuracyProblem(args.geoAccuracyM))
-    throw new Error("INVALID_ACCURACY: accuracy must be a non-negative number of metres.");
+    throw new Error(
+      "INVALID_ACCURACY: accuracy must be a non-negative number of metres.",
+    );
 }
 
 export interface QueryHandle<T> {
@@ -369,8 +373,11 @@ async function getProfile(uid: string): Promise<UserProfile | null> {
 // without this, one dashboard render costs a profiles read per query. TTL is
 // intentionally short (5s) so role changes surface quickly. Auth mutations
 // always use a fresh read (cached=false default).
-let profileCache: { uid: string; profile: UserProfile | null; at: number } | null =
-  null;
+let profileCache: {
+  uid: string;
+  profile: UserProfile | null;
+  at: number;
+} | null = null;
 const PROFILE_TTL_MS = 5_000;
 
 async function getProfileCached(uid: string): Promise<UserProfile | null> {
@@ -631,7 +638,8 @@ function keysetPages<T>(
 
 async function refreshPublicStats() {
   const { error } = await supabase.rpc("refresh_public_stats");
-  if (error) console.warn("[backend] publicStats refresh skipped:", error.message);
+  if (error)
+    console.warn("[backend] publicStats refresh skipped:", error.message);
 }
 
 // ---------------------------------------------------------------------------
@@ -644,19 +652,26 @@ async function refreshPublicStats() {
  *  records.listIncidents fetcher. */
 async function fetchIncidents(
   user: UserProfile,
-): Promise<(Incident & { siteCode: string; siteName: string; county: string })[]> {
+): Promise<
+  (Incident & { siteCode: string; siteName: string; county: string })[]
+> {
   const [incRaw, siteRaw] = await Promise.all([
     allRows<AnyRow>("incidents"),
     allRows<AnyRow>("sites"),
   ]);
   const byId = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
-  const out: (Incident & { siteCode: string; siteName: string; county: string })[] = [];
+  const out: (Incident & {
+    siteCode: string;
+    siteName: string;
+    county: string;
+  })[] = [];
   for (const r of incRaw) {
     const inc = mapIncident(r);
     const site = byId.get(inc.siteId);
     if (!site) continue;
     if (user.role === ROLES.OPERATOR) {
-      if (!user.operatorName || site.operatorName !== user.operatorName) continue;
+      if (!user.operatorName || site.operatorName !== user.operatorName)
+        continue;
     }
     out.push({
       ...inc,
@@ -690,7 +705,9 @@ export type InspectionListRow = {
   inspectorId: string;
 };
 
-async function fetchInspections(user: UserProfile): Promise<InspectionListRow[]> {
+async function fetchInspections(
+  user: UserProfile,
+): Promise<InspectionListRow[]> {
   const [inspRaw, siteRaw] = await Promise.all([
     allRows<AnyRow>("inspections"),
     allRows<AnyRow>("sites"),
@@ -735,13 +752,17 @@ export type ComplianceListRow = CorrectiveAction & {
   county: string;
 };
 
-async function fetchCompliance(user: UserProfile): Promise<ComplianceListRow[]> {
+async function fetchCompliance(
+  user: UserProfile,
+): Promise<ComplianceListRow[]> {
   const [caRaw, findingRaw, siteRaw] = await Promise.all([
     allRows<AnyRow>("corrective_actions"),
     allRows<AnyRow>("findings"),
     allRows<AnyRow>("sites"),
   ]);
-  const findings = new Map(findingRaw.map((r) => [r.id as string, mapFinding(r)]));
+  const findings = new Map(
+    findingRaw.map((r) => [r.id as string, mapFinding(r)]),
+  );
   const sites = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
   const out: ComplianceListRow[] = [];
   for (const r of caRaw) {
@@ -761,7 +782,15 @@ async function fetchCompliance(user: UserProfile): Promise<ComplianceListRow[]> 
   // Openest obligations first: open/in_progress/submitted before decided
   // ones, then by soonest deadline.
   const openRank = (s: CorrectiveAction["status"]) =>
-    s === "open" ? 0 : s === "in_progress" ? 1 : s === "submitted" ? 2 : s === "escalated" ? 3 : 4;
+    s === "open"
+      ? 0
+      : s === "in_progress"
+        ? 1
+        : s === "submitted"
+          ? 2
+          : s === "escalated"
+            ? 3
+            : 4;
   out.sort(
     (a, b) => openRank(a.status) - openRank(b.status) || a.dueAt - b.dueAt,
   );
@@ -838,9 +867,13 @@ function mapCompliancePageRow(r: AnyRow): CompliancePageRow {
     description: r.description as string,
     status: r.status as CorrectiveAction["status"],
     dueAt: numOf(r.dueAt),
-    operatorNote: r.operatorNote == null ? undefined : (r.operatorNote as string),
+    operatorNote:
+      r.operatorNote == null ? undefined : (r.operatorNote as string),
     createdAt: numOf(r.createdAt),
-    findingTitle: r.findingTitle == null ? "Compliance finding" : (r.findingTitle as string),
+    findingTitle:
+      r.findingTitle == null
+        ? "Compliance finding"
+        : (r.findingTitle as string),
     findingSeverity: (r.findingSeverity ?? "medium") as Finding["severity"],
     siteCode: r.siteCode as string,
     siteName: r.siteName as string,
@@ -878,7 +911,12 @@ function explanationFromRow(row: AnyRow): {
   abstained: boolean;
   summary: string | null;
   citations: string[];
-  sentences: { factor: string; points: number; recordIds: string[]; text: string }[];
+  sentences: {
+    factor: string;
+    points: number;
+    recordIds: string[];
+    text: string;
+  }[];
   disclaimer: string;
   configVersion: number | null;
   configEffectiveFrom: number | null;
@@ -899,7 +937,8 @@ function explanationFromRow(row: AnyRow): {
     },
   );
   const citations = [...new Set(factors.flatMap((f) => f.recordIds))].sort();
-  const configVersion = row.configVersion == null ? null : numOf(row.configVersion);
+  const configVersion =
+    row.configVersion == null ? null : numOf(row.configVersion);
   const configEffectiveFrom = toMsOrNull(row.configEffectiveFrom) ?? null;
   // Cite-or-abstain: with no factors there is nothing to explain — abstain
   // rather than invent a narrative.
@@ -995,7 +1034,8 @@ function mapCommandCenterStats(
     return out;
   };
   return {
-    scope: typeof r.scope === "string" && r.scope ? r.scope : scope ?? "national",
+    scope:
+      typeof r.scope === "string" && r.scope ? r.scope : (scope ?? "national"),
     sites: n(r.sites),
     activeSites: n(r.activeSites),
     inspectionsTotal: n(r.inspectionsTotal),
@@ -1039,7 +1079,9 @@ function mapCommandCenterStats(
  *  (realtime still covers changes made by other people). */
 const localWriteListeners = new Set<(tables: readonly string[]) => void>();
 
-function onLocalWrite(listener: (tables: readonly string[]) => void): () => void {
+function onLocalWrite(
+  listener: (tables: readonly string[]) => void,
+): () => void {
   localWriteListeners.add(listener);
   return () => {
     localWriteListeners.delete(listener);
@@ -1110,6 +1152,14 @@ interface Abandonable {
 
 /** Race `work` against a time limit. `onTimeout` should cancel the request
  *  (abort its signal) so the socket is freed, not just abandoned. */
+/** One readable line for any thrown value (Error, Supabase error object, string). */
+function describeError(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  const m = (e as { message?: unknown } | null)?.message;
+  return typeof m === "string" && m ? m : "unknown error";
+}
+
 function withReadTimeout<T>(
   work: PromiseLike<T>,
   ms: number,
@@ -1173,7 +1223,11 @@ function emitLoadProblems(): void {
 
 function describeProblem(err: unknown): string {
   let raw =
-    err instanceof Error ? err.message : typeof err === "string" ? err : "Unknown error";
+    err instanceof Error
+      ? err.message
+      : typeof err === "string"
+        ? err
+        : "Unknown error";
   const text = raw.trim();
   if (text.startsWith("{")) {
     // A server error body that arrived as text: show its message (and code),
@@ -1181,7 +1235,10 @@ function describeProblem(err: unknown): string {
     try {
       const body = JSON.parse(text) as { message?: unknown; code?: unknown };
       if (typeof body.message === "string" && body.message.trim()) {
-        raw = typeof body.code === "string" && body.code ? `${body.message} (${body.code})` : body.message;
+        raw =
+          typeof body.code === "string" && body.code
+            ? `${body.message} (${body.code})`
+            : body.message;
       }
     } catch {
       /* not JSON after all — fall through with the text as is */
@@ -1194,7 +1251,11 @@ function describeProblem(err: unknown): string {
 }
 
 function reportLoadProblem(scope: string, err: unknown): void {
-  loadProblems.set(scope, { scope, message: describeProblem(err), at: Date.now() });
+  loadProblems.set(scope, {
+    scope,
+    message: describeProblem(err),
+    at: Date.now(),
+  });
   emitLoadProblems();
 }
 
@@ -1280,8 +1341,12 @@ function live<T>(
         const stalled =
           inFlight &&
           Date.now() - inFlightSince >
-            Math.min(RESUME_STALL_MS, readTimeout(LIST_READ_TIMEOUT_MS, opts?.timeoutMs) / 3);
-        if (!stalled && !failing && Date.now() - lastOkAt < RESUME_STALE_MS) return;
+            Math.min(
+              RESUME_STALL_MS,
+              readTimeout(LIST_READ_TIMEOUT_MS, opts?.timeoutMs) / 3,
+            );
+        if (!stalled && !failing && Date.now() - lastOkAt < RESUME_STALE_MS)
+          return;
         attempts = 0;
         if (retryTimer) {
           clearTimeout(retryTimer);
@@ -1442,7 +1507,8 @@ function liveDoc<T>(
           inFlight &&
           Date.now() - inFlightSince >
             Math.min(RESUME_STALL_MS, readTimeout(DOC_READ_TIMEOUT_MS) / 3);
-        if (!stalled && !failing && Date.now() - lastOkAt < RESUME_STALE_MS) return;
+        if (!stalled && !failing && Date.now() - lastOkAt < RESUME_STALE_MS)
+          return;
         attempts = 0;
         if (retryTimer) {
           clearTimeout(retryTimer);
@@ -1512,9 +1578,7 @@ function liveDoc<T>(
           inFlight = false;
           if (!cancelled && unsubs.length === 0) {
             try {
-              let channel = supabase.channel(
-                `mg:${table}:${column}:${value}`,
-              );
+              let channel = supabase.channel(`mg:${table}:${column}:${value}`);
               channel = channel.on(
                 "postgres_changes",
                 {
@@ -1557,7 +1621,9 @@ function liveDoc<T>(
 // ---------------------------------------------------------------------------
 
 /** Map Supabase auth errors to the stable message tokens Auth.tsx renders. */
-function authErrorMessage(err: { message?: string } | null | undefined): string {
+function authErrorMessage(
+  err: { message?: string } | null | undefined,
+): string {
   const m = (err?.message ?? "").toLowerCase();
   if (m.includes("invalid login credentials")) return "INCORRECT_CREDENTIALS";
   if (m.includes("email not confirmed")) return "EMAIL_NOT_CONFIRMED";
@@ -1649,7 +1715,11 @@ export async function signInEmailMfaAware(email: string, password: string) {
   return { mfaRequired: false };
 }
 
-export async function signUpEmail(email: string, password: string, name?: string) {
+export async function signUpEmail(
+  email: string,
+  password: string,
+  name?: string,
+) {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
@@ -1717,10 +1787,14 @@ export type NotificationItem = DerivedNotification & {
   read: boolean;
 };
 
-const clip = (v: string, n: number) => (v.length > n ? v.slice(0, n - 1) + "…" : v);
-const notifKey = (d: DerivedNotification) => (d.state ? `${d.id}:${d.state}` : d.id);
+const clip = (v: string, n: number) =>
+  v.length > n ? v.slice(0, n - 1) + "…" : v;
+const notifKey = (d: DerivedNotification) =>
+  d.state ? `${d.id}:${d.state}` : d.id;
 
-async function persistNotifications(derived: DerivedNotification[]): Promise<NotificationItem[]> {
+async function persistNotifications(
+  derived: DerivedNotification[],
+): Promise<NotificationItem[]> {
   const fallback = () =>
     derived.map((d) => ({ ...d, notificationId: d.id, read: false }));
   if (derived.length === 0) {
@@ -1741,7 +1815,10 @@ async function persistNotifications(derived: DerivedNotification[]): Promise<Not
     })),
   });
   if (syncError) {
-    console.warn("[backend] mg_notifications_sync unavailable — derived notifications only:", syncError.message ?? String(syncError));
+    console.warn(
+      "[backend] mg_notifications_sync unavailable — derived notifications only:",
+      syncError.message ?? String(syncError),
+    );
     return fallback();
   }
   const rows = await allRows<AnyRow>("notifications");
@@ -1750,114 +1827,127 @@ async function persistNotifications(derived: DerivedNotification[]): Promise<Not
   for (const d of capped) {
     const row = byKey.get(notifKey(d));
     if (!row || row.dismissed_at) continue;
-    out.push({ ...d, notificationId: row.id as string, read: Boolean(row.read_at) });
+    out.push({
+      ...d,
+      notificationId: row.id as string,
+      read: Boolean(row.read_at),
+    });
   }
   return out;
 }
 
-async function deriveNotifications(user: UserProfile): Promise<DerivedNotification[]> {
-    const now = Date.now();
-    const DAY = 86_400_000;
-    const out: DerivedNotification[] = [];
+async function deriveNotifications(
+  user: UserProfile,
+): Promise<DerivedNotification[]> {
+  const now = Date.now();
+  const DAY = 86_400_000;
+  const out: DerivedNotification[] = [];
 
-    // 1. Corrective-action deadlines in the caller's scope. For operators
-    //    this is their tenant's obligations; for staff their own scope —
-    //    the same scoped feeds the portal pages use.
-    const [caRaw, findingRaw, siteRaw] = await Promise.all([
-      allRows<AnyRow>("corrective_actions"),
-      allRows<AnyRow>("findings"),
-      allRows<AnyRow>("sites"),
-    ]);
-    const findings = new Map(findingRaw.map((r) => [r.id as string, mapFinding(r)]));
-    const sites = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
+  // 1. Corrective-action deadlines in the caller's scope. For operators
+  //    this is their tenant's obligations; for staff their own scope —
+  //    the same scoped feeds the portal pages use.
+  const [caRaw, findingRaw, siteRaw] = await Promise.all([
+    allRows<AnyRow>("corrective_actions"),
+    allRows<AnyRow>("findings"),
+    allRows<AnyRow>("sites"),
+  ]);
+  const findings = new Map(
+    findingRaw.map((r) => [r.id as string, mapFinding(r)]),
+  );
+  const sites = new Map(siteRaw.map((r) => [r.id as string, mapSite(r)]));
+  for (const r of caRaw) {
+    const ca = mapCA(r);
+    if (ca.status !== "open" && ca.status !== "in_progress") continue;
+    const site = sites.get(ca.siteId);
+    if (!site || !canAccessSite(user, site)) continue;
+    const finding = findings.get(ca.findingId);
+    const dueMs = ca.dueAt - now;
+    const isOverdue = dueMs < 0;
+    if (!isOverdue && dueMs > 3 * DAY) continue; // due-soon window: ≤3d
+    const siteLabel = `${site.code} ${site.name}`;
+    out.push({
+      id: `ca-${ca._id}`,
+      kind: "ca_deadline",
+      state: isOverdue ? "overdue" : "soon",
+      severity: isOverdue ? "urgent" : "warning",
+      title: isOverdue
+        ? `Overdue corrective action at ${siteLabel}`
+        : `Corrective action due soon at ${siteLabel}`,
+      body: `${finding?.title ?? "Compliance finding"} — ${ca.description}`,
+      linkTo:
+        user.role === ROLES.OPERATOR
+          ? "/operate/corrective-actions"
+          : `/portal/sites/${site._id}`,
+      at: ca.dueAt,
+    });
+  }
+
+  // 2. Reviewer decisions on corrective actions the caller opened —
+  //    the operator learns their response was verified/closed/escalated.
+  if (user.role === ROLES.OPERATOR && user.operatorName) {
     for (const r of caRaw) {
       const ca = mapCA(r);
-      if (ca.status !== "open" && ca.status !== "in_progress") continue;
+      if (ca.openedById !== user.uid) continue;
+      if (
+        ca.status !== "verified" &&
+        ca.status !== "closed" &&
+        ca.status !== "escalated"
+      )
+        continue;
+      // Persisted inbox: decisions older than 30 days are history (the audit
+      // log serves it), not notifications.
+      if (now - (ca.closedAt ?? ca.dueAt) > 30 * DAY) continue;
       const site = sites.get(ca.siteId);
-      if (!site || !canAccessSite(user, site)) continue;
-      const finding = findings.get(ca.findingId);
-      const dueMs = ca.dueAt - now;
-      const isOverdue = dueMs < 0;
-      if (!isOverdue && dueMs > 3 * DAY) continue; // due-soon window: ≤3d
-      const siteLabel = `${site.code} ${site.name}`;
+      if (!site) continue;
       out.push({
-        id: `ca-${ca._id}`,
-        kind: "ca_deadline",
-        state: isOverdue ? "overdue" : "soon",
-        severity: isOverdue ? "urgent" : "warning",
-        title: isOverdue
-          ? `Overdue corrective action at ${siteLabel}`
-          : `Corrective action due soon at ${siteLabel}`,
-        body: `${finding?.title ?? "Compliance finding"} — ${ca.description}`,
-        linkTo: user.role === ROLES.OPERATOR ? "/operate/corrective-actions" : `/portal/sites/${site._id}`,
-        at: ca.dueAt,
+        id: `cad-${ca._id}`,
+        kind: "ca_decision",
+        severity: ca.status === "escalated" ? "urgent" : "info",
+        title:
+          ca.status === "escalated"
+            ? `Corrective action ESCALATED at ${site.code} ${site.name}`
+            : `Corrective action ${ca.status} at ${site.code} ${site.name}`,
+        body: ca.description,
+        linkTo: "/operate/corrective-actions",
+        at: ca.closedAt ?? ca.dueAt,
       });
     }
+  }
 
-    // 2. Reviewer decisions on corrective actions the caller opened —
-    //    the operator learns their response was verified/closed/escalated.
-    if (user.role === ROLES.OPERATOR && user.operatorName) {
-      for (const r of caRaw) {
-        const ca = mapCA(r);
-        if (ca.openedById !== user.uid) continue;
-        if (ca.status !== "verified" && ca.status !== "closed" && ca.status !== "escalated") continue;
-        // Persisted inbox: decisions older than 30 days are history (the audit
-        // log serves it), not notifications.
-        if (now - (ca.closedAt ?? ca.dueAt) > 30 * DAY) continue;
-        const site = sites.get(ca.siteId);
-        if (!site) continue;
-        out.push({
-          id: `cad-${ca._id}`,
-          kind: "ca_decision",
-          severity: ca.status === "escalated" ? "urgent" : "info",
-          title:
-            ca.status === "escalated"
-              ? `Corrective action ESCALATED at ${site.code} ${site.name}`
-              : `Corrective action ${ca.status} at ${site.code} ${site.name}`,
-          body: ca.description,
-          linkTo: "/operate/corrective-actions",
-          at: ca.closedAt ?? ca.dueAt,
-        });
-      }
+  // 3. Community-report status changes — staff queue only (RLS-scoped).
+  if (isStaffRole(user.role)) {
+    const repRaw = await allRows<AnyRow>("community_reports");
+    for (const r of repRaw) {
+      const rep = mapReport(r);
+      if (rep.status === "submitted") continue; // untouched — not news
+      const reviewedAt = rep.reviewedAt ?? rep.createdAt;
+      if (now - reviewedAt > 7 * DAY) continue; // recent window only
+      out.push({
+        id: `rep-${rep._id}`,
+        kind: "report_status",
+        severity: rep.status === "verified" ? "info" : "warning",
+        title: `Community report ${rep.trackingCode} → ${rep.status.replace("_", " ")}`,
+        body: rep.description,
+        linkTo: "/portal/community",
+        at: reviewedAt,
+      });
     }
+  }
 
-    // 3. Community-report status changes — staff queue only (RLS-scoped).
-    if (isStaffRole(user.role)) {
-      const repRaw = await allRows<AnyRow>("community_reports");
-      for (const r of repRaw) {
-        const rep = mapReport(r);
-        if (rep.status === "submitted") continue; // untouched — not news
-        const reviewedAt = rep.reviewedAt ?? rep.createdAt;
-        if (now - reviewedAt > 7 * DAY) continue; // recent window only
-        out.push({
-          id: `rep-${rep._id}`,
-          kind: "report_status",
-          severity: rep.status === "verified" ? "info" : "warning",
-          title: `Community report ${rep.trackingCode} → ${rep.status.replace("_", " ")}`,
-          body: rep.description,
-          linkTo: "/portal/community",
-          at: reviewedAt,
-        });
-      }
-    }
-
-    // Urgent first, then newest.
-    const sevRank = { urgent: 0, warning: 1, info: 2 } as const;
-    out.sort((a, b) => sevRank[a.severity] - sevRank[b.severity] || b.at - a.at);
-    return out;
+  // Urgent first, then newest.
+  const sevRank = { urgent: 0, warning: 1, info: 2 } as const;
+  out.sort((a, b) => sevRank[a.severity] - sevRank[b.severity] || b.at - a.at);
+  return out;
 }
 
 export const api = {
   // ----------------------------------------------------------------- users
   users: {
     currentUser: () =>
-      liveDoc<UserProfile>(
-        () => {
-          const uid = authUserId();
-          return uid ? { table: "profiles", column: "id", value: uid } : null;
-        },
-        mapProfile,
-      ),
+      liveDoc<UserProfile>(() => {
+        const uid = authUserId();
+        return uid ? { table: "profiles", column: "id", value: uid } : null;
+      }, mapProfile),
   },
 
   // ----------------------------------------------------------------- sites
@@ -1917,7 +2007,9 @@ export const api = {
       const hasLat = args.latitude !== undefined && args.latitude !== null;
       const hasLng = args.longitude !== undefined && args.longitude !== null;
       if (hasLat !== hasLng)
-        throw new Error("INVALID_POSITION: latitude and longitude must be set together.");
+        throw new Error(
+          "INVALID_POSITION: latitude and longitude must be set together.",
+        );
       assertSitePosition(args.latitude, args.longitude);
       assertPositionProvenance(args);
       const existingCodes = await allSiteCodes();
@@ -2047,17 +2139,38 @@ export const api = {
         put("longitude", args.longitude, site.longitude);
       }
       // A point is a PAIR: never leave a half position that cannot be mapped.
-      const nextLat = args.latitude !== undefined ? args.latitude : (site.latitude ?? null);
-      const nextLng = args.longitude !== undefined ? args.longitude : (site.longitude ?? null);
+      const nextLat =
+        args.latitude !== undefined ? args.latitude : (site.latitude ?? null);
+      const nextLng =
+        args.longitude !== undefined
+          ? args.longitude
+          : (site.longitude ?? null);
       if ((nextLat === null) !== (nextLng === null))
-        throw new Error("INVALID_POSITION: latitude and longitude must be set together.");
+        throw new Error(
+          "INVALID_POSITION: latitude and longitude must be set together.",
+        );
       const moved = "latitude" in patch || "longitude" in patch;
-      if (moved || args.geoSource !== undefined || args.geoAccuracyM !== undefined) {
+      if (
+        moved ||
+        args.geoSource !== undefined ||
+        args.geoAccuracyM !== undefined
+      ) {
         // The stored provenance describes the position it came with: a moved
         // point gets its own source/accuracy (never the old ones), and an
         // earlier verification no longer applies to the new place.
-        put("geo_source", nextLat === null ? null : (args.geoSource ?? (moved ? "manual_entry" : site.geoSource ?? "manual_entry")), site.geoSource);
-        put("geo_accuracy_m", nextLat === null ? null : (args.geoAccuracyM ?? null), site.geoAccuracyM);
+        put(
+          "geo_source",
+          nextLat === null
+            ? null
+            : (args.geoSource ??
+                (moved ? "manual_entry" : (site.geoSource ?? "manual_entry"))),
+          site.geoSource,
+        );
+        put(
+          "geo_accuracy_m",
+          nextLat === null ? null : (args.geoAccuracyM ?? null),
+          site.geoAccuracyM,
+        );
         if (moved && site.geoVerified) put("geo_verified", false, true);
       }
       if (args.notes !== undefined) put("notes", args.notes, site.notes);
@@ -2110,73 +2223,81 @@ export const api = {
             configVersion?: number;
           }
         >
-      >(
-        async () => {
-          const user = await requireAuthed(true);
-          if (!user.role) return {};
-          const { data, error } = await supabase.rpc("mg_risk_scores", {
-            p_version: args?.version ?? null,
-            p_as_of: null,
-          });
-          if (!error && Array.isArray(data)) {
-            const byId: Record<
-              string,
-              { score: number; factors: RiskFactor[]; configVersion?: number }
-            > = {};
-            for (const raw of data as AnyRow[]) {
-              const { score, factors } = factorsFromBuilt({
-                score: raw.score,
-                factors: raw.factors,
-              });
-              byId[String(raw.siteId)] = {
-                score,
-                factors,
-                configVersion: numOf(raw.configVersion),
-              };
-            }
-            return byId;
-          }
-          // A requested version cannot be honoured without the database
-          // config — say so rather than silently scoring under other weights.
-          if (args?.version != null) {
-            throw error
-              ? backendError(error)
-              : new Error("RISK_CONFIG_UNAVAILABLE");
-          }
-          // Fallback (lineage without migration 0019): the original full-input
-          // computation under LEGACY_RISK_CONFIG (= version 1) — exact at any
-          // size because every input read pages; only the wire cost differs.
-          console.warn(
-            "[backend] mg_risk_scores unavailable — client-side aggregation fallback:",
-            error ? error.message ?? String(error) : "unexpected payload",
-          );
-          const now = Date.now();
-          const [sitesRaw, findingsRaw, casRaw, incRaw, envRaw] =
-            await Promise.all([
-              allRows<AnyRow>("sites"),
-              allRows<AnyRow>("findings"),
-              allRows<AnyRow>("corrective_actions"),
-              allRows<AnyRow>("incidents"),
-              allRows<AnyRow>("environmental_observations"),
-            ]);
-          const sites = sitesRaw.map(mapSite).filter((s) => canAccessSite(user, s));
+      >(async () => {
+        const user = await requireAuthed(true);
+        if (!user.role) return {};
+        const { data, error } = await supabase.rpc("mg_risk_scores", {
+          p_version: args?.version ?? null,
+          p_as_of: null,
+        });
+        if (!error && Array.isArray(data)) {
           const byId: Record<
             string,
-            { score: number; factors: RiskFactor[] }
+            { score: number; factors: RiskFactor[]; configVersion?: number }
           > = {};
-          for (const site of sites) {
-            const { score, factors } = computeRiskFactors(site, {
+          for (const raw of data as AnyRow[]) {
+            const { score, factors } = factorsFromBuilt({
+              score: raw.score,
+              factors: raw.factors,
+            });
+            byId[String(raw.siteId)] = {
+              score,
+              factors,
+              configVersion: numOf(raw.configVersion),
+            };
+          }
+          return byId;
+        }
+        // A requested version cannot be honoured without the database
+        // config — say so rather than silently scoring under other weights.
+        if (args?.version != null) {
+          throw error
+            ? backendError(error)
+            : new Error("RISK_CONFIG_UNAVAILABLE");
+        }
+        // Fallback (lineage without migration 0019): the original full-input
+        // computation under LEGACY_RISK_CONFIG (= version 1) — exact at any
+        // size because every input read pages; only the wire cost differs.
+        console.warn(
+          "[backend] mg_risk_scores unavailable — client-side aggregation fallback:",
+          error ? (error.message ?? String(error)) : "unexpected payload",
+        );
+        const now = Date.now();
+        const [sitesRaw, findingsRaw, casRaw, incRaw, envRaw] =
+          await Promise.all([
+            allRows<AnyRow>("sites"),
+            allRows<AnyRow>("findings"),
+            allRows<AnyRow>("corrective_actions"),
+            allRows<AnyRow>("incidents"),
+            allRows<AnyRow>("environmental_observations"),
+          ]);
+        const sites = sitesRaw
+          .map(mapSite)
+          .filter((s) => canAccessSite(user, s));
+        const byId: Record<string, { score: number; factors: RiskFactor[] }> =
+          {};
+        for (const site of sites) {
+          const { score, factors } = computeRiskFactors(
+            site,
+            {
               findings: findingsRaw.map(mapFinding),
               correctiveActions: casRaw.map(mapCA),
               incidents: incRaw.map(mapIncident),
               observations: envRaw.map(mapObservation),
-            }, now);
-            byId[site._id] = { score, factors };
-          }
-          return byId;
-        },
-        ["sites", "findings", "corrective_actions", "incidents", "environmental_observations", "risk_config_versions"],
-      ),
+            },
+            now,
+          );
+          byId[site._id] = { score, factors };
+        }
+        return byId;
+      }, [
+        "sites",
+        "findings",
+        "corrective_actions",
+        "incidents",
+        "environmental_observations",
+        "risk_config_versions",
+      ]),
   },
 
   // ------------------------------------------------------------ riskConfig
@@ -2212,13 +2333,15 @@ export const api = {
       });
       if (problem) throw new Error(`INVALID_RISK_CONFIG: ${problem}`);
       const note = args.changeNote.trim();
-      if (note.length < 3) throw new Error("INVALID_RISK_CONFIG: a change note is required");
+      if (note.length < 3)
+        throw new Error("INVALID_RISK_CONFIG: a change note is required");
       const row: Record<string, unknown> = {
         weights: args.weights,
         historical_lookback_days: args.lookbackDays,
         change_note: note,
       };
-      if (args.effectiveFrom != null) row.effective_from = iso(args.effectiveFrom);
+      if (args.effectiveFrom != null)
+        row.effective_from = iso(args.effectiveFrom);
       const id = await insertReturningId("risk_config_versions", row);
       notifyLocalWrite("risk_config_versions");
       const back = await supabase
@@ -2272,7 +2395,12 @@ export const api = {
         abstained: boolean;
         summary: string | null;
         citations: string[];
-        sentences: { factor: string; points: number; recordIds: string[]; text: string }[];
+        sentences: {
+          factor: string;
+          points: number;
+          recordIds: string[];
+          text: string;
+        }[];
         disclaimer: string;
         /** The published risk-config version the explanation was built under
          *  (null on a lineage without migration 0019). */
@@ -2297,13 +2425,15 @@ export const api = {
         }
         if (!error && data == null) return null; // not found OR out of scope
         if (args.version != null) {
-          throw error ? backendError(error) : new Error("RISK_CONFIG_UNAVAILABLE");
+          throw error
+            ? backendError(error)
+            : new Error("RISK_CONFIG_UNAVAILABLE");
         }
         // Fallback (lineage without migration 0014): the original path —
         // same scoped reads as the old riskScores; re-derive server-side.
         console.warn(
           "[backend] mg_risk_explanation unavailable — client-side fallback:",
-          error ? error.message ?? String(error) : "unexpected payload",
+          error ? (error.message ?? String(error)) : "unexpected payload",
         );
         const site = await getSite(args.siteId);
         if (!site) return null; // null-masked: not found OR out of scope
@@ -2325,7 +2455,9 @@ export const api = {
           Date.now(),
         );
 
-        const citations = [...new Set(factors.flatMap((f) => f.recordIds))].sort();
+        const citations = [
+          ...new Set(factors.flatMap((f) => f.recordIds)),
+        ].sort();
         // Cite-or-abstain: with no factors there is nothing to explain —
         // abstain rather than invent a narrative.
         if (factors.length === 0) {
@@ -2352,7 +2484,14 @@ export const api = {
           configVersion: null,
           configEffectiveFrom: null,
         };
-      }, ["sites", "findings", "corrective_actions", "incidents", "environmental_observations", "risk_config_versions"]),
+      }, [
+        "sites",
+        "findings",
+        "corrective_actions",
+        "incidents",
+        "environmental_observations",
+        "risk_config_versions",
+      ]),
   },
 
   // ----------------------------------------------------------- inspections
@@ -2448,7 +2587,10 @@ export const api = {
     },
 
     /** Set the active flag (the publish/unpublish switch). */
-    setTemplateActive: async (args: { templateId: string; active: boolean }) => {
+    setTemplateActive: async (args: {
+      templateId: string;
+      active: boolean;
+    }) => {
       const user = await requireAdminUser();
       const { error } = await supabase
         .from("inspection_templates")
@@ -2527,11 +2669,16 @@ export const api = {
         mapInspectionPageRow,
       );
       if (viaRpc) return viaRpc;
-      if (args.before) return { rows: [], nextCursor: null, source: "fallback" };
+      if (args.before)
+        return { rows: [], nextCursor: null, source: "fallback" };
       console.warn(
         "[backend] mg_inspections_page unavailable — full authorized feed in one page (migration 0014 not applied); list stays exact, paging inactive",
       );
-      return { rows: await fetchInspections(user), nextCursor: null, source: "fallback" };
+      return {
+        rows: await fetchInspections(user),
+        nextCursor: null,
+        source: "fallback",
+      };
     },
 
     /** The §9 compliance export's row source (see api.exports): the same
@@ -2555,11 +2702,16 @@ export const api = {
         mapCompliancePageRow,
       );
       if (viaRpc) return viaRpc;
-      if (args.before) return { rows: [], nextCursor: null, source: "fallback" };
+      if (args.before)
+        return { rows: [], nextCursor: null, source: "fallback" };
       console.warn(
         "[backend] mg_compliance_page unavailable — full authorized feed in one page (migration 0014 not applied); export stays exact, streaming inactive",
       );
-      return { rows: await fetchCompliance(user), nextCursor: null, source: "fallback" };
+      return {
+        rows: await fetchCompliance(user),
+        nextCursor: null,
+        source: "fallback",
+      };
     },
 
     get: (args: { inspectionId: string }) =>
@@ -2641,7 +2793,8 @@ export const api = {
       if (args.notes !== undefined) patch.notes = args.notes;
       if (args.latitude !== undefined) patch.latitude = args.latitude;
       if (args.longitude !== undefined) patch.longitude = args.longitude;
-      if (args.gpsAccuracyM !== undefined) patch.gps_accuracy_m = args.gpsAccuracyM;
+      if (args.gpsAccuracyM !== undefined)
+        patch.gps_accuracy_m = args.gpsAccuracyM;
       const { error } = await supabase
         .from("inspections")
         .update(patch)
@@ -2729,7 +2882,11 @@ export const api = {
         // SEC-4: the same paged read as every whole-table scan — a parent's
         // findings are bounded by that parent's volume, but the read must
         // never depend on the server's row cap.
-        const rows = await pagedEqRows<AnyRow>("findings", "inspection_id", args.inspectionId);
+        const rows = await pagedEqRows<AnyRow>(
+          "findings",
+          "inspection_id",
+          args.inspectionId,
+        );
         return rows.map(mapFinding);
       }, ["findings"]),
 
@@ -2761,10 +2918,17 @@ export const api = {
         }
         // Openest findings first, then newest.
         const openRank = (s: Finding["status"]) =>
-          s === "open" ? 0 : s === "acknowledged" ? 1 : s === "resolved" ? 2 : 3;
+          s === "open"
+            ? 0
+            : s === "acknowledged"
+              ? 1
+              : s === "resolved"
+                ? 2
+                : 3;
         out.sort(
           (a, b) =>
-            openRank(a.status) - openRank(b.status) || b.createdAt - a.createdAt,
+            openRank(a.status) - openRank(b.status) ||
+            b.createdAt - a.createdAt,
         );
         return out;
       }, ["findings", "sites"]),
@@ -2861,7 +3025,11 @@ export const api = {
         const site = await getSite(finding.siteId);
         if (!site || !canAccessSite(user, site)) throw new Error("FORBIDDEN");
         // SEC-4: paged read (see listFindingsForInspection).
-        const rows = await pagedEqRows<AnyRow>("corrective_actions", "finding_id", args.findingId);
+        const rows = await pagedEqRows<AnyRow>(
+          "corrective_actions",
+          "finding_id",
+          args.findingId,
+        );
         return rows.map(mapCA);
       }, ["corrective_actions"]),
 
@@ -2871,7 +3039,11 @@ export const api = {
         const site = await getSite(args.siteId);
         if (!site || !canAccessSite(user, site)) return [];
         // SEC-4: paged read (see listFindingsForInspection).
-        const rows = await pagedEqRows<AnyRow>("corrective_actions", "site_id", args.siteId);
+        const rows = await pagedEqRows<AnyRow>(
+          "corrective_actions",
+          "site_id",
+          args.siteId,
+        );
         return rows.map(mapCA);
       }, ["corrective_actions"]),
 
@@ -2941,13 +3113,19 @@ export const api = {
       const ca = mapCA(data);
       const site = await getSite(ca.siteId);
       if (!site) throw new Error("NOT_FOUND");
-      if (user.role !== ROLES.OPERATOR || user.operatorName !== site.operatorName)
+      if (
+        user.role !== ROLES.OPERATOR ||
+        user.operatorName !== site.operatorName
+      )
         throw new Error("FORBIDDEN");
       // Idempotent replay (OFF: mid-sync crash): the server applied this
       // response but the local queue removal was interrupted. Same note on
       // an already-submitted action IS the desired end state — report
       // success so the queue drains instead of dead-ending on the guard.
-      if (ca.status === "submitted" && (ca.operatorNote ?? "") === args.operatorNote) {
+      if (
+        ca.status === "submitted" &&
+        (ca.operatorNote ?? "") === args.operatorNote
+      ) {
         return;
       }
       let query = supabase
@@ -2959,7 +3137,10 @@ export const api = {
       }
       const { data: updated, error } = await query.select("id");
       if (error) throw backendError(error);
-      if (args.expectedRowVersion != null && (!updated || updated.length === 0)) {
+      if (
+        args.expectedRowVersion != null &&
+        (!updated || updated.length === 0)
+      ) {
         // Zero rows matched: someone bumped row_version first. Fetch the
         // current row so the human resolution screen can show both sides.
         const { data: cur } = await supabase
@@ -3034,14 +3215,13 @@ export const api = {
   // --------------------------------------------------------------- records
   records: {
     listIncidents: () =>
-      live<(Incident & { siteCode: string; siteName: string; county: string })[]>(
-        async () => {
-          const user = await requireAuthed(true);
-          if (!user.role) return [];
-          return fetchIncidents(user);
-        },
-        ["incidents", "sites"],
-      ),
+      live<
+        (Incident & { siteCode: string; siteName: string; county: string })[]
+      >(async () => {
+        const user = await requireAuthed(true);
+        if (!user.role) return [];
+        return fetchIncidents(user);
+      }, ["incidents", "sites"]),
 
     /** SEC-4 v2 — the incidents list page's keyset page (migration 0014's
      *  SECURITY INVOKER mg_incidents_page): (occurred_at, id) DESC windows
@@ -3054,7 +3234,9 @@ export const api = {
       before?: KeysetCursor | null;
       limit?: number;
     }): Promise<
-      KeysetPage<Incident & { siteCode: string; siteName: string; county: string }>
+      KeysetPage<
+        Incident & { siteCode: string; siteName: string; county: string }
+      >
     > => {
       const user = await requireAuthed(true);
       if (!user.role) return { rows: [], nextCursor: null, source: "fallback" };
@@ -3069,11 +3251,16 @@ export const api = {
         mapIncidentPageRow,
       );
       if (viaRpc) return viaRpc;
-      if (args.before) return { rows: [], nextCursor: null, source: "fallback" };
+      if (args.before)
+        return { rows: [], nextCursor: null, source: "fallback" };
       console.warn(
         "[backend] mg_incidents_page unavailable — full authorized feed in one page (migration 0014 not applied); list stays exact, paging inactive",
       );
-      return { rows: await fetchIncidents(user), nextCursor: null, source: "fallback" };
+      return {
+        rows: await fetchIncidents(user),
+        nextCursor: null,
+        source: "fallback",
+      };
     },
 
     getIncident: (args: { incidentId: string }) =>
@@ -3089,7 +3276,12 @@ export const api = {
         const inc = mapIncident(data);
         const site = await getSite(inc.siteId);
         if (!site || !canAccessSite(user, site)) return null;
-        return { ...inc, siteCode: site.code, siteName: site.name, county: site.county };
+        return {
+          ...inc,
+          siteCode: site.code,
+          siteName: site.name,
+          county: site.county,
+        };
       }, ["incidents", "sites"]),
 
     reportIncident: async (args: {
@@ -3176,7 +3368,12 @@ export const api = {
           const site = byId.get(o.siteId);
           if (!site) continue;
           if (!canAccessSite(user, site)) continue;
-          out.push({ ...o, siteCode: site.code, siteName: site.name, county: site.county });
+          out.push({
+            ...o,
+            siteCode: site.code,
+            siteName: site.name,
+            county: site.county,
+          });
         }
         out.sort((a, b) => b.observedAt - a.observedAt);
         return out;
@@ -3195,7 +3392,12 @@ export const api = {
         const obs = mapObservation(data);
         const site = await getSite(obs.siteId);
         if (!site || !canAccessSite(user, site)) return null;
-        return { ...obs, siteCode: site.code, siteName: site.name, county: site.county };
+        return {
+          ...obs,
+          siteCode: site.code,
+          siteName: site.name,
+          county: site.county,
+        };
       }, ["environmental_observations", "sites"]),
 
     reportObservation: async (args: {
@@ -3304,24 +3506,25 @@ export const api = {
 
     /** Public: track by code. Returns only coarse, non-sensitive fields. */
     trackCommunityReport: (args: { trackingCode: string }) =>
-      live<{ trackingCode: string; status: string; createdAt: number } | null>(
-        async () => {
-          const code = args.trackingCode.trim().toUpperCase();
-          const { data, error } = await supabase
-            .from("report_tracking")
-            .select("*")
-            .eq("tracking_code", code)
-            .maybeSingle();
-          if (error) throw backendError(error);
-          if (!data) return null;
-          return {
-            trackingCode: data.tracking_code as string,
-            status: data.status as string,
-            createdAt: toMs(data.created_at),
-          };
-        },
-        ["report_tracking"],
-      ),
+      live<{
+        trackingCode: string;
+        status: string;
+        createdAt: number;
+      } | null>(async () => {
+        const code = args.trackingCode.trim().toUpperCase();
+        const { data, error } = await supabase
+          .from("report_tracking")
+          .select("*")
+          .eq("tracking_code", code)
+          .maybeSingle();
+        if (error) throw backendError(error);
+        if (!data) return null;
+        return {
+          trackingCode: data.tracking_code as string,
+          status: data.status as string,
+          createdAt: toMs(data.created_at),
+        };
+      }, ["report_tracking"]),
 
     triageCommunityReport: async (args: {
       reportId: string;
@@ -3361,7 +3564,13 @@ export const api = {
         if (!user.role) return [];
         const derived = await deriveNotifications(user);
         return persistNotifications(derived);
-      }, ["corrective_actions", "findings", "sites", "community_reports", "notifications"]),
+      }, [
+        "corrective_actions",
+        "findings",
+        "sites",
+        "community_reports",
+        "notifications",
+      ]),
 
     /** Mark one notification read (own inbox only — RLS + guard). */
     markNotificationRead: async (notificationId: string) => {
@@ -3415,53 +3624,70 @@ export const api = {
     // client-side recount would be a second, divergent implementation of
     // figures that end up in a printed report; a lineage without 0021 shows
     // an honest error instead.
-    trendSeries: (args: { metric: TrendMetric; bucket: TrendBucket; from?: string; to?: string }) =>
-      live<TrendSeries | null>(
-        async () => {
-          const user = await requireAuthed(true);
-          if (!user.role) return null;
-          const { data, error } = await supabase.rpc("mg_trend_series", {
-            p_metric: args.metric,
-            p_bucket: args.bucket,
-            p_from: args.from ?? null,
-            p_to: args.to ?? null,
-          });
-          if (error) throw backendError(error);
-          return mapTrendSeries(data);
-        },
-        ["incidents", "inspections", "findings", "environmental_observations", "community_reports"],
-      ),
+    trendSeries: (args: {
+      metric: TrendMetric;
+      bucket: TrendBucket;
+      from?: string;
+      to?: string;
+    }) =>
+      live<TrendSeries | null>(async () => {
+        const user = await requireAuthed(true);
+        if (!user.role) return null;
+        const { data, error } = await supabase.rpc("mg_trend_series", {
+          p_metric: args.metric,
+          p_bucket: args.bucket,
+          p_from: args.from ?? null,
+          p_to: args.to ?? null,
+        });
+        if (error) throw backendError(error);
+        return mapTrendSeries(data);
+      }, [
+        "incidents",
+        "inspections",
+        "findings",
+        "environmental_observations",
+        "community_reports",
+      ]),
 
     trendGeo: (args: { metric: TrendMetric; from?: string; to?: string }) =>
-      live<TrendGeo | null>(
-        async () => {
-          const user = await requireAuthed(true);
-          if (!user.role) return null;
-          const { data, error } = await supabase.rpc("mg_trend_geo", {
-            p_metric: args.metric,
-            p_from: args.from ?? null,
-            p_to: args.to ?? null,
-          });
-          if (error) throw backendError(error);
-          return mapTrendGeo(data);
-        },
-        ["incidents", "inspections", "findings", "environmental_observations", "community_reports", "sites"],
-      ),
+      live<TrendGeo | null>(async () => {
+        const user = await requireAuthed(true);
+        if (!user.role) return null;
+        const { data, error } = await supabase.rpc("mg_trend_geo", {
+          p_metric: args.metric,
+          p_from: args.from ?? null,
+          p_to: args.to ?? null,
+        });
+        if (error) throw backendError(error);
+        return mapTrendGeo(data);
+      }, [
+        "incidents",
+        "inspections",
+        "findings",
+        "environmental_observations",
+        "community_reports",
+        "sites",
+      ]),
 
     summaryReport: (args: { from?: string; to?: string }) =>
-      live<SummaryReport | null>(
-        async () => {
-          const user = await requireAuthed(true);
-          if (!user.role) return null;
-          const { data, error } = await supabase.rpc("mg_summary_report", {
-            p_from: args.from ?? null,
-            p_to: args.to ?? null,
-          });
-          if (error) throw backendError(error);
-          return mapSummaryReport(data);
-        },
-        ["incidents", "inspections", "findings", "corrective_actions", "environmental_observations", "community_reports", "sites"],
-      ),
+      live<SummaryReport | null>(async () => {
+        const user = await requireAuthed(true);
+        if (!user.role) return null;
+        const { data, error } = await supabase.rpc("mg_summary_report", {
+          p_from: args.from ?? null,
+          p_to: args.to ?? null,
+        });
+        if (error) throw backendError(error);
+        return mapSummaryReport(data);
+      }, [
+        "incidents",
+        "inspections",
+        "findings",
+        "corrective_actions",
+        "environmental_observations",
+        "community_reports",
+        "sites",
+      ]),
 
     commandCenter: () =>
       live<CommandCenterStats>(async () => {
@@ -3470,14 +3696,23 @@ export const api = {
         if (!user.role) {
           return {
             scope: user.scope ?? "national",
-            sites: 0, activeSites: 0,
-            inspectionsTotal: 0, inspectionsUnderReview: 0,
-            findingsTotal: 0, findingsCriticalOpen: 0,
-            correctiveActionsOpen: 0, correctiveActionsOverdue: 0,
-            incidentsTotal: 0, fatalities: 0,
-            envAlerts: 0, envByCategory: {},
-            communityReports: 0, communityReportsPending: 0,
-            inspectionCoveragePct: 0, countyCounts: {}, incidentTypes: {},
+            sites: 0,
+            activeSites: 0,
+            inspectionsTotal: 0,
+            inspectionsUnderReview: 0,
+            findingsTotal: 0,
+            findingsCriticalOpen: 0,
+            correctiveActionsOpen: 0,
+            correctiveActionsOverdue: 0,
+            incidentsTotal: 0,
+            fatalities: 0,
+            envAlerts: 0,
+            envByCategory: {},
+            communityReports: 0,
+            communityReportsPending: 0,
+            inspectionCoveragePct: 0,
+            countyCounts: {},
+            incidentTypes: {},
           };
         }
         // SEC-4 — AGGREGATE IN THE DATABASE. Hosted PostgREST caps unranged
@@ -3497,22 +3732,31 @@ export const api = {
         // only the wire cost differs. Loud about why, never truncated.
         console.warn(
           "[backend] mg_command_center_stats unavailable — client-side aggregation fallback:",
-          error ? error.message ?? String(error) : "empty payload",
+          error ? (error.message ?? String(error)) : "empty payload",
         );
         const staff = isStaffRole(user.role);
-        const [sitesRaw, inspRaw, findingsRaw, casRaw, incRaw, envRaw, reportsRaw] =
-          await Promise.all([
-            allRows<AnyRow>("sites"),
-            allRows<AnyRow>("inspections"),
-            allRows<AnyRow>("findings"),
-            allRows<AnyRow>("corrective_actions"),
-            allRows<AnyRow>("incidents"),
-            allRows<AnyRow>("environmental_observations"),
-            staff
-              ? allRows<AnyRow>("community_reports")
-              : Promise.resolve([] as AnyRow[]),
-          ]);
-        const sites = sitesRaw.map(mapSite).filter((s) => canAccessSite(user, s));
+        const [
+          sitesRaw,
+          inspRaw,
+          findingsRaw,
+          casRaw,
+          incRaw,
+          envRaw,
+          reportsRaw,
+        ] = await Promise.all([
+          allRows<AnyRow>("sites"),
+          allRows<AnyRow>("inspections"),
+          allRows<AnyRow>("findings"),
+          allRows<AnyRow>("corrective_actions"),
+          allRows<AnyRow>("incidents"),
+          allRows<AnyRow>("environmental_observations"),
+          staff
+            ? allRows<AnyRow>("community_reports")
+            : Promise.resolve([] as AnyRow[]),
+        ]);
+        const sites = sitesRaw
+          .map(mapSite)
+          .filter((s) => canAccessSite(user, s));
         const inspections = inspRaw.map(mapInspection);
         const findings = findingsRaw.map(mapFinding);
         const cas = casRaw.map(mapCA);
@@ -3522,7 +3766,9 @@ export const api = {
         const now = Date.now();
 
         const visibleIds = new Set(sites.map((s) => s._id));
-        const visInspections = inspections.filter((i) => visibleIds.has(i.siteId));
+        const visInspections = inspections.filter((i) =>
+          visibleIds.has(i.siteId),
+        );
         const visFindings = findings.filter((f) => visibleIds.has(f.siteId));
         const visCas = cas.filter((c) => visibleIds.has(c.siteId));
         const visIncidents = incidents.filter((i) => visibleIds.has(i.siteId));
@@ -3544,12 +3790,17 @@ export const api = {
             (o.verification === "measured" || o.verification === "verified"),
         );
         const approved = new Set(
-          visInspections.filter((i) => i.status === "approved").map((i) => i.siteId),
+          visInspections
+            .filter((i) => i.status === "approved")
+            .map((i) => i.siteId),
         );
         const coverage =
-          sites.length === 0 ? 0 : Math.round((approved.size / sites.length) * 100);
+          sites.length === 0
+            ? 0
+            : Math.round((approved.size / sites.length) * 100);
         const countyCounts: Record<string, number> = {};
-        for (const s of sites) countyCounts[s.county] = (countyCounts[s.county] ?? 0) + 1;
+        for (const s of sites)
+          countyCounts[s.county] = (countyCounts[s.county] ?? 0) + 1;
         const countBy = (arr: { [k: string]: unknown }[], key: string) => {
           const m: Record<string, number> = {};
           for (const item of arr) {
@@ -3564,24 +3815,44 @@ export const api = {
           sites: sites.length,
           activeSites: sites.filter((s) => s.status === "active").length,
           inspectionsTotal: visInspections.length,
-          inspectionsUnderReview: visInspections.filter((i) => i.status === "under_review").length,
+          inspectionsUnderReview: visInspections.filter(
+            (i) => i.status === "under_review",
+          ).length,
           findingsTotal: visFindings.length,
           findingsCriticalOpen: visFindings.filter(
-            (f) => f.severity === "critical" && (f.status === "open" || f.status === "acknowledged"),
+            (f) =>
+              f.severity === "critical" &&
+              (f.status === "open" || f.status === "acknowledged"),
           ).length,
           correctiveActionsOpen: openCa.length,
           correctiveActionsOverdue: overdueCa.length,
           incidentsTotal: visIncidents.length,
           fatalities,
           envAlerts: envAlerts.length,
-          envByCategory: countBy(visEnv as unknown as { [k: string]: unknown }[], "category"),
+          envByCategory: countBy(
+            visEnv as unknown as { [k: string]: unknown }[],
+            "category",
+          ),
           communityReports: reports.length,
-          communityReportsPending: reports.filter((r) => r.status === "submitted").length,
+          communityReportsPending: reports.filter(
+            (r) => r.status === "submitted",
+          ).length,
           inspectionCoveragePct: coverage,
           countyCounts,
-          incidentTypes: countBy(visIncidents as unknown as { [k: string]: unknown }[], "type"),
+          incidentTypes: countBy(
+            visIncidents as unknown as { [k: string]: unknown }[],
+            "type",
+          ),
         };
-      }, ["sites", "inspections", "findings", "corrective_actions", "incidents", "environmental_observations", "community_reports"]),
+      }, [
+        "sites",
+        "inspections",
+        "findings",
+        "corrective_actions",
+        "incidents",
+        "environmental_observations",
+        "community_reports",
+      ]),
 
     recentAuditLog: () =>
       live<AuditEntry[]>(async () => {
@@ -3598,7 +3869,12 @@ export const api = {
       }, ["audit_log"]),
 
     publicStats: () =>
-      liveDoc<{ sites: number; inspections: number; incidents: number; communityReports: number }>(
+      liveDoc<{
+        sites: number;
+        inspections: number;
+        incidents: number;
+        communityReports: number;
+      }>(
         () => ({ table: "meta", column: "key", value: "public_stats" }),
         (r) => {
           const v = (r.value ?? {}) as Record<string, unknown>;
@@ -3758,8 +4034,7 @@ export const api = {
         // the 0013 RLS / storage / RPC branches.
         throw new Error("FORBIDDEN");
       }
-      if (args.file.size > 25 * 1024 * 1024)
-        throw new Error("FILE_TOO_LARGE");
+      if (args.file.size > 25 * 1024 * 1024) throw new Error("FILE_TOO_LARGE");
       const site = args.siteId ? await getSite(args.siteId) : null;
       if (args.siteId && (!site || !canAccessSite(user, site)))
         throw new Error("FORBIDDEN");
@@ -3818,7 +4093,10 @@ export const api = {
         sha256: storedSha,
       };
       let { error: dbErr } = await supabase.from("evidence").insert(row);
-      if (dbErr && String((dbErr as { message?: string }).message ?? "").includes("sha256")) {
+      if (
+        dbErr &&
+        String((dbErr as { message?: string }).message ?? "").includes("sha256")
+      ) {
         // Pre-0013 lineage (live until migration 0013 is applied): the
         // column does not exist yet. Record the row WITHOUT the digest
         // rather than failing every upload on that lineage; the digest is
@@ -3872,18 +4150,40 @@ export const api = {
      * The RPC clamps TTL server-side (30-300s) regardless of what we send.
      */
     getUrl: async (evidenceId: string): Promise<string | null> => {
-      await requireAuthed();
+      // The server RPC enforces sign-in, role and site scope itself, so the
+      // CACHED profile is enough here — the uncached read this used to make
+      // added a full extra round trip to every file shown.
+      await requireAuthed(true);
       const TTL_SECONDS = 120;
-      const { data: path, error } = await supabase.rpc("evidence_url", {
-        p_evidence_id: evidenceId,
-        p_ttl_seconds: TTL_SECONDS,
+      // Each step is named in its error so the screen can say WHICH one failed
+      // (a bare "couldn't load" cannot be diagnosed by anyone).
+      const { data: path, error } = await withReadTimeout(
+        Promise.resolve(
+          supabase.rpc("evidence_url", {
+            p_evidence_id: evidenceId,
+            p_ttl_seconds: TTL_SECONDS,
+          }),
+        ),
+        15_000,
+      ).catch((e: unknown) => {
+        throw new Error(`ACCESS CHECK: ${describeError(e)}`);
       });
-      if (error) throw backendError(error);
+      if (error)
+        throw new Error(`ACCESS CHECK: ${describeError(backendError(error))}`);
       if (!path) throw new Error("NOT_FOUND");
-      const { data: signed, error: sErr } = await supabase.storage
-        .from("evidence")
-        .createSignedUrl(path as string, TTL_SECONDS);
-      if (sErr || !signed) return null;
+      const { data: signed, error: sErr } = await withReadTimeout(
+        supabase.storage
+          .from("evidence")
+          .createSignedUrl(path as string, TTL_SECONDS),
+        15_000,
+      ).catch((e: unknown) => {
+        throw new Error(`STORAGE: ${describeError(e)}`);
+      });
+      if (sErr || !signed) {
+        throw new Error(
+          `STORAGE: ${describeError(sErr ?? "no link returned")}`,
+        );
+      }
       return signed.signedUrl;
     },
 
@@ -3910,7 +4210,10 @@ export const api = {
   seed: {
     checkSeeded: () =>
       live<{ seeded: boolean }>(async () => {
-        const { data, error } = await supabase.from("sites").select("id").limit(1);
+        const { data, error } = await supabase
+          .from("sites")
+          .select("id")
+          .limit(1);
         if (error) throw backendError(error);
         return { seeded: (data ?? []).length > 0 };
       }, ["sites"]),
@@ -3920,7 +4223,10 @@ export const api = {
     seedIfEmpty: async () => {
       await requireAdminUser();
       // Existence probe only — limit(1) keeps this a bounded read (SEC-4).
-      const { data, error } = await supabase.from("sites").select("id").limit(1);
+      const { data, error } = await supabase
+        .from("sites")
+        .select("id")
+        .limit(1);
       if (error) throw backendError(error);
       if ((data ?? []).length > 0) {
         return { seeded: false, reason: "not_empty" as const };
@@ -4038,7 +4344,8 @@ export const api = {
       accuracyM?: number;
     }): Promise<Site> => {
       await requireAdminUser();
-      if (args.geoVerified && !args.source?.trim()) throw new Error("INVALID_SOURCE");
+      if (args.geoVerified && !args.source?.trim())
+        throw new Error("INVALID_SOURCE");
       if (args.accuracyM !== undefined && !(args.accuracyM >= 0))
         throw new Error("INVALID_ACCURACY");
       const current = await getSite(args.siteId);
@@ -4159,7 +4466,9 @@ export async function loadMapFeatures(): Promise<MapFeedPayload> {
       tolerantRows("incidents"),
       tolerantRows("inspections"),
       tolerantRows("environmental_observations"),
-      staff ? tolerantRows("community_reports") : Promise.resolve([] as AnyRow[]),
+      staff
+        ? tolerantRows("community_reports")
+        : Promise.resolve([] as AnyRow[]),
       tolerantRows("admin_boundaries"),
       tolerantRows("site_boundaries"),
     ]);
@@ -4208,10 +4517,18 @@ export async function loadMapFeatures(): Promise<MapFeedPayload> {
   const siteBoundaries = siteBoundRows
     .map(siteBoundaryFromRow)
     .filter(
-      (b) => sites.has(b.siteId) && parseBoundaryGeometry(b.geometryGeoJson) !== null,
+      (b) =>
+        sites.has(b.siteId) &&
+        parseBoundaryGeometry(b.geometryGeoJson) !== null,
     );
 
-  return { layers: MAP_LAYER_CONFIGS, features, adminBoundaries, siteBoundaries, excluded };
+  return {
+    layers: MAP_LAYER_CONFIGS,
+    features,
+    adminBoundaries,
+    siteBoundaries,
+    excluded,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -4222,12 +4539,66 @@ export async function loadMapFeatures(): Promise<MapFeedPayload> {
 /** Synthetic demo sites. Longitudes are NEGATIVE: Liberia is west of the prime
  *  meridian (tests/gis.test.ts pins every seeded position inside Liberia). */
 export const DEMO_SITE_DEFS = [
-  { name: "Demo Gold Operation — Zorzor Corridor", operatorName: "Lofa Minerals Demo", county: "Lofa", district: "Zorzor", community: "Zorzor City", mineralType: "Gold", lat: 7.6067, lng: -9.4236 },
-  { name: "Demo Iron Ore Quarry — Yekepa", operatorName: "Nimba Aggregates Demo", county: "Nimba", district: "Sanniquellie-Mahn", community: "Yekepa", mineralType: "Iron Ore", lat: 7.5989, lng: -8.6333 },
-  { name: "Demo Alluvial Site — Saniquellie", operatorName: "Nimba Aggregates Demo", county: "Nimba", district: "Sanniquellie-Mahn", community: "Saniquellie", mineralType: "Alluvial Gold", lat: 7.5806, lng: -8.7236 },
-  { name: "Demo Sand Mining — Robertsport", operatorName: "Grand Cape Coastal Demo", county: "Grand Cape Mount", district: "Robertsport", community: "Robertsport", mineralType: "Sand", lat: 6.7572, lng: -11.3686 },
-  { name: "Demo Artisanal Camp — Gbarpolu", operatorName: "Gbarpolu Artisanal Demo", county: "Gbarpolu", district: "Bopolu", community: "Bopolu", mineralType: "Gold", lat: 6.7236, lng: -9.7167 },
-  { name: "Demo Basalt Pit — Ganta", operatorName: "Nimba Aggregates Demo", county: "Nimba", district: "Gba & Ma", community: "Ganta", mineralType: "Basalt", lat: 7.2194, lng: -8.9833 },
+  {
+    name: "Demo Gold Operation — Zorzor Corridor",
+    operatorName: "Lofa Minerals Demo",
+    county: "Lofa",
+    district: "Zorzor",
+    community: "Zorzor City",
+    mineralType: "Gold",
+    lat: 7.6067,
+    lng: -9.4236,
+  },
+  {
+    name: "Demo Iron Ore Quarry — Yekepa",
+    operatorName: "Nimba Aggregates Demo",
+    county: "Nimba",
+    district: "Sanniquellie-Mahn",
+    community: "Yekepa",
+    mineralType: "Iron Ore",
+    lat: 7.5989,
+    lng: -8.6333,
+  },
+  {
+    name: "Demo Alluvial Site — Saniquellie",
+    operatorName: "Nimba Aggregates Demo",
+    county: "Nimba",
+    district: "Sanniquellie-Mahn",
+    community: "Saniquellie",
+    mineralType: "Alluvial Gold",
+    lat: 7.5806,
+    lng: -8.7236,
+  },
+  {
+    name: "Demo Sand Mining — Robertsport",
+    operatorName: "Grand Cape Coastal Demo",
+    county: "Grand Cape Mount",
+    district: "Robertsport",
+    community: "Robertsport",
+    mineralType: "Sand",
+    lat: 6.7572,
+    lng: -11.3686,
+  },
+  {
+    name: "Demo Artisanal Camp — Gbarpolu",
+    operatorName: "Gbarpolu Artisanal Demo",
+    county: "Gbarpolu",
+    district: "Bopolu",
+    community: "Bopolu",
+    mineralType: "Gold",
+    lat: 6.7236,
+    lng: -9.7167,
+  },
+  {
+    name: "Demo Basalt Pit — Ganta",
+    operatorName: "Nimba Aggregates Demo",
+    county: "Nimba",
+    district: "Gba & Ma",
+    community: "Ganta",
+    mineralType: "Basalt",
+    lat: 7.2194,
+    lng: -8.9833,
+  },
 ] as const;
 
 async function runSeed() {
@@ -4235,7 +4606,6 @@ async function runSeed() {
   const now = Date.now();
   const day = 24 * 60 * 60 * 1000;
   const uid = user.uid;
-
 
   const siteIds: Record<string, { id: string; code: string }> = {};
   const existingCodes = await allSiteCodes();
@@ -4269,32 +4639,77 @@ async function runSeed() {
       {
         title: "Site & Workforce Safety",
         questions: [
-          { label: "Are workers wearing required PPE?", answerType: "boolean", required: true },
-          { label: "Is a trained safety officer present on site?", answerType: "boolean", required: true },
-          { label: "Number of workers observed on site", answerType: "number", required: true },
-          { label: "Overall safety condition", answerType: "select", options: ["Good", "Fair", "Poor", "Immediate risk"], required: true },
+          {
+            label: "Are workers wearing required PPE?",
+            answerType: "boolean",
+            required: true,
+          },
+          {
+            label: "Is a trained safety officer present on site?",
+            answerType: "boolean",
+            required: true,
+          },
+          {
+            label: "Number of workers observed on site",
+            answerType: "number",
+            required: true,
+          },
+          {
+            label: "Overall safety condition",
+            answerType: "select",
+            options: ["Good", "Fair", "Poor", "Immediate risk"],
+            required: true,
+          },
         ],
       },
       {
         title: "Equipment & Infrastructure",
         questions: [
-          { label: "Equipment inspected and maintained?", answerType: "boolean", required: true },
-          { label: "Any structural defects observed?", answerType: "boolean", required: true },
-          { label: "Describe defects or concerns", answerType: "text", required: false },
+          {
+            label: "Equipment inspected and maintained?",
+            answerType: "boolean",
+            required: true,
+          },
+          {
+            label: "Any structural defects observed?",
+            answerType: "boolean",
+            required: true,
+          },
+          {
+            label: "Describe defects or concerns",
+            answerType: "text",
+            required: false,
+          },
         ],
       },
       {
         title: "Environmental Condition",
         questions: [
-          { label: "Signs of water pollution or sediment discharge?", answerType: "boolean", required: true },
-          { label: "Waste and tailings properly managed?", answerType: "boolean", required: true },
-          { label: "Additional environmental observations", answerType: "text", required: false },
+          {
+            label: "Signs of water pollution or sediment discharge?",
+            answerType: "boolean",
+            required: true,
+          },
+          {
+            label: "Waste and tailings properly managed?",
+            answerType: "boolean",
+            required: true,
+          },
+          {
+            label: "Additional environmental observations",
+            answerType: "text",
+            required: false,
+          },
         ],
       },
       {
         title: "Administrative",
         questions: [
-          { label: "Site records available for review?", answerType: "boolean", required: true },
+          {
+            label: "Site records available for review?",
+            answerType: "boolean",
+            required: true,
+          },
           { label: "Inspector notes", answerType: "text", required: false },
         ],
       },
@@ -4311,9 +4726,14 @@ async function runSeed() {
     inspector_id: uid,
     status: "approved",
     answers: {
-      "0:0": true, "0:1": true, "0:2": 24, "0:3": "Fair",
-      "1:0": true, "1:1": false,
-      "2:0": true, "2:1": false,
+      "0:0": true,
+      "0:1": true,
+      "0:2": 24,
+      "0:3": "Fair",
+      "1:0": true,
+      "1:1": false,
+      "2:0": true,
+      "2:1": false,
       "3:0": true,
     },
     notes: "Routine inspection; PPE compliance observed at both pits.",
@@ -4328,7 +4748,8 @@ async function runSeed() {
     inspection_id: insp1,
     site_id: zorzor.id,
     title: "Sediment discharge into seasonal stream",
-    description: "Uncontrolled runoff from the processing area entering the stream.",
+    description:
+      "Uncontrolled runoff from the processing area entering the stream.",
     severity: "high",
     status: "acknowledged",
     created_by_id: uid,
@@ -4351,9 +4772,15 @@ async function runSeed() {
     inspector_id: uid,
     status: "under_review",
     answers: {
-      "0:0": true, "0:1": false, "0:2": 11, "0:3": "Fair",
-      "1:0": true, "1:1": true, "1:2": "Berms eroded on eastern section.",
-      "2:0": false, "2:1": true,
+      "0:0": true,
+      "0:1": false,
+      "0:2": 11,
+      "0:3": "Fair",
+      "1:0": true,
+      "1:1": true,
+      "1:2": "Berms eroded on eastern section.",
+      "2:0": false,
+      "2:1": true,
       "3:0": true,
     },
     notes: "Haul-road inspection; berms low on the eastern section.",
@@ -4378,7 +4805,8 @@ async function runSeed() {
     site_id: robertsport.id,
     type: "injury",
     severity: "medium",
-    description: "Worker laceration from handling screen mesh; treated on site.",
+    description:
+      "Worker laceration from handling screen mesh; treated on site.",
     occurred_at: iso(now - 4 * day),
     injured: 1,
     status: "investigating",
@@ -4391,7 +4819,8 @@ async function runSeed() {
     site_id: zorzor.id,
     category: "water_pollution",
     verification: "measured",
-    description: "Turbidity downstream visibly elevated; sample taken for analysis.",
+    description:
+      "Turbidity downstream visibly elevated; sample taken for analysis.",
     observed_at: iso(now - 5 * day),
     latitude: 7.6067,
     longitude: 9.4236,
@@ -4404,7 +4833,8 @@ async function runSeed() {
     {
       tracking_code: "CR-DEMO0001",
       category: "pollution",
-      description: "Community reports discolored water in the creek used for washing.",
+      description:
+        "Community reports discolored water in the creek used for washing.",
       county: "Lofa",
       community: "Zorzor City",
       status: "under_review",
@@ -4413,7 +4843,8 @@ async function runSeed() {
     {
       tracking_code: "CR-DEMO0002",
       category: "suspected_illegal_mining",
-      description: "Unknown digging activity observed after dark near the ridge.",
+      description:
+        "Unknown digging activity observed after dark near the ridge.",
       county: "Nimba",
       community: "Yekepa",
       status: "submitted",
@@ -4421,15 +4852,21 @@ async function runSeed() {
     },
   ]);
   if (repErr) throw backendError(repErr);
-  const { error: trkErr } = await supabase
-    .from("report_tracking")
-    .upsert(
-      [
-        { tracking_code: "CR-DEMO0001", status: "under_review", created_at: iso(now - 3 * day) },
-        { tracking_code: "CR-DEMO0002", status: "submitted", created_at: iso(now - 1 * day) },
-      ],
-      { onConflict: "tracking_code" },
-    );
+  const { error: trkErr } = await supabase.from("report_tracking").upsert(
+    [
+      {
+        tracking_code: "CR-DEMO0001",
+        status: "under_review",
+        created_at: iso(now - 3 * day),
+      },
+      {
+        tracking_code: "CR-DEMO0002",
+        status: "submitted",
+        created_at: iso(now - 1 * day),
+      },
+    ],
+    { onConflict: "tracking_code" },
+  );
   if (trkErr) throw backendError(trkErr);
 
   // No client-side audit insert here anymore (SEC-1): every seeded row above

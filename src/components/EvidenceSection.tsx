@@ -600,6 +600,33 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+/** At most MAX_MINTS link requests in flight at once: a screen with many
+ *  attachments used to fire them all together and starve the connection. */
+const MAX_MINTS = 3;
+let activeMints = 0;
+const mintQueue: Array<() => void> = [];
+async function limited<T>(work: () => Promise<T>): Promise<T> {
+  if (activeMints >= MAX_MINTS)
+    await new Promise<void>((go) => mintQueue.push(go));
+  activeMints++;
+  try {
+    return await work();
+  } finally {
+    activeMints--;
+    mintQueue.shift()?.();
+  }
+}
+
+function friendlyReason(e: unknown): string {
+  const m = e instanceof Error ? e.message : String(e);
+  if (m === "TIMEOUT") return "The server did not respond in time.";
+  if (m.includes("NOT_FOUND"))
+    return "This file was not found, or your account cannot open it.";
+  if (m.includes("UNAUTHENTICATED"))
+    return "You are signed out. Sign in again.";
+  return m.replace(/^Error:\s*/, "").slice(0, 200);
+}
+
 type Minted = { url: string; at: number };
 
 function EvidenceCard({ ev }: { ev: Evidence }) {
@@ -609,6 +636,7 @@ function EvidenceCard({ ev }: { ev: Evidence }) {
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [mediaFailed, setMediaFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [reason, setReason] = useState<string | null>(null);
 
   const isImage = ev.mimeType.startsWith("image/");
   const isVideo = ev.mimeType.startsWith("video/");
@@ -620,14 +648,22 @@ function EvidenceCard({ ev }: { ev: Evidence }) {
     setAttempt((n) => n + 1);
   };
 
-  const mint = useCallback(async (): Promise<string | null> => {
+  // Returns the link, or the reason there is none (state is set by the callers,
+  // inside promise callbacks).
+  const mint = useCallback(async (): Promise<{
+    url: string | null;
+    why: string | null;
+  }> => {
     try {
-      const u = await withTimeout(getUrlRef.current(ev._id), MINT_TIMEOUT_MS);
-      if (!u) return null;
+      const u = await limited(() =>
+        withTimeout(getUrlRef.current(ev._id), MINT_TIMEOUT_MS),
+      );
+      if (!u)
+        return { url: null, why: "The server returned no link for this file." };
       setMinted({ url: u, at: Date.now() });
-      return u;
-    } catch {
-      return null;
+      return { url: u, why: null };
+    } catch (e) {
+      return { url: null, why: friendlyReason(e) };
     }
   }, [ev._id, getUrlRef]);
 
@@ -635,8 +671,14 @@ function EvidenceCard({ ev }: { ev: Evidence }) {
   // without a tap. Always ends in "ready" or "error" — never an endless spinner.
   useEffect(() => {
     let cancelled = false;
-    void mint().then((u) => {
-      if (!cancelled) setState(u ? "ready" : "error");
+    // A retry that fails instantly looks like a dead button; hold the busy
+    // state briefly so the person SEES it try again.
+    const minBusy =
+      attempt > 0 ? new Promise((r) => setTimeout(r, 700)) : Promise.resolve();
+    void Promise.all([mint(), minBusy]).then(([r]) => {
+      if (cancelled) return;
+      setReason(r.why);
+      setState(r.url ? "ready" : "error");
     });
     return () => {
       cancelled = true;
@@ -648,7 +690,9 @@ function EvidenceCard({ ev }: { ev: Evidence }) {
     let url = minted && Date.now() - minted.at < URL_TTL_MS ? minted.url : null;
     if (!url) {
       setState("loading");
-      url = await mint();
+      const r = await mint();
+      url = r.url;
+      setReason(r.why);
       setState(url ? "ready" : "error");
     }
     if (!url) {
@@ -685,7 +729,17 @@ function EvidenceCard({ ev }: { ev: Evidence }) {
               className="flex h-32 flex-col items-center justify-center gap-2 text-xs text-muted-foreground"
               role="alert"
             >
-              <span>Couldn&apos;t load this file.</span>
+              <span className="px-3 text-center">
+                Couldn&apos;t load this file.
+                {reason && (
+                  <span className="mt-1 block break-words font-mono text-[11px]">
+                    {reason}
+                  </span>
+                )}
+                {attempt > 0 && (
+                  <span className="mt-1 block">Tried {attempt + 1} times.</span>
+                )}
+              </span>
               <Button
                 type="button"
                 variant="outline"
