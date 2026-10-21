@@ -18,9 +18,9 @@ export default function Boundaries() {
   if (!user) return null;
   if (user.role !== "admin") {
     return (
-      <div className="paper flex items-start gap-3 p-6">
+      <div className="paper flex min-w-0 items-start gap-3 p-6">
         <ShieldAlert className="mt-0.5 size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
-        <div>
+        <div className="min-w-0">
           <p className="text-sm font-medium">Administrator access required</p>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             Loading map boundaries is limited to platform administrators. Your current role:{" "}
@@ -32,10 +32,10 @@ export default function Boundaries() {
   }
 
   return (
-    <div className="space-y-8">
-      <header>
+    <div className="min-w-0 space-y-8">
+      <header className="min-w-0">
         <p className="kicker">Administration</p>
-        <h1 className="display mt-1 text-3xl">Map boundaries</h1>
+        <h1 className="display mt-1 text-2xl break-words sm:text-3xl">Map boundaries</h1>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
           Load site outlines and administrative areas (counties, districts…) from a GeoJSON file. Every
           shape is checked before anything is saved, and nothing is repaired or guessed. Loaded

@@ -232,7 +232,7 @@ export function BoundaryLoader({
   const problems = parsed.candidates.length - ready.length;
 
   return (
-    <div className="space-y-8">
+    <div className="min-w-0 space-y-8">
       <Tabs
         value={kind}
         onValueChange={(v) => {
@@ -241,21 +241,21 @@ export function BoundaryLoader({
           setResults({});
         }}
       >
-        <TabsList>
+        <TabsList className="h-auto max-w-full flex-wrap justify-start">
           <TabsTrigger value="site">Site outlines</TabsTrigger>
           <TabsTrigger value="admin">Administrative areas</TabsTrigger>
         </TabsList>
 
         {/* The panel the active tab controls (aria-controls must resolve). */}
-        <TabsContent value={kind} className="space-y-8 pt-8 outline-none">
+        <TabsContent value={kind} className="min-w-0 space-y-8 pt-8 outline-none">
           <DataSourcesHelp />
 
           {/* 1 — the data */}
-          <section className="space-y-3">
+          <section className="min-w-0 space-y-3">
             <h2 className="display border-b border-border pb-2 text-lg">
               1 · Choose the GeoJSON
             </h2>
-            <div className="space-y-1.5">
+            <div className="min-w-0 space-y-1.5">
               <Label htmlFor="boundary-file">
                 GeoJSON file (.geojson or .json, up to 5 MB)
               </Label>
@@ -267,35 +267,35 @@ export function BoundaryLoader({
                 disabled={running}
               />
               {fileName && (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs break-all text-muted-foreground">
                   Loaded {fileName}
                 </p>
               )}
               {fileError && (
-                <p className="text-xs text-destructive" role="alert">
+                <p className="text-xs break-words text-destructive" role="alert">
                   {fileError}
                 </p>
               )}
             </div>
-            <div className="space-y-1.5">
+            <div className="min-w-0 space-y-1.5">
               <Label htmlFor="boundary-text">…or paste GeoJSON</Label>
               <Textarea
                 id="boundary-text"
                 value={text}
                 onChange={(e) => resetInput(e.target.value, null)}
                 rows={4}
-                className="font-mono text-xs"
+                className="w-full max-w-full font-mono text-xs"
                 placeholder='{"type":"FeatureCollection","features":[…]}'
                 disabled={running}
               />
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[11px] break-words text-muted-foreground">
                 Coordinates must be WGS84 [longitude, latitude] — Liberia&apos;s
                 longitudes are negative. Shapefile, KML and TopoJSON are not
                 read; export as GeoJSON first.
               </p>
             </div>
             {parsed.fatal && (
-              <p className="text-sm text-destructive" role="alert">
+              <p className="text-sm break-words text-destructive" role="alert">
                 {parsed.fatal}
               </p>
             )}
@@ -303,11 +303,11 @@ export function BoundaryLoader({
 
           {/* 2 — review */}
           {parsed.candidates.length > 0 && (
-            <section className="space-y-3">
+            <section className="min-w-0 space-y-3">
               <h2 className="display border-b border-border pb-2 text-lg">
                 2 · Review
               </h2>
-              <p className="text-sm text-muted-foreground" role="status">
+              <p className="text-sm break-words text-muted-foreground" role="status">
                 Found {parsed.candidates.length} shape
                 {parsed.candidates.length === 1 ? "" : "s"}:{" "}
                 <strong>{ready.length}</strong> valid
@@ -321,7 +321,7 @@ export function BoundaryLoader({
               </p>
 
               {kind === "admin" && (
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Label htmlFor="boundary-level" className="text-sm">
                     These are
                   </Label>
@@ -349,7 +349,7 @@ export function BoundaryLoader({
                 </div>
               )}
 
-              <ul className="divide-y divide-border border border-border">
+              <ul className="min-w-0 divide-y divide-border border border-border">
                 {parsed.candidates.map((c) => {
                   const row = rowOf(c);
                   const result = results[c.index];
@@ -362,8 +362,8 @@ export function BoundaryLoader({
                         )
                       : undefined;
                   return (
-                    <li key={c.index} className="space-y-2 p-3">
-                      <div className="flex items-start gap-3">
+                    <li key={c.index} className="min-w-0 space-y-2 p-3">
+                      <div className="flex min-w-0 flex-wrap items-start gap-x-3 gap-y-1 sm:flex-nowrap">
                         <Checkbox
                           checked={row.include && !c.problem}
                           disabled={Boolean(c.problem) || running}
@@ -374,13 +374,13 @@ export function BoundaryLoader({
                           className="mt-1"
                         />
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium">{c.label}</p>
+                          <p className="text-sm font-medium break-words">{c.label}</p>
                           {c.problem ? (
-                            <p className="mt-0.5 text-xs text-destructive">
+                            <p className="mt-0.5 text-xs break-words text-destructive">
                               {c.problem}
                             </p>
                           ) : (
-                            <p className="mt-0.5 text-xs text-muted-foreground">
+                            <p className="mt-0.5 text-xs break-words text-muted-foreground">
                               {c.geometryType}
                               {c.parts > 1 ? ` · ${c.parts} parts` : ""} ·{" "}
                               {c.vertices.toLocaleString()} points
@@ -389,7 +389,7 @@ export function BoundaryLoader({
                         </div>
                         {result && (
                           <span
-                            className={`text-xs ${result.ok ? "text-muted-foreground" : "text-destructive"}`}
+                            className={`min-w-0 max-w-full break-words pl-7 text-xs sm:max-w-[45%] sm:pl-0 sm:text-right ${result.ok ? "text-muted-foreground" : "text-destructive"}`}
                             role="status"
                           >
                             {result.ok ? "✓ " : "✕ "}
@@ -399,7 +399,7 @@ export function BoundaryLoader({
                       </div>
 
                       {!c.problem && row.include && kind === "site" && (
-                        <div className="pl-7">
+                        <div className="min-w-0 pl-7">
                           <Select
                             value={row.siteId ?? ""}
                             onValueChange={(v) => edit(c.index, { siteId: v })}
@@ -420,7 +420,7 @@ export function BoundaryLoader({
                       )}
 
                       {!c.problem && row.include && kind === "admin" && (
-                        <div className="space-y-1 pl-7">
+                        <div className="min-w-0 space-y-1 pl-7">
                           <Input
                             value={row.name}
                             onChange={(e) =>
@@ -431,7 +431,7 @@ export function BoundaryLoader({
                             disabled={running}
                           />
                           {existing && (
-                            <p className="text-[11px] text-muted-foreground">
+                            <p className="text-[11px] break-words text-muted-foreground">
                               A {level} named “{row.name.trim()}” is already
                               loaded — this will replace it.
                             </p>
@@ -444,7 +444,7 @@ export function BoundaryLoader({
               </ul>
 
               {planned.length > 0 && (
-                <div className="space-y-2">
+                <div className="min-w-0 space-y-2">
                   <Button
                     type="button"
                     variant="outline"
@@ -479,11 +479,11 @@ export function BoundaryLoader({
 
           {/* 3 — provenance + load */}
           {parsed.candidates.length > 0 && (
-            <section className="space-y-3">
+            <section className="min-w-0 space-y-3">
               <h2 className="display border-b border-border pb-2 text-lg">
                 3 · Source and load
               </h2>
-              <div className="space-y-1.5">
+              <div className="min-w-0 space-y-1.5">
                 <Label htmlFor="boundary-source">
                   Source of this data (required)
                 </Label>
@@ -498,7 +498,7 @@ export function BoundaryLoader({
                   disabled={running}
                 />
               </div>
-              <div className="space-y-1.5">
+              <div className="min-w-0 space-y-1.5">
                 <Label htmlFor="boundary-accuracy">
                   Positional accuracy in metres (optional)
                 </Label>
@@ -529,7 +529,7 @@ export function BoundaryLoader({
 
               {blockers.length > 0 && (
                 <ul
-                  className="space-y-0.5 text-xs text-muted-foreground"
+                  className="space-y-0.5 text-xs break-words text-muted-foreground"
                   aria-live="polite"
                 >
                   {blockers.map((b) => (
@@ -549,7 +549,7 @@ export function BoundaryLoader({
           )}
 
           {/* what is already loaded */}
-          <section className="space-y-3">
+          <section className="min-w-0 space-y-3">
             <h2 className="display border-b border-border pb-2 text-lg">
               Already loaded
             </h2>
@@ -561,7 +561,7 @@ export function BoundaryLoader({
                 National Map are empty.
               </p>
             ) : (
-              <div className="grid gap-6 md:grid-cols-2">
+              <div className="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-2">
                 <LoadedList
                   emptyText="No administrative areas loaded yet."
                   title={`Administrative areas (${adminBoundaries.length})`}
@@ -600,11 +600,11 @@ const EXTERNAL = { target: "_blank", rel: "noopener noreferrer" } as const;
 function DataSourcesHelp() {
   const link = "underline underline-offset-2";
   return (
-    <details className="paper group p-4 text-sm">
+    <details className="paper group min-w-0 p-4 text-sm">
       <summary className="cursor-pointer font-medium">
         Where do I get this data?
       </summary>
-      <div className="mt-3 space-y-4 text-xs leading-relaxed text-muted-foreground">
+      <div className="mt-3 min-w-0 space-y-4 text-xs leading-relaxed break-words text-muted-foreground">
         <section>
           <h3 className="text-sm font-medium text-foreground">
             Counties and districts (administrative areas)
@@ -673,7 +673,7 @@ function DataSourcesHelp() {
             </li>
             <li>
               Command line:{" "}
-              <code>
+              <code className="break-all">
                 ogr2ogr -f GeoJSON -t_srs EPSG:4326 out.geojson in.shp
               </code>
             </li>
@@ -703,12 +703,12 @@ function LoadedList({
   }[];
 }) {
   return (
-    <div>
-      <h3 className="text-sm font-medium">{title}</h3>
+    <div className="min-w-0">
+      <h3 className="text-sm font-medium break-words">{title}</h3>
       {items.length === 0 ? (
-        <p className="mt-1 text-xs text-muted-foreground">{emptyText}</p>
+        <p className="mt-1 text-xs break-words text-muted-foreground">{emptyText}</p>
       ) : (
-        <ul className="mt-1 divide-y divide-border border border-border text-sm">
+        <ul className="mt-1 min-w-0 divide-y divide-border border border-border text-sm">
           {items.map((i) => (
             <li
               key={i.key}
