@@ -100,27 +100,29 @@ export default function CommandCenter() {
   );
 
   return (
-    <div className="space-y-8">
-      <header className="flex flex-col gap-1">
-        <p className="kicker">National command center — {stats.scope} scope</p>
-        <h1 className="display text-3xl">Oversight at a glance</h1>
-        <p className="text-sm text-muted-foreground">
+    <div className="min-w-0 space-y-8">
+      <header className="flex min-w-0 flex-col gap-1">
+        <p className="kicker break-words">National command center — {stats.scope} scope</p>
+        <h1 className="display text-2xl break-words sm:text-3xl">Oversight at a glance</h1>
+        <p className="text-sm break-words text-muted-foreground">
           All figures computed from live platform data. {user?.name ? `Welcome, ${user.name}.` : ""}
         </p>
       </header>
 
       {queueCount > 0 && (
-        <div className="flex items-center gap-2 rounded-sm border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          <TriangleAlert className="size-4" />
-          {queueCount} field submission(s) queued offline — they will sync automatically
-          when connectivity returns.
+        <div className="flex min-w-0 items-start gap-2 rounded-sm border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+          <p className="min-w-0 flex-1 break-words">
+            {queueCount} field submission(s) queued offline — they will sync automatically
+            when connectivity returns.
+          </p>
         </div>
       )}
 
       <TrendsPanel />
 
       {/* Stat row */}
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-sm border border-border bg-border md:grid-cols-4">
+      <div className="grid min-w-0 grid-cols-2 gap-px overflow-hidden rounded-sm border border-border bg-border md:grid-cols-4">
         <StatCell label="Mining sites" value={stats.sites} sub={`${stats.activeSites} active`} />
         <StatCell label="Inspections" value={stats.inspectionsTotal} sub={`${stats.inspectionsUnderReview} under review`} />
         <StatCell label="Open findings" value={stats.findingsTotal} sub={`${stats.findingsCriticalOpen} critical open`} />
@@ -131,11 +133,11 @@ export default function CommandCenter() {
         <StatCell label="Inspection coverage" value={stats.inspectionCoveragePct} suffix="%" sub="sites with an approved inspection" />
       </div>
 
-      <div className="grid gap-8 lg:grid-cols-2">
+      <div className="grid min-w-0 grid-cols-1 gap-8 lg:grid-cols-2">
         {/* Priority sites */}
-        <section>
-          <div className="flex items-baseline justify-between border-b border-border pb-2">
-            <h2 className="display text-lg">Priority sites (risk indicator)</h2>
+        <section className="min-w-0">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-2">
+            <h2 className="display min-w-0 text-lg break-words">Priority sites (risk indicator)</h2>
             <span className="text-xs text-muted-foreground">Explainable · configurable · not a verdict</span>
           </div>
           {priority.length === 0 ? (
@@ -149,19 +151,19 @@ export default function CommandCenter() {
                 return (
                   <li key={r.siteId} className="py-3">
                     <button
-                      className="group w-full text-left"
+                      className="group block w-full min-w-0 text-left"
                       onClick={() => navigate(`/portal/sites/${r.siteId}`)}
                     >
-                      <div className="flex items-baseline justify-between gap-3">
-                        <span className="text-sm font-medium group-hover:underline">
+                      <div className="flex min-w-0 items-baseline justify-between gap-3">
+                        <span className="min-w-0 text-sm font-medium break-words group-hover:underline">
                           {site ? site.name : "Site"}
                         </span>
-                        <span className="stat-figure text-lg">{r.score}</span>
+                        <span className="stat-figure shrink-0 text-lg">{r.score}</span>
                       </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
-                        <span className="font-mono">{site?.code}</span>
+                      <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
+                        <span className="font-mono break-all">{site?.code}</span>
                         {r.factors.slice(0, 2).map((f) => (
-                          <span key={f.label}>· {f.label}</span>
+                          <span key={f.label} className="min-w-0 break-words">· {f.label}</span>
                         ))}
                       </div>
                     </button>
@@ -173,23 +175,23 @@ export default function CommandCenter() {
         </section>
 
         {/* Attention queues */}
-        <section className="space-y-6">
-          <div>
-            <div className="flex items-baseline justify-between border-b border-border pb-2">
-              <h2 className="display text-lg">Under review</h2>
-              <Link to="/portal/inspections" className="inline-flex min-h-6 items-center text-xs text-muted-foreground hover:text-foreground">
+        <section className="min-w-0 space-y-6">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-2">
+              <h2 className="display min-w-0 text-lg break-words">Under review</h2>
+              <Link to="/portal/inspections" className="inline-flex min-h-6 shrink-0 items-center text-xs text-muted-foreground hover:text-foreground">
                 All inspections →
               </Link>
             </div>
-            <p className="py-3 text-sm text-muted-foreground">
+            <p className="py-3 text-sm break-words text-muted-foreground">
               {stats.inspectionsUnderReview} inspection(s) awaiting supervisor decision.
             </p>
           </div>
 
-          <div>
-            <div className="flex items-baseline justify-between border-b border-border pb-2">
-              <h2 className="display text-lg">Community reports awaiting triage</h2>
-              <Link to="/portal/community" className="inline-flex min-h-6 items-center text-xs text-muted-foreground hover:text-foreground">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-2">
+              <h2 className="display min-w-0 text-lg break-words">Community reports awaiting triage</h2>
+              <Link to="/portal/community" className="inline-flex min-h-6 shrink-0 items-center text-xs text-muted-foreground hover:text-foreground">
                 Triage queue →
               </Link>
             </div>
@@ -198,15 +200,15 @@ export default function CommandCenter() {
             ) : (
               <ul className="divide-y divide-border">
                 {pendingReports.slice(0, 4).map((r) => (
-                  <li key={r._id} className="flex items-center justify-between gap-3 py-2.5">
-                    <div className="min-w-0">
+                  <li key={r._id} className="flex min-w-0 items-center justify-between gap-3 py-2.5">
+                    <div className="min-w-0 flex-1">
                       <p className="truncate text-sm">{r.description}</p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs break-words text-muted-foreground">
                         <span className="font-mono">{r.trackingCode}</span> · {r.county} ·{" "}
                         {r.category.replace(/_/g, " ")}
                       </p>
                     </div>
-                    <Button asChild variant="outline" size="sm">
+                    <Button asChild variant="outline" size="sm" className="shrink-0">
                       <Link to="/portal/community">
                         Review <ArrowRight className="size-3" />
                       </Link>
@@ -217,10 +219,10 @@ export default function CommandCenter() {
             )}
           </div>
 
-          <div className="border border-border bg-card p-4">
-            <div className="flex items-start gap-2">
-              <ShieldAlert className="mt-0.5 size-4 text-muted-foreground" strokeWidth={1.5} />
-              <p className="text-xs leading-relaxed text-muted-foreground">
+          <div className="min-w-0 border border-border bg-card p-4">
+            <div className="flex min-w-0 items-start gap-2">
+              <ShieldAlert className="mt-0.5 size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+              <p className="min-w-0 flex-1 text-xs leading-relaxed break-words text-muted-foreground">
                 Risk indicators are decision-support only. They summarize recorded
                 findings, overdue actions, incidents, and verified environmental alerts
                 using configurable weights. A risk score never determines guilt or
@@ -246,13 +248,13 @@ function StatCell({
   suffix?: string;
 }) {
   return (
-    <div className="bg-card p-4">
-      <p className="kicker">{label}</p>
-      <p className="stat-figure mt-1 text-3xl">
+    <div className="min-w-0 bg-card p-3 sm:p-4">
+      <p className="kicker break-words">{label}</p>
+      <p className="stat-figure mt-1 text-2xl break-words sm:text-3xl">
         {value.toLocaleString()}
         {suffix ?? ""}
       </p>
-      {sub && <p className="mt-0.5 text-xs text-muted-foreground">{sub}</p>}
+      {sub && <p className="mt-0.5 text-xs break-words text-muted-foreground">{sub}</p>}
     </div>
   );
 }

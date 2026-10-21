@@ -43,17 +43,17 @@ export default function TrendsPanel() {
   const data = (series?.points ?? []).map((p) => ({ name: bucketLabel(p.bucket, bucket), value: p.value }));
 
   return (
-    <section aria-labelledby="trends-heading" className="space-y-4 border border-border bg-card p-4">
+    <section aria-labelledby="trends-heading" className="min-w-0 space-y-4 border border-border bg-card p-4">
       <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border pb-3">
-        <div>
+        <div className="min-w-0">
           <p className="kicker">Trends</p>
-          <h2 id="trends-heading" className="display text-xl">{label} over time</h2>
+          <h2 id="trends-heading" className="display text-xl break-words">{label} over time</h2>
         </div>
-        <div className="flex flex-wrap gap-3">
-          <label className="text-xs text-muted-foreground">
+        <div className="flex min-w-0 flex-wrap gap-3">
+          <label className="flex min-w-0 items-center text-xs text-muted-foreground">
             Measure
             <select
-              className="ml-2 rounded-sm border border-border bg-background px-2 py-1 text-sm text-foreground"
+              className="ml-2 min-w-0 max-w-full rounded-sm border border-border bg-background px-2 py-1 text-sm text-foreground"
               value={metric}
               onChange={(e) => setMetric(e.target.value as TrendMetric)}
             >
@@ -62,10 +62,10 @@ export default function TrendsPanel() {
               ))}
             </select>
           </label>
-          <label className="text-xs text-muted-foreground">
+          <label className="flex min-w-0 items-center text-xs text-muted-foreground">
             Period
             <select
-              className="ml-2 rounded-sm border border-border bg-background px-2 py-1 text-sm text-foreground"
+              className="ml-2 min-w-0 max-w-full rounded-sm border border-border bg-background px-2 py-1 text-sm text-foreground"
               value={bucket}
               onChange={(e) => setBucket(e.target.value as TrendBucket)}
             >
@@ -100,7 +100,7 @@ export default function TrendsPanel() {
           </div>
           <details className="text-xs">
             <summary className="cursor-pointer text-muted-foreground">Show as table</summary>
-            <table className="mt-2 w-full">
+            <div className="mt-2 overflow-x-auto"><table className="w-full">
               <caption className="sr-only">{label} per {bucket}</caption>
               <thead>
                 <tr className="text-left text-muted-foreground">
@@ -116,19 +116,19 @@ export default function TrendsPanel() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           </details>
         </>
       )}
 
-      <div>
-        <h3 className="kicker mb-2">By county — latest window vs the one before</h3>
+      <div className="min-w-0">
+        <h3 className="kicker mb-2 break-words">By county — latest window vs the one before</h3>
         {geo === undefined || geo === null ? (
           <p className="text-sm text-muted-foreground">{series === null ? "—" : "Loading…"}</p>
         ) : geo.rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nothing recorded in either window.</p>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto"><table className="w-full text-sm">
             <caption className="sr-only">
               {label} by county, {geo.from} to {geo.to}, compared with {geo.previousFrom} to {geo.previousTo}
             </caption>
@@ -159,7 +159,7 @@ export default function TrendsPanel() {
                 );
               })}
             </tbody>
-          </table>
+          </table></div>
         )}
       </div>
     </section>

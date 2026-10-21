@@ -384,7 +384,7 @@ export default function PortalLayout() {
               </div>
             </div>
           </header>
-          <main id="main-content" tabIndex={-1} className="flex-1 px-4 py-6 md:px-8 md:py-8">
+          <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">
             <Outlet />
           </main>
 
