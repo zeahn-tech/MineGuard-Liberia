@@ -10,3 +10,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/** Short commit id injected at build time (vite.config.ts `define`). */
+declare const __BUILD_ID__: string;

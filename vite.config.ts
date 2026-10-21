@@ -18,6 +18,13 @@ export default defineConfig(({ command }) => {
   return {
     plugins: [react(), tailwindcss()],
     base,
+    // Short commit id of the deployed build, shown on error panels so a report
+    // can say exactly which version of the app produced it.
+    define: {
+      __BUILD_ID__: JSON.stringify(
+        (process.env.GITHUB_SHA ?? "dev").slice(0, 7),
+      ),
+    },
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),

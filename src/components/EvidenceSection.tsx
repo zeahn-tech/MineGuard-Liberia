@@ -739,6 +739,10 @@ function EvidenceCard({ ev }: { ev: Evidence }) {
                 {attempt > 0 && (
                   <span className="mt-1 block">Tried {attempt + 1} times.</span>
                 )}
+                <span className="mt-1 block opacity-70">
+                  build{" "}
+                  {typeof __BUILD_ID__ === "string" ? __BUILD_ID__ : "dev"}
+                </span>
               </span>
               <Button
                 type="button"
