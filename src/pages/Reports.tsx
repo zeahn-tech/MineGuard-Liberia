@@ -117,33 +117,60 @@ export default function Reports() {
 
           <section aria-labelledby="rep-county">
             <h3 id="rep-county" className="kicker mb-2">By county</h3>
-            {/* Scrollable region: focusable + named so keyboard users can scroll it (WCAG 2.1.1). */}
+            {/* Phones: one card per county — five numeric columns cannot sit
+                side by side on a ~300px card without colliding. */}
+            <ul className="divide-y divide-border/60 border-y border-border/60 sm:hidden">
+              {report.byCounty.map((c) => (
+                <li key={c.county} className="py-3">
+                  <p className="mb-2 text-sm font-medium">{c.county}</p>
+                  <dl className="grid grid-cols-3 gap-x-3 gap-y-2.5">
+                    {[
+                      ["Sites", c.sites],
+                      ["Incidents", c.incidents],
+                      ["Fatalities", c.fatalities],
+                      ["Critical findings", c.criticalFindings],
+                      ["Overdue actions", c.overdueCorrectiveActions],
+                    ].map(([label, value]) => (
+                      <div key={label} className="min-w-0">
+                        <dt className="text-[11px] leading-tight text-muted-foreground">{label}</dt>
+                        <dd className="mt-0.5 text-base font-medium tabular-nums">{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </li>
+              ))}
+              {report.byCounty.length === 0 && (
+                <li className="py-2 text-sm text-muted-foreground">No sites in scope.</li>
+              )}
+            </ul>
+
+            {/* Tablet / desktop: aligned table. Scrollable region: focusable + named so keyboard users can scroll it (WCAG 2.1.1). */}
             <div
-              className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+              className="hidden overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring sm:block"
               tabIndex={0}
               role="region"
               aria-labelledby="rep-county"
             >
-              <table className="w-full text-sm">
+              <table className="w-full table-auto border-collapse text-sm">
                 <thead>
-                  <tr className="text-left text-xs text-muted-foreground">
-                    <th scope="col" className="py-1 font-normal">County</th>
-                    <th scope="col" className="py-1 text-right font-normal">Sites</th>
-                    <th scope="col" className="py-1 text-right font-normal">Incidents</th>
-                    <th scope="col" className="py-1 text-right font-normal">Fatalities</th>
-                    <th scope="col" className="py-1 text-right font-normal">Critical findings</th>
-                    <th scope="col" className="py-1 text-right font-normal">Overdue actions</th>
+                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                    <th scope="col" className="py-2 pr-4 font-normal whitespace-nowrap">County</th>
+                    <th scope="col" className="px-3 py-2 text-right font-normal whitespace-nowrap">Sites</th>
+                    <th scope="col" className="px-3 py-2 text-right font-normal whitespace-nowrap">Incidents</th>
+                    <th scope="col" className="px-3 py-2 text-right font-normal whitespace-nowrap">Fatalities</th>
+                    <th scope="col" className="px-3 py-2 text-right font-normal whitespace-nowrap">Critical findings</th>
+                    <th scope="col" className="py-2 pl-3 text-right font-normal whitespace-nowrap">Overdue actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {report.byCounty.map((c) => (
-                    <tr key={c.county} className="border-t border-border/60">
-                      <th scope="row" className="py-1.5 text-left font-normal">{c.county}</th>
-                      <td className="py-1.5 text-right tabular-nums">{c.sites}</td>
-                      <td className="py-1.5 text-right tabular-nums">{c.incidents}</td>
-                      <td className="py-1.5 text-right tabular-nums">{c.fatalities}</td>
-                      <td className="py-1.5 text-right tabular-nums">{c.criticalFindings}</td>
-                      <td className="py-1.5 text-right tabular-nums">{c.overdueCorrectiveActions}</td>
+                    <tr key={c.county} className="border-b border-border/60 last:border-b-0">
+                      <th scope="row" className="py-2.5 pr-4 text-left font-normal whitespace-nowrap">{c.county}</th>
+                      <td className="px-3 py-2.5 text-right tabular-nums">{c.sites}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">{c.incidents}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">{c.fatalities}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">{c.criticalFindings}</td>
+                      <td className="py-2.5 pl-3 text-right tabular-nums">{c.overdueCorrectiveActions}</td>
                     </tr>
                   ))}
                   {report.byCounty.length === 0 && (
