@@ -432,9 +432,9 @@ export default function PortalLayout() {
           <SheetHeader className="shrink-0 border-b border-border py-5 pr-14 pl-4 text-left">
             <SheetTitle className="flex items-center gap-2 text-sm">
               <BrandMark className="size-5" />
-              <span className="display">MineGuard</span>
-              <span className="kicker text-[10px]">Liberia</span>
-              <span className="stamp ml-auto text-[9px] text-muted-foreground">
+              {/* Same wordmark treatment as the landing page: serif, bold, mixed case. */}
+              <span className="display min-w-0 whitespace-nowrap">MineGuard Liberia</span>
+              <span className="stamp ml-auto shrink-0 text-[9px] text-muted-foreground">
                 V1.0
               </span>
             </SheetTitle>
