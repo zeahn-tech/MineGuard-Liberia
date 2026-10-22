@@ -284,11 +284,9 @@ export default function PortalLayout() {
         <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar md:flex print:!hidden">
           <div className="flex items-center gap-2 border-b border-border px-4 py-5">
             <BrandMark className="size-6" />
-            <div>
-              <div className="display text-sm leading-tight">MineGuard</div>
-              <div className="kicker text-[10px]">Liberia</div>
-            </div>
-            <span className="ml-auto stamp text-[9px] text-muted-foreground">V1.0</span>
+            {/* Same wordmark treatment as the landing page and the mobile drawer. */}
+            <span className="display min-w-0 text-sm whitespace-nowrap">MineGuard Liberia</span>
+            <span className="ml-auto shrink-0 stamp text-[9px] text-muted-foreground">V1.0</span>
           </div>
           <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-4">
             <NavLinks items={navItems} />
