@@ -172,5 +172,16 @@ Verified by `tests/evidence-url.test.ts` and live (docs/11).
   (`resolveRedirectAfterAuth` requires a single leading slash); the
   recovery `redirectTo` lands on the app root — no user-controllable
   redirect target is ever sent to GoTrue.
+- Password-reset landing: the recovery link signs the person in with a
+  one-time session. `src/lib/recovery.ts` captures `type=recovery` from the
+  URL (and the `PASSWORD_RECOVERY` auth event) and `<RecoveryGate>` holds every
+  route except `/auth?mode=reset` until a new password is set or the reset is
+  cancelled (cancel signs the session out). Setting the password releases the
+  hold and signs out all other devices. Expired / already-used links
+  (`error_code=otp_expired`) show an explanation and the "request a new link"
+  form instead of a dead end.
+  Supabase dashboard: Site URL and the Redirect URLs allow-list must contain
+  the app root exactly as the browser reports it (origin + path, e.g.
+  `https://<user>.github.io/MineGuard-Liberia/`).
 - No dangerouslySetInnerHTML usage; Leaflet marker HTML is static, sanitized
   constants.

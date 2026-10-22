@@ -9,12 +9,22 @@
 // ---------------------------------------------------------------------------
 
 import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  captureRecoveryFromLocation,
+  clearRecovery,
+  markRecoveryPending,
+  markRecoveryReady,
+} from "./recovery";
 
 export const SUPABASE_URL = "https://ewukneoblhogtreeekqc.supabase.co";
 export const SUPABASE_ANON_KEY = "sb_publishable_g_SOzhE21n76m1-FAx-c5Q_CzUi7VMi";
 
 /** localStorage key of the auth session (also used to clear a poisoned one). */
 export const AUTH_STORAGE_KEY = "mg.supabase.auth.v1";
+
+// Must run BEFORE createClient / the router: remembers that this page load is a
+// password-recovery landing (the URL fragment is consumed right after).
+captureRecoveryFromLocation();
 
 export let supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
@@ -65,8 +75,18 @@ export function onAuthStateChangedSupabase(cb: AuthListener): () => void {
 
 // Subscribe once at module load.
 supabase.auth.onAuthStateChange((event, session: Session | null) => {
+  // A recovery link signs the person in; remember WHY so the app asks for a new
+  // password instead of treating it as a normal sign-in.
+  if (event === "PASSWORD_RECOVERY") markRecoveryPending();
+  if (event === "SIGNED_OUT") clearRecovery();
   setUserId(session?.user?.id ?? null);
 });
+
+// supabase-js reads the URL during initialize(); getSession() resolves after it.
+void supabase.auth
+  .getSession()
+  .then(({ data }) => markRecoveryReady(Boolean(data.session)))
+  .catch(() => markRecoveryReady(false));
 
 export function authUserId(): string | null {
   return currentUserId;

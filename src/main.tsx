@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { RootErrorBoundary } from "@/components/RootErrorBoundary";
+import { RecoveryGate } from "@/components/RecoveryGate";
 import { RouteLoading } from "@/components/RouteLoading";
 import React, { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -90,6 +91,7 @@ createRoot(document.getElementById("root")!).render(
           hash routing keeps every deep link (/portal, /report, /auth)
           working with zero server-side rewrite configuration. */}
       <HashRouter>
+       <RecoveryGate>
         <Suspense fallback={<RouteLoading />}>
           <Routes>
             {/* Public */}
@@ -157,6 +159,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>
+       </RecoveryGate>
       </HashRouter>
       <Toaster />
     </RootErrorBoundary>

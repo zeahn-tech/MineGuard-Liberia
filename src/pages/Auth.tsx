@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/tabs";
 
 import { useAuth } from "@/hooks/use-auth";
+import { useRecoveryState } from "@/hooks/use-recovery";
+import { clearRecovery, dismissRecoveryLinkError } from "@/lib/recovery";
 import {
   mfaAal,
   resetPasswordEmail,
@@ -65,7 +67,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
   // Password-recovery mode (deep link from the recovery email) and the
   // "forgot password" request panel are part of this page — Gap #4.
-  const isRecovery = searchParams.get("mode") === "reset";
+  // The recovery link signs the person in; src/lib/recovery.ts remembers that
+  // this session is a RECOVERY one, which is what puts us on the set-password
+  // panel (and keeps the "already signed in → go to the portal" redirect from
+  // swallowing it).
+  const recovery = useRecoveryState();
+  const isRecovery = recovery.pending;
   const [showForgot, setShowForgot] = useState(false);
   const [forgotSent, setForgotSent] = useState(false);
 
@@ -76,16 +83,35 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [mfaError, setMfaError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!authLoading && isAuthenticated) {
+    if (!authLoading && isAuthenticated && !isRecovery) {
       navigate(redirect);
     }
-  }, [authLoading, isAuthenticated, navigate, redirect]);
+  }, [authLoading, isAuthenticated, isRecovery, navigate, redirect]);
+
+  // An expired / already-used link lands here with the reason; the "request a
+  // new link" panel opens by itself so the next step is obvious.
+  const forgotOpen = showForgot || recovery.linkError !== null;
 
   // Auth errors arrive as plain-message Errors from the Supabase layer
   // (src/lib/backend.ts authErrorMessage) — match on message text.
   const authMessage = (err: unknown, fallback: string) => {
     const msg = err instanceof Error ? err.message : "";
+    if (msg.includes("RECOVERY_EXPIRED"))
+      return "Your reset link has expired. Request a new one to continue.";
+    if (msg.includes("SAME_PASSWORD"))
+      return "Choose a password you have not used before.";
+    if (msg.includes("MFA_REQUIRED"))
+      return "This account uses two-factor sign-in. Sign in normally, then change your password from Security.";
+    if (msg.includes("WEAK_PASSWORD"))
+      return "Password is too weak (use at least 6 characters).";
+    if (msg.includes("EMAIL_IN_USE"))
+      return "An account already exists with that email — sign in instead.";
+    if (msg.includes("EMAIL_NOT_CONFIRMED"))
+      return "Email not confirmed yet. Check your inbox.";
+    if (msg.includes("TOO_MANY_ATTEMPTS"))
+      return "Too many attempts — please wait a moment and try again.";
     if (
+      msg.includes("INCORRECT_CREDENTIALS") ||
       msg.includes("Incorrect email or password") ||
       msg.includes("invalid login credentials")
     )
@@ -158,6 +184,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     try {
       await resetPasswordEmail(String(new FormData(event.currentTarget).get("email") ?? "").trim());
+      dismissRecoveryLinkError();
       setForgotSent(true);
     } catch (err) {
       console.error("Password reset error:", err);
@@ -173,19 +200,45 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     const fd = new FormData(event.currentTarget);
     const pw = String(fd.get("password") ?? "");
+    if (pw.length < 6) {
+      setError("Password must be at least 6 characters.");
+      setIsLoading(false);
+      return;
+    }
     if (pw !== String(fd.get("confirm") ?? "")) {
       setError("Passwords do not match.");
       setIsLoading(false);
       return;
     }
     try {
-      await updatePassword(pw);
+      await updatePassword(pw); // also releases the pending-recovery hold
       setSearchParams({}, { replace: true });
       setNotice("Password updated — you are signed in.");
-      navigate(redirect);
+      navigate(redirect, { replace: true });
     } catch (err) {
       console.error("Password set error:", err);
+      if (err instanceof Error && err.message.includes("RECOVERY_EXPIRED")) {
+        // The one-time session is gone: nothing more can be done on this
+        // screen, so hand over to "request a new link".
+        clearRecovery();
+        setSearchParams({}, { replace: true });
+        setShowForgot(true);
+        setForgotSent(false);
+      }
       setError(authMessage(err, "Could not set the new password."));
+      setIsLoading(false);
+    }
+  };
+
+  const cancelRecovery = async () => {
+    // Abandon the reset: end the one-time session and return to sign-in.
+    setIsLoading(true);
+    try {
+      await signOut();
+    } finally {
+      clearRecovery();
+      setSearchParams({}, { replace: true });
+      setError(null);
       setIsLoading(false);
     }
   };
@@ -247,8 +300,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   <p className="kicker">Account recovery</p>
                   <CardTitle role="heading" aria-level={1} className="display mt-1 text-2xl">Set a new password</CardTitle>
                   <CardDescription>
-                    Choose a new password for your account. The recovery link
-                    signed you in once for exactly this purpose.
+                    Choose a new password for your account. This link works once
+                    and is only for setting a new password.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -273,10 +326,19 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   />
                   {error && <p className="text-sm text-destructive">{error}</p>}
                 </CardContent>
-                <CardFooter>
+                <CardFooter className="flex-col gap-2">
                   <Button type="submit" className="w-full" disabled={isLoading}>
                     {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <KeyRound className="mr-2 h-4 w-4" strokeWidth={1.5} />}
                     Set password and continue
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => void cancelRecovery()}
+                    disabled={isLoading}
+                  >
+                    Cancel and sign out
                   </Button>
                 </CardFooter>
               </form>
@@ -331,7 +393,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   </Button>
                 </CardFooter>
               </div>
-            ) : showForgot ? (
+            ) : forgotOpen ? (
               /* ------------------------------------------------ forgot-password request */
               <div>
                 <CardHeader className="pb-2 text-center">
@@ -348,7 +410,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       If an account exists for that address, a recovery email is
                       on its way. Follow its link to set a new password.
                     </p>
-                    <Button variant="outline" className="w-full" onClick={() => setShowForgot(false)}>
+                    <Button variant="outline" className="w-full" onClick={() => { dismissRecoveryLinkError(); setShowForgot(false); }}>
                       Back to sign-in
                     </Button>
                   </CardContent>
@@ -368,14 +430,18 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         required
                       />
                       </div>
-                      {error && <p className="text-sm text-destructive">{error}</p>}
+                      {(error ?? recovery.linkError?.message) && (
+                        <p className="text-sm text-destructive" role="alert">
+                          {error ?? recovery.linkError?.message}
+                        </p>
+                      )}
                     </CardContent>
                     <CardFooter className="flex-col gap-2">
                       <Button type="submit" className="w-full" disabled={isLoading}>
                         {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" strokeWidth={1.5} />}
                         Send recovery email
                       </Button>
-                      <Button type="button" variant="outline" className="w-full" onClick={() => setShowForgot(false)}>
+                      <Button type="button" variant="outline" className="w-full" onClick={() => { dismissRecoveryLinkError(); setError(null); setShowForgot(false); }}>
                         Back to sign-in
                       </Button>
                     </CardFooter>

@@ -25,6 +25,7 @@ import {
   supabase,
   uploadWithProgress,
 } from "./supabase";
+import { clearRecovery } from "./recovery";
 import { validateTemplateSections } from "./template-schema";
 import {
   validateRiskSettings,
@@ -1664,6 +1665,12 @@ function authErrorMessage(
   if (m.includes("anonymous sign-ins are disabled") || m.includes("anonymous"))
     return "ANON_DISABLED";
   if (m.includes("signups not allowed")) return "SIGNUPS_DISABLED";
+  // Password-recovery failures (set-new-password step).
+  if (m.includes("auth session missing") || m.includes("session_not_found") || m.includes("jwt expired"))
+    return "RECOVERY_EXPIRED";
+  if (m.includes("different from the old password") || m.includes("same_password"))
+    return "SAME_PASSWORD";
+  if (m.includes("aal2") || m.includes("insufficient_aal")) return "MFA_REQUIRED";
   return err?.message ?? "AUTH_FAILED";
 }
 
@@ -1687,10 +1694,10 @@ export type { MfaAal, MfaEnrollStart, MfaFactor } from "./supabase";
 /** Request a password-reset email. Response and timing are identical for
  *  known and unknown addresses (no account enumeration) — Supabase does the
  *  same server-side. The redirect lands on the app ROOT (not a hash route):
- *  supabase-js exchanges the recovery token in the URL fragment/query before
- *  the router sees it, restoring a session for setting the new password.
- *  With a recovery session active, change the password on /portal/security
- *  or via the /auth reset panel. */
+ *  supabase-js exchanges the recovery token in the URL fragment before the
+ *  router sees it. src/lib/recovery.ts remembers that the session came from a
+ *  recovery link and <RecoveryGate> holds the person on the /auth?mode=reset
+ *  panel until a new password is set (or they cancel). */
 export async function resetPasswordEmail(email: string) {
   // Bun/SSR-safe: tests run the data layer without a DOM.
   const base =
@@ -1704,10 +1711,19 @@ export async function resetPasswordEmail(email: string) {
 }
 
 /** Set a new password from a recovery session (the email link restores a
- *  privileged session GoTrue treats as aal1 for password update). */
+ *  privileged session GoTrue treats as aal1 for password update). On success
+ *  the pending-recovery hold is released and every OTHER signed-in device is
+ *  signed out — the point of a reset is that whoever held the old password
+ *  loses access. */
 export async function updatePassword(newPassword: string) {
   const { error } = await supabase.auth.updateUser({ password: newPassword });
   if (error) throw new Error(authErrorMessage(error));
+  clearRecovery();
+  try {
+    await supabase.auth.signOut({ scope: "others" });
+  } catch {
+    /* best effort: the password is already changed */
+  }
 }
 
 /** Create the profile row for a fresh account (idempotent; the
@@ -1772,6 +1788,7 @@ export async function signInGuest() {
 }
 
 export async function signOut() {
+  clearRecovery(); // a deliberate sign-out also abandons a pending password reset
   await supabase.auth.signOut();
   profileCache = null;
 }
