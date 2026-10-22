@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { useMutation } from "@/lib/backend-react";
-import { api } from "@/lib/backend";
+import { api, refreshAllData } from "@/lib/backend";
 import { useLatest } from "@/lib/use-latest";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -204,16 +204,24 @@ export default function PortalLayout() {
   const handleSyncNow = async () => {
     const scheduler = schedulerRef.current;
     if (!scheduler) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      toast.info("You're offline — queued items will send automatically once you reconnect");
+      setQueue(readQueue());
+      return;
+    }
     setSyncing(true);
     try {
       const r = await scheduler.syncNow();
+      // Refresh doubles as "re-read what's on screen": pull fresh server data
+      // for whichever screen is open, not just flush the offline queue.
+      refreshAllData();
       // Success/failure toasts come from announce() via onResult; this
       // branch only narrates the "nothing left to send" case.
       const synced = (r.queue?.synced ?? 0) + (r.evidence?.synced ?? 0);
       const failed = (r.queue?.failed ?? 0) + (r.evidence?.failed ?? 0);
       if (synced === 0 && failed === 0) {
         if (readQueue().filter((q) => q.status !== "done").length === 0)
-          toast.info("Queue is empty");
+          toast.success("Up to date — queue is empty and data refreshed");
         else
           toast.info("Nothing ready to send right now — items stay queued");
       }
@@ -373,7 +381,8 @@ export default function PortalLayout() {
                   <button
                     onClick={handleSyncNow}
                     disabled={syncing}
-                    aria-label="Queue synced — tap to sync again"
+                    aria-label="Refresh — sync queue and reload data"
+                    title="Refresh — sync queue and reload data"
                     className="flex items-center gap-1.5 rounded-sm border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent"
                   >
                     <RefreshCw className={`size-3.5 ${syncing ? "animate-spin" : ""}`} />
@@ -420,7 +429,7 @@ export default function PortalLayout() {
           side="left"
           className="w-72 bg-sidebar p-0 sm:max-w-[18rem]"
         >
-          <SheetHeader className="shrink-0 border-b border-border px-4 py-5 text-left">
+          <SheetHeader className="shrink-0 border-b border-border py-5 pr-14 pl-4 text-left">
             <SheetTitle className="flex items-center gap-2 text-sm">
               <ShieldCheck className="size-5" strokeWidth={1.5} />
               <span className="display">MineGuard</span>

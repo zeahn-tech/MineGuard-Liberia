@@ -1,4 +1,5 @@
 import { RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   MapContainer,
@@ -216,7 +217,14 @@ export default function NationalMap() {
             type="button"
             variant="outline"
             size="sm"
-            onClick={refreshMapFeatures}
+            onClick={() => {
+              if (typeof navigator !== "undefined" && navigator.onLine === false) {
+                toast.info("You're offline — showing the last loaded map data");
+                return;
+              }
+              refreshMapFeatures();
+              toast.success("Refreshing map data…");
+            }}
             title="Re-read sites, boundaries and records now"
           >
             <RefreshCw className="size-4" /> Refresh

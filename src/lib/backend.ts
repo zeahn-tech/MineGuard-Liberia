@@ -1103,6 +1103,34 @@ const MAP_TABLES = [
   "site_boundaries",
 ] as const;
 
+/** Every table a live() query watches — a global manual refresh re-reads all
+ *  of them. Each screen's watcher debounces (300 ms) and single-flights, so
+ *  this only re-fetches data that is currently on screen. */
+const ALL_LIVE_TABLES = [
+  "admin_boundaries",
+  "audit_log",
+  "community_reports",
+  "corrective_actions",
+  "environmental_observations",
+  "evidence",
+  "findings",
+  "incidents",
+  "inspection_templates",
+  "inspections",
+  "notifications",
+  "profiles",
+  "report_tracking",
+  "risk_config_versions",
+  "site_boundaries",
+  "sites",
+] as const;
+
+/** Force every mounted screen to re-read its data from the server now (the
+ *  header's refresh button). */
+export function refreshAllData(): void {
+  notifyLocalWrite(...ALL_LIVE_TABLES);
+}
+
 /** Force the map's data to re-read now (the page's Refresh button). */
 export function refreshMapFeatures(): void {
   notifyLocalWrite(...MAP_TABLES);

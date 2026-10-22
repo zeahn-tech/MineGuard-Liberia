@@ -31,7 +31,7 @@ import {
 } from "@/lib/offline-sync";
 import { QueueManagerButton } from "@/components/QueueManager";
 import { sectionJump } from "@/lib/utils";
-import { api } from "@/lib/backend";
+import { api, refreshAllData } from "@/lib/backend";
 import { useLatest } from "@/lib/use-latest";
 import { useMutation } from "@/lib/backend-react";
 import {
@@ -161,13 +161,20 @@ export default function OperatorLayout() {
   const handleSyncNow = async () => {
     const scheduler = schedulerRef.current;
     if (!scheduler) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      toast.info("You're offline — queued items will send automatically once you reconnect");
+      setQueue(readQueue());
+      return;
+    }
     setSyncing(true);
     try {
       const r = await scheduler.syncNow();
+      refreshAllData();
       const synced = (r.queue?.synced ?? 0) + (r.evidence?.synced ?? 0);
       const failed = (r.queue?.failed ?? 0) + (r.evidence?.failed ?? 0);
       if (synced === 0 && failed === 0) {
-        if (pendingCount === 0) toast.info("Queue is empty");
+        if (pendingCount === 0)
+          toast.success("Up to date — queue is empty and data refreshed");
         else toast.info("Nothing ready to send right now — items stay queued");
       }
       setQueue(readQueue());
