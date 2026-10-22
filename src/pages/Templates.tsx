@@ -105,11 +105,11 @@ export function TemplateList() {
   };
 
   return (
-    <div className="space-y-4 p-4 md:p-6">
+    <div className="min-w-0 space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <p className="kicker">Administration</p>
-          <h1 className="display text-2xl">Inspection templates</h1>
+          <h1 className="display text-2xl break-words">Inspection templates</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
             Inspection design is data, not code: sections, questions and
             answer types are defined here and immediately offered to field
@@ -139,11 +139,11 @@ export function TemplateList() {
         {templates.map((t) => {
           const qCount = t.sections.reduce((n, s) => n + s.questions.length, 0);
           return (
-            <Card key={t._id} className="paper rounded-none border-border shadow-none">
-              <CardContent className="flex flex-wrap items-center gap-3 pt-4">
-                <FileCheck2 className="size-5 text-muted-foreground" strokeWidth={1.5} />
-                <div className="min-w-0">
-                  <p className="flex items-center gap-2 text-sm font-medium">
+            <Card key={t._id} className="paper min-w-0 rounded-none border-border shadow-none">
+              <CardContent className="flex min-w-0 flex-wrap items-center gap-3 px-4 pt-4 sm:px-6">
+                <FileCheck2 className="size-5 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+                <div className="min-w-0 flex-1 basis-48">
+                  <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium break-words">
                     {t.name}
                     <span
                       className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
@@ -155,12 +155,12 @@ export function TemplateList() {
                       {t.active ? "published" : "unpublished"}
                     </span>
                   </p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs break-words text-muted-foreground">
                     {t.sections.length} section{t.sections.length === 1 ? "" : "s"} · {qCount} question{qCount === 1 ? "" : "s"}
                     {t.description ? ` · ${t.description}` : ""}
                   </p>
                 </div>
-                <div className="ml-auto flex gap-2">
+                <div className="ml-auto flex flex-wrap gap-2">
                   <Link to={`/portal/templates/${t._id}`}>
                     <Button variant="outline" size="sm" disabled={busy}>
                       Edit
@@ -267,7 +267,7 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
   };
 
   return (
-    <div className="space-y-4 p-4 md:p-6">
+    <div className="min-w-0 space-y-4">
       <Link
         to="/portal/templates"
         className="inline-flex items-center gap-1 text-sm text-muted-foreground underline-offset-4 hover:underline"
@@ -275,10 +275,10 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
         <ArrowLeft className="size-3.5" /> All templates
       </Link>
 
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div>
+      <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-3">
+        <div className="min-w-0">
           <p className="kicker">Administration</p>
-          <h1 className="display text-2xl">
+          <h1 className="display text-2xl break-words">
             {existing ? `Edit: ${existing.name}` : "New inspection template"}
           </h1>
         </div>
@@ -289,9 +289,9 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
       </div>
 
       {/* Identity */}
-      <Card className="paper rounded-none border-border shadow-none">
-        <CardContent className="grid gap-3 pt-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
+      <Card className="paper min-w-0 rounded-none border-border shadow-none">
+        <CardContent className="grid min-w-0 grid-cols-1 gap-3 px-4 pt-4 sm:grid-cols-2 sm:px-6">
+          <div className="min-w-0 space-y-1.5">
             <Label htmlFor="tpl-name">Template name</Label>
             <Input
               id="tpl-name"
@@ -302,14 +302,14 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
               maxLength={120}
             />
           </div>
-          <div className="space-y-1.5">
+          <div className="min-w-0 space-y-1.5">
             <Label htmlFor="tpl-active">Availability</Label>
             <Select
               value={active ? "published" : "draft"}
               onValueChange={(v) => setActive(v === "published")}
               disabled={busy}
             >
-              <SelectTrigger id="tpl-active">
+              <SelectTrigger id="tpl-active" className="w-full min-w-0">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -318,7 +318,7 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-1.5 sm:col-span-2">
+          <div className="min-w-0 space-y-1.5 sm:col-span-2">
             <Label htmlFor="tpl-desc">Description (optional)</Label>
             <Input
               id="tpl-desc"
@@ -341,12 +341,12 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
       {/* Sections */}
       <div className="space-y-3">
         {sections.map((sec, si) => (
-          <Card key={si} className="paper rounded-none border-border shadow-none">
+          <Card key={si} className="paper min-w-0 rounded-none border-border shadow-none">
             <CardHeader
               role="button"
               tabIndex={0}
               aria-expanded={openSection === si}
-              className="cursor-pointer pb-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+              className="min-w-0 cursor-pointer px-4 pb-2 sm:px-6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
               onClick={() => setOpenSection(openSection === si ? -1 : si)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
@@ -355,20 +355,20 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
                 }
               }}
             >
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                 {openSection === si ? (
-                  <ChevronUp className="size-4 text-muted-foreground" />
+                  <ChevronUp className="size-4 shrink-0 text-muted-foreground" />
                 ) : (
-                  <ChevronDown className="size-4 text-muted-foreground" />
+                  <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
                 )}
-                <CardTitle className="display text-base">
+                <CardTitle className="display min-w-0 flex-1 basis-40 text-base leading-snug break-words">
                   Section {si + 1}
                   {sec.title ? `: ${sec.title}` : " (untitled)"}
                 </CardTitle>
-                <span className="text-xs text-muted-foreground">
+                <span className="shrink-0 text-xs whitespace-nowrap text-muted-foreground">
                   {sec.questions.length} question{sec.questions.length === 1 ? "" : "s"}
                 </span>
-                <div className="ml-auto flex gap-1" onClick={(e) => e.stopPropagation()}>
+                <div className="ml-auto flex shrink-0 gap-1" onClick={(e) => e.stopPropagation()}>
                   <Button variant="ghost" size="icon" className="size-7" disabled={si === 0 || busy} onClick={() => moveSection(si, -1)} aria-label="Move section up">
                     <ChevronUp className="size-3.5" />
                   </Button>
@@ -389,8 +389,8 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
               </div>
             </CardHeader>
             {openSection === si && (
-              <CardContent className="space-y-3">
-                <div className="space-y-1.5">
+              <CardContent className="min-w-0 space-y-3 px-4 sm:px-6">
+                <div className="min-w-0 space-y-1.5">
                   <Label htmlFor={`sec-title-${si}`}>Section title</Label>
                   <Input
                     id={`sec-title-${si}`}
@@ -402,11 +402,11 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
                   />
                 </div>
 
-                <div className="space-y-2">
+                <div className="min-w-0 space-y-2">
                   {sec.questions.map((q, qi) => (
-                    <div key={qi} className="rounded border border-border bg-muted/30 p-3">
-                      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                        <div className="space-y-1.5">
+                    <div key={qi} className="min-w-0 rounded border border-border bg-muted/30 p-3">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                        <div className="min-w-0 space-y-1.5">
                           <Label htmlFor={`q-label-${si}-${qi}`}>Question {qi + 1}</Label>
                           <Input
                             id={`q-label-${si}-${qi}`}
@@ -417,14 +417,14 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
                             maxLength={300}
                           />
                         </div>
-                        <div className="space-y-1.5">
+                        <div className="min-w-0 space-y-1.5">
                           <Label htmlFor={`q-type-${si}-${qi}`}>Answer type</Label>
                           <Select
                             value={q.answerType}
                             onValueChange={(v) => setQuestion(si, qi, { answerType: v as TemplateSection["questions"][number]["answerType"] })}
                             disabled={busy}
                           >
-                            <SelectTrigger id={`q-type-${si}-${qi}`} className="w-40">
+                            <SelectTrigger id={`q-type-${si}-${qi}`} className="w-full sm:w-40">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -437,7 +437,7 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
                         </div>
                       </div>
                       {q.answerType === "select" && (
-                        <div className="mt-2 space-y-1.5">
+                        <div className="mt-2 min-w-0 space-y-1.5">
                           <Label htmlFor={`q-opts-${si}-${qi}`}>Choices (comma-separated)</Label>
                           <Input
                             id={`q-opts-${si}-${qi}`}
@@ -452,7 +452,7 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
                           />
                         </div>
                       )}
-                      <div className="mt-2 flex items-center gap-3">
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
                         <label className="flex items-center gap-1.5 text-sm">
                           <input
                             type="checkbox"
@@ -514,7 +514,7 @@ export function TemplateEditor() {
 
   if (templateId && templatesQ !== undefined && !existing) {
     return (
-      <div className="p-6">
+      <div>
         <p className="text-sm text-muted-foreground">
           Template not found. It may have been archived.
         </p>
@@ -524,7 +524,7 @@ export function TemplateEditor() {
 
   if (templatesQ === undefined) {
     return (
-      <p className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
+      <p className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
         <Loader2 className="size-4 animate-spin" /> Loading…
       </p>
     );
