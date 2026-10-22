@@ -514,10 +514,10 @@ export default function PortalLayout() {
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
+              <div className="min-w-0 space-y-1.5">
                 <Label>Role</Label>
                 <Select value={targetRole} onValueChange={setTargetRole}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="admin">Admin</SelectItem>
                     <SelectItem value="supervisor">Supervisor</SelectItem>
@@ -526,10 +526,10 @@ export default function PortalLayout() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5">
+              <div className="min-w-0 space-y-1.5">
                 <Label>Scope</Label>
                 <Select value={targetScope} onValueChange={setTargetScope}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="national">National</SelectItem>
                     <SelectItem value="county">County</SelectItem>

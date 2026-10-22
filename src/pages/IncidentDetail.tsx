@@ -48,7 +48,7 @@ export default function IncidentDetail() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="min-w-0 space-y-8">
       <div>
         <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted-foreground">
           <Link to="/portal/incidents">
@@ -58,9 +58,9 @@ export default function IncidentDetail() {
       </div>
 
       <header className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
+        <div className="min-w-0">
           <p className="kicker">Incident record</p>
-          <h1 className="display mt-1 text-2xl">
+          <h1 className="display mt-1 text-2xl break-words">
             {incident.type.replace(/_/g, " ")}
           </h1>
           <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -76,7 +76,7 @@ export default function IncidentDetail() {
           </div>
         </div>
         {isStaff && incident.status !== "closed" && (
-          <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="flex flex-col gap-2 sm:flex-row md:shrink-0">
             {incident.status === "reported" && (
               <Button
                 onClick={() =>
@@ -107,42 +107,42 @@ export default function IncidentDetail() {
       </header>
 
       {/* Provenance */}
-      <section className="grid gap-3 text-xs text-muted-foreground sm:grid-cols-3">
-        <div className="border border-border p-3">
+      <section className="grid min-w-0 grid-cols-1 gap-3 text-xs text-muted-foreground sm:grid-cols-3">
+        <div className="min-w-0 border border-border p-3 break-words">
           <p className="kicker mb-1">Site</p>
           <p className="flex items-center gap-1">
-            <MapPin className="size-3.5" />
+            <MapPin className="size-3.5 shrink-0" />
             <span className="font-mono">{incident.siteCode ?? "—"}</span>
             {incident.siteName ? ` · ${incident.siteName}` : ""}
           </p>
         </div>
-        <div className="border border-border p-3">
+        <div className="min-w-0 border border-border p-3 break-words">
           <p className="kicker mb-1">County</p>
           <p>{incident.county ?? "—"}</p>
         </div>
-        <div className="border border-border p-3">
+        <div className="min-w-0 border border-border p-3 break-words">
           <p className="kicker mb-1">Report source</p>
           <p className="flex items-center gap-1">
-            <UserCheck className="size-3.5" />
+            <UserCheck className="size-3.5 shrink-0" />
             {incident.reportSource}
           </p>
         </div>
       </section>
 
       {/* Narrative + casualty figures */}
-      <section className="space-y-4">
-        <div>
+      <section className="min-w-0 space-y-4">
+        <div className="min-w-0">
           <h2 className="display border-b border-border pb-2 text-lg">
             Account
           </h2>
-          <p className="mt-3 text-sm leading-relaxed">{incident.description}</p>
+          <p className="mt-3 text-sm leading-relaxed break-words">{incident.description}</p>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="border border-border p-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="min-w-0 border border-border p-3 break-words">
             <p className="kicker mb-1">Fatalities</p>
             <p className="stat-figure text-xl">{incident.fatalities ?? 0}</p>
           </div>
-          <div className="border border-border p-3">
+          <div className="min-w-0 border border-border p-3 break-words">
             <p className="kicker mb-1">Injured</p>
             <p className="stat-figure text-xl">{incident.injured ?? 0}</p>
           </div>

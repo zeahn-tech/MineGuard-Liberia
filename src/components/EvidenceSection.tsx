@@ -336,8 +336,8 @@ export default function EvidenceSection({
   const total = (evidence?.length ?? 0) + pending.length;
 
   return (
-    <section>
-      <div className="flex items-baseline justify-between border-b border-border pb-2">
+    <section className="min-w-0">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-2">
         <h2 className="display flex items-center gap-2 text-lg">
           <Paperclip className="size-4" /> Evidence
         </h2>
@@ -364,7 +364,7 @@ export default function EvidenceSection({
           {canUpload ? " Photos, video, audio or documents (max 25MB)." : ""}
         </p>
       ) : (
-        <ul className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="mt-3 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {pending.map((p) => (
             <PendingCard key={p.id} item={p} />
           ))}
@@ -522,7 +522,7 @@ export default function EvidenceSection({
 function PendingCard({ item }: { item: PendingEvidence }) {
   const isImage = item.mimeType.startsWith("image/");
   return (
-    <li className="border border-dashed border-border p-3">
+    <li className="min-w-0 border border-dashed border-border p-3">
       <div className="flex items-start gap-3">
         <span className="flex size-12 shrink-0 items-center justify-center border border-border bg-muted/40">
           {isImage ? (
@@ -539,7 +539,7 @@ function PendingCard({ item }: { item: PendingEvidence }) {
             <CloudOff className="size-3" /> Queued for upload
           </span>
           {item.lastError && (
-            <span className="mt-1 block text-xs text-destructive">
+            <span className="mt-1 block text-xs break-words text-destructive">
               {item.lastError}
             </span>
           )}
@@ -715,7 +715,7 @@ function EvidenceCard({ ev }: { ev: Evidence }) {
   const url = minted?.url ?? null;
   const caption = ev.caption ?? ev.fileName;
   return (
-    <li className="border border-border p-3">
+    <li className="min-w-0 border border-border p-3">
       {previewable && (
         <div className="mb-3 overflow-hidden border border-border bg-muted/40">
           {state === "loading" && (
@@ -821,7 +821,7 @@ function EvidenceCard({ ev }: { ev: Evidence }) {
             {new Date(ev.capturedAt ?? ev.createdAt).toLocaleString()}
           </span>
           {ev.caption && (
-            <span className="mt-1 block text-xs text-muted-foreground italic">
+            <span className="mt-1 block text-xs break-words text-muted-foreground italic">
               {ev.caption}
             </span>
           )}

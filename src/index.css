@@ -145,6 +145,13 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* Safety net: no page-level sideways scroll. `clip` (unlike `hidden`) keeps
+     position: sticky working, and stops one over-wide element from widening
+     the layout viewport, which would push centered dialogs off-screen. */
+  html,
+  body {
+    overflow-x: clip;
+  }
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
