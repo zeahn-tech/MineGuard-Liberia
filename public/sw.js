@@ -12,7 +12,7 @@
  * Version bump busts the cache on deploy.
  * ------------------------------------------------------------------------- */
 
-const VERSION = "v1.3.1";
+const VERSION = "v1.3.2";
 const CACHE = `mineguard-shell-${VERSION}`;
 
 // ---- Map tiles (GIS-5) — keep in sync with src/lib/map-tiles.ts (pinned by
@@ -84,12 +84,12 @@ const PRECACHE = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
-  "./icons/pwa-192.png",
-  "./icons/pwa-512.png",
-  "./icons/pwa-maskable-192.png",
-  "./icons/pwa-maskable-512.png",
-  "./icons/apple-touch-icon.png",
-  "./icons/favicon-32.png",
+  "./icons/pwa-192.v2.png",
+  "./icons/pwa-512.v2.png",
+  "./icons/pwa-maskable-192.v2.png",
+  "./icons/pwa-maskable-512.v2.png",
+  "./icons/apple-touch-icon.v2.png",
+  "./icons/favicon-32.v2.png",
 ];
 
 /** Immutable build output — safe to serve cache-first forever. */
