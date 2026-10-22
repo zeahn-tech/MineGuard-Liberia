@@ -34,10 +34,16 @@ export default function InspectionDetail() {
     api.inspections.get,
     inspectionId ? { inspectionId: inspectionId as Id<"inspections"> } : "skip",
   );
-  const templates = useQuery(api.inspections.listTemplates);
   const findings = useQuery(
     api.inspections.listFindingsForInspection,
     inspectionId ? { inspectionId: inspectionId as Id<"inspections"> } : "skip",
+  );
+  // Resolve by id, NOT from the published list: an unpublished template must
+  // keep rendering the answers of inspections already recorded against it.
+  const inspectionTemplateId = inspection?.templateId;
+  const template = useQuery(
+    api.inspections.getTemplate,
+    inspectionTemplateId ? { templateId: inspectionTemplateId as string } : "skip",
   );
   const review = useMutation(api.inspections.review);
   const addFinding = useMutation(api.inspections.addFinding);
@@ -59,7 +65,6 @@ export default function InspectionDetail() {
   if (inspection === null)
     return <p className="py-16 text-center text-sm text-muted-foreground">Not found or access denied.</p>;
 
-  const template = templates?.find((t) => t._id === inspection.templateId);
   const answers = (inspection.answers ?? {}) as Record<string, unknown>;
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     try {
@@ -171,6 +176,12 @@ export default function InspectionDetail() {
       <section>
         <h2 className="display border-b border-border pb-2 text-lg">Recorded answers</h2>
         <div className="mt-4 space-y-6">
+          {template === null && (
+            <p className="text-sm text-muted-foreground">
+              The template this inspection was recorded with is no longer available, so the
+              individual answers cannot be laid out.
+            </p>
+          )}
           {(template?.sections ?? []).map((sec, si) => (
             <div key={si}>
               <h3 className="text-sm font-semibold">{sec.title}</h3>

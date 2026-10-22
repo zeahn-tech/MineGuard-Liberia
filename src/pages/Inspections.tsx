@@ -384,7 +384,17 @@ export function LocalInspectionForm() {
     };
   }, [clientRef]);
 
-  const template = templates?.find((t) => t._id === draft?.templateId);
+  // A draft keeps working if its template is unpublished after it was started:
+  // fall back to a by-id lookup (the published list no longer contains it).
+  const draftTemplateId = draft?.templateId;
+  const publishedTemplate = templates?.find((t) => t._id === draftTemplateId);
+  const fetchedTemplate = useQuery(
+    api.inspections.getTemplate,
+    draftTemplateId && templates !== undefined && !publishedTemplate
+      ? { templateId: draftTemplateId as string }
+      : "skip",
+  );
+  const template = publishedTemplate ?? fetchedTemplate ?? undefined;
   const site = sites?.find((s) => s._id === draft?.siteId);
 
   const saveDraft = (patch: Partial<LocalDraft>) => {

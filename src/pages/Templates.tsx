@@ -14,6 +14,16 @@
 // here is immediately usable on-device, offline included.
 // ---------------------------------------------------------------------------
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -32,6 +42,7 @@ import {
 } from "@/components/ui/select";
 import { useMutation, useQuery } from "@/lib/backend-react";
 import { api, validateTemplateSections } from "@/lib/backend";
+import { describeTemplateError } from "@/lib/template-schema";
 import type { InspectionTemplate, TemplateSection } from "@/lib/types";
 import {
   Archive,
@@ -45,7 +56,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 
@@ -59,12 +70,16 @@ function blankSection(): TemplateSection {
 
 function friendlyError(err: unknown, fallback: string): string {
   const msg = err instanceof Error ? err.message : "";
-  if (msg.startsWith("TEMPLATE_Q_") || msg.startsWith("TEMPLATE_SECTION_")) {
-    return `Template shape invalid: ${msg}`;
-  }
-  if (msg.includes("TEMPLATE_NAME_REQUIRED")) return "Give the template a name.";
+  if (typeof navigator !== "undefined" && navigator.onLine === false)
+    return "You're offline — reconnect and try again. Template changes need a connection.";
+  const described = describeTemplateError(msg.match(/TEMPLATE_[A-Z0-9_]+/)?.[0] ?? null);
+  if (described) return described;
   if (msg.includes("TEMPLATE_IN_USE"))
     return "This template is used by existing inspections — it cannot be archived (history keeps its shape). Unpublish it instead.";
+  if (msg.includes("FORBIDDEN"))
+    return "Only administrators can change inspection templates.";
+  if (/network|failed to fetch|unavailable/i.test(msg))
+    return "Could not reach the server — check your connection and try again.";
   return fallback;
 }
 
@@ -77,6 +92,7 @@ export function TemplateList() {
   const setActive = useMutation(api.inspections.setTemplateActive);
   const archive = useMutation(api.inspections.archiveTemplate);
   const [busy, setBusy] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState<InspectionTemplate | null>(null);
 
   const templates = templatesQ ?? [];
 
@@ -175,7 +191,7 @@ export function TemplateList() {
                     disabled={busy}
                     aria-label={`Archive template ${t.name}`}
                     title="Archive template (never deleted — kept for history)"
-                    onClick={() => void doArchive(t)}
+                    onClick={() => setConfirmArchive(t)}
                   >
                     <Archive className="size-3.5" />
                   </Button>
@@ -185,6 +201,37 @@ export function TemplateList() {
           );
         })}
       </div>
+
+      <AlertDialog
+        open={confirmArchive !== null}
+        onOpenChange={(o) => {
+          if (!o && !busy) setConfirmArchive(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive “{confirmArchive?.name}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The template disappears from every list and can no longer be used for new
+              inspections. It is never deleted — the record stays for audit. Templates
+              already used by inspections cannot be archived; unpublish those instead.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Keep template</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy}
+              onClick={(e) => {
+                e.preventDefault();
+                const t = confirmArchive;
+                if (t) void doArchive(t).then(() => setConfirmArchive(null));
+              }}
+            >
+              {busy ? "Archiving…" : "Archive"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -208,12 +255,32 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
 
   // Live validation feedback — the same validator the data layer enforces.
   const validationError = useMemo(() => validateTemplateSections(sections), [sections]);
+  const validationMessage = describeTemplateError(validationError);
   const dirty =
     !existing ||
     name !== existing.name ||
     description !== (existing.description ?? "") ||
     active !== existing.active ||
     JSON.stringify(sections) !== JSON.stringify(existing.sections);
+
+  const [confirmLeave, setConfirmLeave] = useState(false);
+
+  // Unsaved edits: warn on tab close / reload, and confirm before the in-app
+  // "All templates" link throws them away.
+  const hasUnsaved = existing
+    ? dirty
+    : name.trim() !== "" ||
+      description.trim() !== "" ||
+      JSON.stringify(sections) !== JSON.stringify([blankSection()]);
+  useEffect(() => {
+    if (!hasUnsaved || busy) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasUnsaved, busy]);
 
   const setSection = (si: number, patch: Partial<TemplateSection>) => {
     setSections((arr) => arr.map((s, i) => (i === si ? { ...s, ...patch } : s)));
@@ -270,6 +337,12 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
     <div className="min-w-0 space-y-4">
       <Link
         to="/portal/templates"
+        onClick={(e) => {
+          if (hasUnsaved && !busy) {
+            e.preventDefault();
+            setConfirmLeave(true);
+          }
+        }}
         className="inline-flex items-center gap-1 text-sm text-muted-foreground underline-offset-4 hover:underline"
       >
         <ArrowLeft className="size-3.5" /> All templates
@@ -332,9 +405,12 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
       </Card>
 
       {/* Validation feedback */}
-      {validationError && (
-        <p className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {validationError}
+      {validationError && hasUnsaved && (
+        <p
+          role="alert"
+          className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
+          {validationMessage ?? "Some template details need attention before it can be saved."}
         </p>
       )}
 
@@ -500,6 +576,24 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
         save; this editor cannot persist a template the field app cannot
         render.
       </p>
+
+      <AlertDialog open={confirmLeave} onOpenChange={setConfirmLeave}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have edits to this template that have not been saved. If you leave now they
+              will be lost.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction onClick={() => navigate("/portal/templates")}>
+              Discard changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

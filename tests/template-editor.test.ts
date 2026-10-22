@@ -22,7 +22,7 @@
 
 import { beforeAll, describe, expect, test } from "bun:test";
 import { api } from "../src/lib/backend";
-import { validateTemplateSections } from "../src/lib/template-schema";
+import { describeTemplateError, validateTemplateSections } from "../src/lib/template-schema";
 import { __testSetSupabaseClient, __testSetAuthUserId } from "../src/lib/supabase";
 import type { TemplateSection } from "../src/lib/types";
 import {
@@ -341,5 +341,108 @@ describe("template editor workflow (§11)", () => {
     setIdentity(f.opA);
     const offered = await first(api.inspections.listTemplates());
     expect(offered!.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ===========================================================================
+// 3. HISTORY SURVIVES UNPUBLISH + FRIENDLY MESSAGES
+// ===========================================================================
+
+describe("template lifecycle hardening", () => {
+  test("getTemplate returns an UNPUBLISHED template (recorded inspections keep their layout)", async () => {
+    setIdentity(f.admin);
+    const id = await api.inspections.saveTemplate({
+      name: "Unpublish-me",
+      active: true,
+      sections: validSections(),
+    });
+    await api.inspections.setTemplateActive({ templateId: id, active: false });
+
+    // Gone from the field flow's published list…
+    const published = await first(api.inspections.listTemplates());
+    expect(published!.some((t) => t._id === id)).toBe(false);
+
+    // …but still resolvable by id for inspection history / in-progress drafts,
+    // for staff and for operators (who read inspections read-only).
+    for (const who of [f.admin, f.opA]) {
+      setIdentity(who);
+      const t = await first(api.inspections.getTemplate({ templateId: id }));
+      expect(t?.name).toBe("Unpublish-me");
+      expect(t?.active).toBe(false);
+      expect(t?.sections.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("getTemplate resolves to null for an unknown id", async () => {
+    setIdentity(f.admin);
+    const t = await first(
+      api.inspections.getTemplate({ templateId: "00000000-0000-0000-0000-000000000000" }),
+    );
+    expect(t).toBeNull();
+  });
+});
+
+describe("describeTemplateError (editor wording)", () => {
+  test("points at the exact section / question in plain language", () => {
+    expect(describeTemplateError("TEMPLATE_SECTION_0_TITLE_REQUIRED")).toBe("Section 1 needs a title.");
+    expect(describeTemplateError("TEMPLATE_Q_1_2_LABEL_REQUIRED")).toBe(
+      "Section 2, question 3 needs a question text.",
+    );
+    expect(describeTemplateError("TEMPLATE_Q_0_0_OPTIONS_REQUIRED")).toContain("add at least one choice");
+    expect(describeTemplateError("TEMPLATE_SECTIONS_EMPTY")).toBe("Add at least one section.");
+    expect(describeTemplateError("TEMPLATE_NAME_REQUIRED")).toBe("Give the template a name.");
+  });
+
+  test("never leaks an internal token; null stays null", () => {
+    expect(describeTemplateError(null)).toBeNull();
+    expect(describeTemplateError("SOMETHING_ELSE")).toBeNull();
+    for (const t of [
+      "TEMPLATE_SECTION_3_QUESTIONS_EMPTY",
+      "TEMPLATE_Q_0_1_ANSWER_TYPE_INVALID",
+      "TEMPLATE_Q_2_0_OPTIONS_INVALID",
+      "TEMPLATE_SECTIONS_TOO_MANY",
+    ]) {
+      const msg = describeTemplateError(t)!;
+      expect(msg).toBeTruthy();
+      expect(msg).not.toContain("TEMPLATE_");
+    }
+  });
+
+  test("every token the validator can emit has a friendly sentence", () => {
+    const bad: unknown[] = [
+      [],
+      [{ title: "", questions: [] }],
+      [{ title: "A", questions: [] }],
+      [{ title: "A", questions: [{ label: "", answerType: "boolean", required: true }] }],
+      [{ title: "A", questions: [{ label: "x", answerType: "select", required: true }] }],
+      [{ title: "A", questions: [{ label: "x", answerType: "select", options: [" "], required: true }] }],
+      [{ title: "A", questions: [{ label: "x", answerType: "nope", required: true }] }],
+    ];
+    for (const b of bad) {
+      const token = validateTemplateSections(b);
+      expect(token).toBeTruthy();
+      expect(describeTemplateError(token)).toBeTruthy();
+    }
+  });
+});
+
+describe("template editor UI contract (source)", () => {
+  const read = (p: string) => Bun.file(new URL(p, import.meta.url)).text();
+
+  test("archive asks for confirmation; unsaved edits are guarded", async () => {
+    const src = await read("../src/pages/Templates.tsx");
+    expect(src).toContain("setConfirmArchive(t)");
+    expect(src).toContain("Discard unsaved changes?");
+    expect(src).toContain("beforeunload");
+  });
+
+  test("history + drafts resolve templates by id, not from the published list", async () => {
+    expect(await read("../src/pages/InspectionDetail.tsx")).toContain("api.inspections.getTemplate");
+    expect(await read("../src/pages/Inspections.tsx")).toContain("api.inspections.getTemplate");
+  });
+
+  test("template writes refresh live lists immediately", async () => {
+    const src = await read("../src/lib/backend.ts");
+    expect((src.match(/notifyLocalWrite\("inspection_templates"\)/g) ?? []).length).toBeGreaterThanOrEqual(4);
   });
 });

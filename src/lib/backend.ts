@@ -2559,6 +2559,23 @@ export const api = {
         return rows.filter((r) => !r.archived_at).map(mapTemplate);
       }, ["inspection_templates"]),
 
+    /** One template by id, REGARDLESS of its published flag. Records that were
+     *  already captured against a template (a submitted inspection's answers,
+     *  an in-progress field draft) must keep rendering after the template is
+     *  unpublished — the active-only listTemplates would make them lose their
+     *  name and every recorded answer. RLS limits reads to staff + operators. */
+    getTemplate: (args: { templateId: string }) =>
+      live<InspectionTemplate | null>(async () => {
+        await requireAuthed();
+        const { data, error } = await supabase
+          .from("inspection_templates")
+          .select("*")
+          .eq("id", args.templateId)
+          .maybeSingle();
+        if (error) throw backendError(error);
+        return data ? mapTemplate(data) : null;
+      }, ["inspection_templates"]),
+
     /** ALL templates regardless of active flag — the template editor's list
      *  (§11: inspection design configurable without a code change). */
     listTemplatesAll: () =>
@@ -2614,6 +2631,7 @@ export const api = {
           entityId: args.templateId,
           summary: `Template “${name}” updated (${args.sections.length} section(s))`,
         });
+        notifyLocalWrite("inspection_templates");
         return args.templateId;
       }
       const id = await insertReturningId("inspection_templates", {
@@ -2628,6 +2646,7 @@ export const api = {
         entityId: id,
         summary: `Template “${name}” created (${args.sections.length} section(s))`,
       });
+      notifyLocalWrite("inspection_templates");
       return id;
     },
 
@@ -2650,6 +2669,7 @@ export const api = {
         entityId: args.templateId,
         summary: `Template ${args.active ? "published" : "unpublished"}`,
       });
+      notifyLocalWrite("inspection_templates");
     },
 
     /** Archive a template — the soft-delete lifecycle (SEC-2, migration
@@ -2681,6 +2701,7 @@ export const api = {
         entityId: args.templateId,
         summary: "Template archived",
       });
+      notifyLocalWrite("inspection_templates");
     },
 
     list: () =>

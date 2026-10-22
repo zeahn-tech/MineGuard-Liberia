@@ -58,3 +58,59 @@ export function validateTemplateSections(
   }
   return null;
 }
+
+/** Plain-language version of a validateTemplateSections / saveTemplate token,
+ *  for the editor UI. The tokens themselves stay stable (the data layer and
+ *  tests assert them); only the display text is friendly. Unknown tokens fall
+ *  back to a generic sentence rather than leaking an internal code. */
+export function describeTemplateError(token: string | null): string | null {
+  if (!token) return null;
+  const sec = /^TEMPLATE_SECTION_(\d+)_(.+)$/.exec(token);
+  if (sec) {
+    const n = Number(sec[1]) + 1;
+    switch (sec[2]) {
+      case "TITLE_REQUIRED":
+        return `Section ${n} needs a title.`;
+      case "TITLE_TOO_LONG":
+        return `Section ${n}'s title is too long (120 characters maximum).`;
+      case "QUESTIONS_EMPTY":
+        return `Section ${n} needs at least one question.`;
+      case "QUESTIONS_TOO_MANY":
+        return `Section ${n} has too many questions (60 maximum).`;
+      default:
+        return `Section ${n} is not valid.`;
+    }
+  }
+  const q = /^TEMPLATE_Q_(\d+)_(\d+)_(.+)$/.exec(token);
+  if (q) {
+    const where = `Section ${Number(q[1]) + 1}, question ${Number(q[2]) + 1}`;
+    switch (q[3]) {
+      case "LABEL_REQUIRED":
+        return `${where} needs a question text.`;
+      case "LABEL_TOO_LONG":
+        return `${where} is too long (300 characters maximum).`;
+      case "OPTIONS_REQUIRED":
+        return `${where} is a choice question — add at least one choice.`;
+      case "OPTIONS_INVALID":
+        return `${where} has an empty choice — fill it in or remove it.`;
+      case "ANSWER_TYPE_INVALID":
+        return `${where} has an unsupported answer type.`;
+      default:
+        return `${where} is not valid.`;
+    }
+  }
+  switch (token) {
+    case "TEMPLATE_SECTIONS_EMPTY":
+      return "Add at least one section.";
+    case "TEMPLATE_SECTIONS_TOO_MANY":
+      return "Too many sections (30 maximum).";
+    case "TEMPLATE_NAME_REQUIRED":
+      return "Give the template a name.";
+    case "TEMPLATE_NAME_TOO_LONG":
+      return "The template name is too long (120 characters maximum).";
+    case "TEMPLATE_SECTIONS_INVALID":
+      return "The template layout is not valid.";
+    default:
+      return null;
+  }
+}
