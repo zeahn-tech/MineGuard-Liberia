@@ -2,10 +2,11 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
+import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ShieldCheck, Search } from "lucide-react";
+import { Search } from "lucide-react";
 
 const STATUS_COPY: Record<string, string> = {
   submitted: "Received — awaiting triage by authorized personnel.",
@@ -39,7 +40,7 @@ export default function CommunityTrack() {
       <header className="border-b border-border">
         <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-4 md:px-8">
           <Link to="/" className="flex min-h-9 items-center gap-2">
-            <ShieldCheck className="size-5" strokeWidth={1.5} />
+            <BrandMark className="size-5" />
             <span className="display text-base">MineGuard Liberia</span>
           </Link>
           <Link to="/report" className="inline-flex min-h-9 items-center text-sm text-muted-foreground hover:text-foreground">

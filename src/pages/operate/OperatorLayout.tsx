@@ -13,6 +13,7 @@
 // inspection flow.
 // ---------------------------------------------------------------------------
 
+import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import NotificationBell from "@/components/NotificationBell";
 import { RequireOperator } from "@/components/RequireAuth";
@@ -198,7 +199,7 @@ export default function OperatorLayout() {
           {/* Sidebar */}
           <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar md:flex">
             <div className="flex items-center gap-2 border-b border-border px-4 py-5">
-              <ShieldCheck className="size-6 text-foreground" strokeWidth={1.5} />
+              <BrandMark className="size-6" />
               <div>
                 <div className="display text-sm leading-tight">MineGuard</div>
                 <div className="kicker text-[10px]">Operator access</div>

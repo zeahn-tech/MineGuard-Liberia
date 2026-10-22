@@ -4,6 +4,7 @@ import { useMutation } from "@/lib/backend-react";
 import { api, refreshAllData } from "@/lib/backend";
 import { useLatest } from "@/lib/use-latest";
 import { useAuth } from "@/hooks/use-auth";
+import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { sectionJump } from "@/lib/utils";
 import NotificationBell from "@/components/NotificationBell";
@@ -43,7 +44,6 @@ import {
   RefreshCw,
   ScrollText,
   Scale,
-  ShieldCheck,
   ShieldEllipsis,
   UserCog,
 } from "lucide-react";
@@ -283,7 +283,7 @@ export default function PortalLayout() {
         {/* Sidebar */}
         <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar md:flex print:!hidden">
           <div className="flex items-center gap-2 border-b border-border px-4 py-5">
-            <ShieldCheck className="size-6 text-foreground" strokeWidth={1.5} />
+            <BrandMark className="size-6" />
             <div>
               <div className="display text-sm leading-tight">MineGuard</div>
               <div className="kicker text-[10px]">Liberia</div>
@@ -431,7 +431,7 @@ export default function PortalLayout() {
         >
           <SheetHeader className="shrink-0 border-b border-border py-5 pr-14 pl-4 text-left">
             <SheetTitle className="flex items-center gap-2 text-sm">
-              <ShieldCheck className="size-5" strokeWidth={1.5} />
+              <BrandMark className="size-5" />
               <span className="display">MineGuard</span>
               <span className="kicker text-[10px]">Liberia</span>
               <span className="stamp ml-auto text-[9px] text-muted-foreground">

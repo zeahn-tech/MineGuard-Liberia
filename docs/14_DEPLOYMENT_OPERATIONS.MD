@@ -13,8 +13,8 @@ with required reviewers).
 - Vite SPA (Freebuff-managed dev server, HMR disabled by platform policy).
 - **Static-hosting ready** (added 2026-09): `HashRouter` (deep links work on
   any static host), repository-aware `base` path, offline service worker
-  (`public/sw.js`), installable PWA manifest with generated Papery icons
-  (`public/icons/`, regenerate via `bun run icons`). GitHub Pages deployment
+  (`public/sw.js`), installable PWA manifest with the MineGuard Liberia
+  brand icons (`public/icons/`; SVG masters and export steps in `branding/`). GitHub Pages deployment
   ships via `.github/workflows/deploy-pages.yml` (Settings → Pages → Source:
   GitHub Actions). Other static hosts: `bun run build` → serve `dist/`.
   **`.nojekyll` ships in `public/` and is also forced into `dist/` by both

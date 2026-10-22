@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { useMutation } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { toast } from "sonner";
+import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -117,7 +118,7 @@ export default function CommunitySubmit() {
       <header className="border-b border-border">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4 md:px-8">
           <Link to="/" className="flex min-h-9 items-center gap-2">
-            <ShieldCheck className="size-5" strokeWidth={1.5} />
+            <BrandMark className="size-5" />
             <span className="display text-base">MineGuard Liberia</span>
           </Link>
           <Link to="/report/track" className="inline-flex min-h-9 items-center text-sm text-muted-foreground hover:text-foreground">

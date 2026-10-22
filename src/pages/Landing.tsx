@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { useAuth } from "@/hooks/use-auth";
+import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { sectionJump } from "@/lib/utils";
 import {
@@ -13,7 +14,6 @@ import {
   Map,
   MessageSquareWarning,
   ScrollText,
-  ShieldCheck,
   WifiOff,
 } from "lucide-react";
 
@@ -39,7 +39,7 @@ export default function Landing() {
       <header className="border-b border-foreground/80">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 md:px-8">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="size-5" strokeWidth={1.5} />
+            <BrandMark className="size-5" />
             <span className="display text-lg">MineGuard Liberia</span>
           </div>
           <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">

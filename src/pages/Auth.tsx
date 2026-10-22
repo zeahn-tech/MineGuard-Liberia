@@ -1,3 +1,4 @@
+import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -288,7 +289,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       <main id="main-content" className="flex-1">
         <div className="mx-auto flex h-full w-full max-w-md flex-col justify-center px-4 py-16">
           <Link to="/" className="mb-8 flex items-center justify-center gap-2">
-            <ShieldCheck className="size-6" strokeWidth={1.5} />
+            <BrandMark className="size-6" />
             <span className="display text-xl">MineGuard Liberia</span>
           </Link>
 

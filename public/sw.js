@@ -12,7 +12,7 @@
  * Version bump busts the cache on deploy.
  * ------------------------------------------------------------------------- */
 
-const VERSION = "v1.3.0";
+const VERSION = "v1.3.1";
 const CACHE = `mineguard-shell-${VERSION}`;
 
 // ---- Map tiles (GIS-5) — keep in sync with src/lib/map-tiles.ts (pinned by
