@@ -9,8 +9,12 @@ import { HashRouter, Route, Routes } from "react-router";
 import { RequireStaff } from "@/components/RequireAuth";
 import "./index.css";
 import { installChunkRecovery } from "@/lib/chunk-recovery";
+import { startInstallPrompt } from "@/lib/install-prompt";
+import { InstallBanner } from "@/components/InstallBanner";
 
 installChunkRecovery();
+// Listen for the browser's install event right away — it can fire before React renders.
+startInstallPrompt();
 
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
@@ -160,6 +164,7 @@ createRoot(document.getElementById("root")!).render(
           </Routes>
         </Suspense>
        </RecoveryGate>
+       <InstallBanner />
       </HashRouter>
       <Toaster />
     </RootErrorBoundary>
