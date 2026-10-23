@@ -230,10 +230,10 @@ export default function InspectionDetail() {
       />
 
       {/* Findings */}
-      <section>
-        <div className="flex items-baseline justify-between border-b border-border pb-2">
-          <h2 className="display text-lg">Findings</h2>
-          <span className="text-xs text-muted-foreground">
+      <section className="min-w-0">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-border pb-2">
+          <h2 className="display shrink-0 text-lg">Findings</h2>
+          <span className="min-w-0 text-xs text-muted-foreground">
             Inspection → finding → corrective action → verification
           </span>
         </div>
@@ -247,8 +247,8 @@ export default function InspectionDetail() {
             {findings.map((f: Doc<"findings">) => (
               <li key={f._id} className="py-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="text-sm font-medium">{f.title}</p>
-                  <div className="flex items-center gap-2">
+                  <p className="min-w-0 text-sm font-medium break-words">{f.title}</p>
+                  <div className="flex shrink-0 items-center gap-2">
                     <span className={`stamp ${SEV_STYLES[f.severity]}`}>{f.severity}</span>
                     <Badge variant="outline" className="font-mono text-[10px]">
                       {f.status}
@@ -256,7 +256,7 @@ export default function InspectionDetail() {
                   </div>
                 </div>
                 {f.description && (
-                  <p className="mt-1 text-sm text-muted-foreground">{f.description}</p>
+                  <p className="mt-1 text-sm break-words text-muted-foreground">{f.description}</p>
                 )}
 
                 {/* Finding status transitions */}
@@ -281,7 +281,7 @@ export default function InspectionDetail() {
                       </Button>
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="outline"
                         onClick={() => setCaForm({ findingId: f._id, description: "", dueAt: "" })}
                       >
                         Open corrective action…
