@@ -1,0 +1,57 @@
+# Required status checks for pull requests into main.
+# The job names below ("Validate", "rls-security-test") are the exact check
+# names the branch ruleset waits for — renaming a job leaves the PR stuck on
+# "Expected — Waiting for status to be reported".
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  Validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bunx tsc -b --noEmit
+      - name: Lint
+        run: bunx eslint .
+      - name: Build
+        run: bunx vite build
+      - name: Test (full suite)
+        run: bun test --timeout 60000
+
+  rls-security-test:
+    name: rls-security-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - run: bun install --frozen-lockfile
+      - name: RLS / grants / audit-hardening regression suites
+        run: >
+          bun test --timeout 60000
+          tests/rls.test.ts
+          tests/migration-apply.test.ts
+          tests/audit-hardening.test.ts
+          tests/rate-limit.test.ts
