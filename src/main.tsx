@@ -44,6 +44,8 @@ const TemplateEditor = lazy(() =>
   import("./pages/Templates.tsx").then((m) => ({ default: m.TemplateEditor })),
 );
 const Boundaries = lazy(() => import("./pages/Boundaries.tsx"));
+const Terms = lazy(() => import("./pages/Terms.tsx"));
+const Privacy = lazy(() => import("./pages/Privacy.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 const OperatorLayout = lazy(() => import("./pages/operate/OperatorLayout.tsx"));
 const OperatorOverview = lazy(() => import("./pages/operate/OperatorOverview.tsx"));
@@ -104,6 +106,8 @@ createRoot(document.getElementById("root")!).render(
               path="/auth"
               element={<AuthPage redirectAfterAuth="/portal" />}
             />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/privacy" element={<Privacy />} />
             <Route path="/report" element={<CommunitySubmit />} />
             <Route path="/report/track" element={<CommunityTrack />} />
 
