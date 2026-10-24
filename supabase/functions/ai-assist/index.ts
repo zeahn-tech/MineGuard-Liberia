@@ -19,7 +19,9 @@ import { handleAiRequest } from "../_shared/ai/handler.ts";
 import { resolveProvider } from "../_shared/ai/provider.ts";
 
 const CORS = {
-  "Access-Control-Allow-Origin": Deno.env.get("AI_ALLOWED_ORIGIN") ?? "*",
+  // Fail closed: with AI_ALLOWED_ORIGIN unset no browser origin is allowed
+  // (set it to your exact site origin, e.g. https://example.org).
+  "Access-Control-Allow-Origin": Deno.env.get("AI_ALLOWED_ORIGIN") ?? "null",
   "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };

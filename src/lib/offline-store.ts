@@ -278,7 +278,7 @@ function emitChange() {
 // parent receives its server id.
 // ---------------------------------------------------------------------------
 
-const REFS_KEY = "mg.offline.refs.v1";
+export const REFS_KEY = "mg.offline.refs.v1";
 export type LocalRefTable = "inspections" | "incidents" | "environmental_observations";
 type RefMap = Record<string, { table: LocalRefTable; id: string }>;
 

@@ -1,8 +1,11 @@
 name: Deploy to GitHub Pages
 
+# AUDIT F7: this workflow publishes to the SAME GitHub Pages site as
+# deploy-production.yml but WITHOUT the production gate (reviewers, forced
+# backup, VITE_MINEGUARD_ENV=production). A push to main must therefore never
+# deploy it automatically — run it by hand only for non-production use, or
+# delete it once deploy-production.yml is your only path.
 on:
-  push:
-    branches: [main, master]
   workflow_dispatch:
 
 permissions:
@@ -25,7 +28,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.4.4"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile

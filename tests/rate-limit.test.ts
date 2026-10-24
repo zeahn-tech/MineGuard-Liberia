@@ -131,11 +131,9 @@ describe("per-source quota isolation (the directive's core acceptance)", () => {
       await submit(run, "CR-RL-B-FIRST");
       // Success confirmed via the world-readable tracking mirror (anon can
       // read report_tracking; it cannot read community_reports directly).
-      const mirror = await run(
-        `select status from public.report_tracking
-          where tracking_code = 'CR-RL-B-FIRST'`,
-      );
-      expect(mirror[0]?.status).toBe("submitted");
+      // (0023: the server mints the code, and anon cannot read the tracking
+      // table or rate_limits; B's submit() resolving without RATE_LIMITED is
+      // the success signal.)
 
       // And B's fresh quota did not reset A's exhausted window.
       await run(xff(IP_A));

@@ -11,7 +11,7 @@
 // helper throws with the offending migration name if anything fails.
 // ---------------------------------------------------------------------------
 
-import { beforeAll, describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test, afterEach } from "bun:test";
 import {
   getDb,
   getFixture,
@@ -23,6 +23,20 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 beforeAll(() => getFixture());
+
+// This file re-applies older migrations on the ONE database shared with every
+// other test file (idempotency checks), which clobbers later hardening. Restore
+// the final state of the newest migration after every test so assertions — and
+// the other files that run afterwards — always see the real end state.
+afterEach(async () => {
+  const db = await getDb();
+  await db.exec(
+    readFileSync(
+      join(ROOT, "supabase", "migrations", "0023_security_audit_hardening.sql"),
+      "utf8",
+    ),
+  );
+});
 
 const ROOT = join(import.meta.dir, "..");
 
@@ -383,15 +397,17 @@ describe("RLS policy hygiene (§0.1 regression suite)", () => {
     });
   });
 
-  test("world-readable surfaces stay readable (meta + tracking)", async () => {
+  test("world-readable surface is meta only; report_tracking is NOT listable (0023, audit F4)", async () => {
     await withRole("anon", null, async (run) => {
       const meta = await one(run, "select count(*) from public.meta");
       expect(Number(scalar(meta))).toBeGreaterThan(0);
-      const tracking = await one(
-        run,
-        "select count(*) from public.report_tracking",
-      );
-      expect(Number(scalar(tracking))).toBeGreaterThan(0);
+      let denied = "";
+      try {
+        await run("select count(*) from public.report_tracking");
+      } catch (e) {
+        denied = String((e as Error).message);
+      }
+      expect(denied).toMatch(/permission denied/i);
     });
   });
 
@@ -523,7 +539,8 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
       expect(r.a_del, `authenticated must not hold DELETE on ${r.t}`).toBe(false);
       expect(r.a_ins, `authenticated INSERT on ${r.t}`).toBe(r.t !== "audit_log");
       expect(r.n_ins, `anon must not hold INSERT on ${r.t}`).toBe(false);
-      const anonReadable = r.t === "meta" || r.t === "report_tracking";
+      // 0023 (audit F4): report_tracking is no longer anon-readable.
+      const anonReadable = r.t === "meta";
       expect(r.n_sel, `anon SELECT surface on ${r.t}`).toBe(anonReadable);
     }
   });
@@ -714,6 +731,7 @@ describe("GAP-0: function execute surface (0011)", () => {
   const ANON_SURFACE = [
     "refresh_public_stats()",
     "submit_community_report(text, text, text, text, text, text, double precision, double precision, text)",
+    "track_community_report(text)",
   ];
 
   /** The complete authenticated surface: the client RPC surface + the
@@ -756,6 +774,7 @@ describe("GAP-0: function execute surface (0011)", () => {
     "provision_user_by_email(text, text, text, text, text)",
     "refresh_public_stats()",
     "submit_community_report(text, text, text, text, text, text, double precision, double precision, text)",
+    "track_community_report(text)",
     "triage_community_report(uuid, text, text)",
   ];
 
@@ -870,7 +889,7 @@ describe("GAP-0: function execute surface (0011)", () => {
     // The reachable set must actually be non-trivial, or this assertion is
     // vacuous.
     expect(rows.length).toBeGreaterThanOrEqual(15);
-    const PUBLIC_FLOWS = new Set(["submit_community_report", "refresh_public_stats"]);
+    const PUBLIC_FLOWS = new Set(["submit_community_report", "refresh_public_stats", "track_community_report"]);
     const HELPERS = new Set([
       "mg_any_profile_role",
       "mg_can_access_site",
