@@ -23,6 +23,8 @@
 import {
   storeGet,
   storeSet,
+  storeRemove,
+  REFS_KEY,
   recordLocalRef,
   readLocalRefs,
   NotSavedError,
@@ -341,6 +343,22 @@ export async function updateQueueItem(id: string, patch: Partial<QueueItem>): Pr
   await transactQueue((cur) =>
     cur.map((q) => (q.id === id ? { ...q, ...patch } : q)),
   );
+}
+
+/**
+ * Shared-device hygiene (audit F9): on sign-out, remove queued items, drafts and
+ * local id refs — but ONLY when nothing is waiting to sync, so unsent field
+ * data is never destroyed. Returns false when it deliberately kept the data.
+ */
+export async function wipeOfflineDataIfSynced(): Promise<boolean> {
+  await ensureOfflineReady();
+  if (pendingCount() > 0) return false;
+  const { pendingEvidenceCount } = await import("./offline-evidence");
+  if ((await pendingEvidenceCount()) > 0) return false;
+  await transactQueue(() => []);
+  await transactDrafts(() => []);
+  await storeRemove(REFS_KEY);
+  return true;
 }
 
 export async function removeQueueItem(id: string): Promise<void> {

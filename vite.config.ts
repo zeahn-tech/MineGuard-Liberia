@@ -1,7 +1,39 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
+
+// Audit F6: GitHub Pages cannot send response headers, so ship a <meta> CSP in
+// PRODUCTION builds only (dev needs inline scripts/websockets for HMR). Note a
+// meta CSP cannot enforce frame-ancestors / report-uri; put the site behind a
+// header-capable host (Cloudflare, Netlify, Vercel) to get those.
+const SUPABASE_ORIGIN = "https://ewukneoblhogtreeekqc.supabase.co";
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'", // React/Leaflet/Radix set inline style attributes
+  `img-src 'self' data: blob: https://tile.openstreetmap.org ${SUPABASE_ORIGIN}`,
+  `media-src 'self' blob: ${SUPABASE_ORIGIN}`,
+  `connect-src 'self' ${SUPABASE_ORIGIN} wss://ewukneoblhogtreeekqc.supabase.co`,
+  "font-src 'self' data:",
+  "worker-src 'self'",
+  "manifest-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
+
+function cspPlugin(): Plugin {
+  return {
+    name: "mg-csp-meta",
+    apply: "build",
+    transformIndexHtml: (html) =>
+      html.replace(
+        "<head>",
+        `<head>\n  <meta http-equiv="Content-Security-Policy" content="${CSP}" />\n  <meta name="referrer" content="strict-origin-when-cross-origin" />`,
+      ),
+  };
+}
 
 // https://vite.dev/config/
 export default defineConfig(({ command }) => {
@@ -16,7 +48,7 @@ export default defineConfig(({ command }) => {
     (command === "build" && repoName ? `/${repoName}/` : "/");
 
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), cspPlugin()],
     base,
     // Short commit id of the deployed build, shown on error panels so a report
     // can say exactly which version of the app produced it.

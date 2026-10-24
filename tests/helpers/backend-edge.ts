@@ -675,6 +675,7 @@ type RpcSpec = { fn: string; args: string[]; textArgs?: string[] };
 
 const RPC_SPECS: Record<string, RpcSpec> = {
   submit_community_report: { fn: "submit_community_report", args: ["p_tracking_code", "p_category", "p_description", "p_county", "p_district", "p_community", "p_latitude", "p_longitude", "p_contact_phone"] },
+  track_community_report: { fn: "track_community_report", args: ["p_code"] },
   triage_community_report: { fn: "triage_community_report", args: ["p_report_id", "p_decision", "p_note"] },
   provision_user_by_email: { fn: "provision_user_by_email", args: ["p_email", "p_role", "p_scope", "p_county", "p_operator_name"] },
   complete_staff_profile: { fn: "complete_staff_profile", args: ["p_job_title", "p_organization", "p_scope", "p_county", "p_operator_name"] },

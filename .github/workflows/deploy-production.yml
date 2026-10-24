@@ -67,7 +67,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.4.4"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -102,11 +102,25 @@ jobs:
           OUT="$(bash scripts/backup-supabase.sh ./backups)"
           echo "artifact=$OUT" >> "$GITHUB_OUTPUT"
 
-      - name: Upload backup artifact (retain 90 days)
+      - name: Encrypt backup (never upload plaintext — this repo may be public)
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          test -n "$BACKUP_PASSPHRASE" || { echo "::error::BACKUP_PASSPHRASE secret is required"; exit 1; }
+          mkdir -p backups-enc
+          for f in backups/*; do
+            printf %s "$BACKUP_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+              --passphrase-fd 0 --symmetric --cipher-algo AES256 \
+              -o "backups-enc/$(basename "$f").gpg" "$f"
+          done
+          ls -l backups-enc
+
+      - name: Upload ENCRYPTED backup artifact (retain 90 days)
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.backup.outputs.artifact }}
-          path: backups/
+          path: backups-enc/
           retention-days: 90
           if-no-files-found: error
 
@@ -121,7 +135,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.4.4"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile

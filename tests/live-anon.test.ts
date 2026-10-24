@@ -79,13 +79,15 @@ describe.skipIf(!process.env.RUN_LIVE_TESTS)("live DB: anonymous client (anon ke
     expect(body).toContain("permission denied for table profiles");
   });
 
-  test("public mirrors remain readable (landing page + tracking)", async () => {
+  test("public mirror (meta) readable; report_tracking is NOT listable (0023)", async () => {
     const meta = await rest("meta?select=key");
     expect(meta.status).toBe(200);
     expect(JSON.parse(meta.body).length).toBeGreaterThan(0);
 
     const tracking = await rest("report_tracking?select=tracking_code");
-    expect(tracking.status).toBe(200);
-    expect(JSON.parse(tracking.body).length).toBeGreaterThan(0);
+    // Either an explicit 401/403 or an empty list is acceptable; a populated
+    // list means every tracking code is enumerable again (audit F4).
+    const rows = tracking.status === 200 ? JSON.parse(tracking.body) : [];
+    expect(rows.length).toBe(0);
   });
 });

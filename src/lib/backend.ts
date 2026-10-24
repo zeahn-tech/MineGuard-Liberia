@@ -76,7 +76,6 @@ import {
   MAP_LAYER_CONFIGS,
   canAccessSite,
   isStaffRole,
-  makeTrackingCode,
   nextSiteCodeFrom,
   type AdminBoundary,
   type AuditEntry,
@@ -982,6 +981,18 @@ function mapRiskConfigVersion(r: AnyRow): RiskConfigVersion {
   };
 }
 
+/** Strip path separators / control chars so a name can never create sub-paths or
+ *  break the `{rowId}__{fileName}` join the storage read policy parses. */
+export function sanitizeEvidenceFileName(name: string): string {
+  const base = (name ?? "").split(/[\\/]/).pop() ?? "";
+  const cleaned = base
+    .replace(/[^\w.\- ()]/g, "_")
+    .replace(/\.{2,}/g, ".")
+    .trim()
+    .slice(-120);
+  return cleaned.replace(/^\.+/, "") || "file";
+}
+
 function evidenceKindByMime(mime: string): EvidenceKind {
   const m = mime.toLowerCase();
   if (m.startsWith("image/")) return "photo";
@@ -1791,6 +1802,14 @@ export async function signOut() {
   clearRecovery(); // a deliberate sign-out also abandons a pending password reset
   await supabase.auth.signOut();
   profileCache = null;
+  // Shared-device hygiene: remove cached offline data unless unsynced work is
+  // still waiting (never destroy field data that has not reached the server).
+  try {
+    const m = await import("./offline-queue");
+    await m.wipeOfflineDataIfSynced();
+  } catch {
+    /* best effort — never block sign-out */
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3555,7 +3574,8 @@ export const api = {
       // Rate limiting, tracking mirror and audit are enforced server-side by
       // the security-definer RPC (30 reports/minute cap).
       const { data, error } = await supabase.rpc("submit_community_report", {
-        p_tracking_code: makeTrackingCode(),
+        // Ignored by the server (0023): it mints the code. Kept for signature parity.
+        p_tracking_code: "",
         p_category: args.category,
         p_description: args.description,
         p_county: args.county,
@@ -3578,17 +3598,17 @@ export const api = {
         createdAt: number;
       } | null>(async () => {
         const code = args.trackingCode.trim().toUpperCase();
-        const { data, error } = await supabase
-          .from("report_tracking")
-          .select("*")
-          .eq("tracking_code", code)
-          .maybeSingle();
+        // 0023: no direct table read — one rate-limited RPC lookup per code.
+        const { data, error } = await supabase.rpc("track_community_report", {
+          p_code: code,
+        });
         if (error) throw backendError(error);
         if (!data) return null;
+        const d = data as { trackingCode: string; status: string; createdAt: string };
         return {
-          trackingCode: data.tracking_code as string,
-          status: data.status as string,
-          createdAt: toMs(data.created_at),
+          trackingCode: d.trackingCode,
+          status: d.status,
+          createdAt: toMs(d.createdAt),
         };
       }, ["report_tracking"]),
 
@@ -4120,7 +4140,8 @@ export const api = {
         c && typeof c.randomUUID === "function"
           ? c.randomUUID()
           : `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
-      const storagePath = `${user.uid}/${rowId}__${args.fileName}`;
+      const safeFileName = sanitizeEvidenceFileName(args.fileName);
+      const storagePath = `${user.uid}/${rowId}__${safeFileName}`;
       // 2. Upload bytes (uid first-folder contract + 25MB bucket cap
       //    re-checked server-side by the bucket setting and storage policy).
       if (args.onProgress && typeof XMLHttpRequest !== "undefined") {
@@ -4150,7 +4171,7 @@ export const api = {
         parent_id: args.parentId,
         site_id: args.siteId || null,
         kind,
-        file_name: args.fileName,
+        file_name: safeFileName,
         mime_type: args.mimeType,
         size_bytes: args.file.size,
         caption: args.caption ?? null,
