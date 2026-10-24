@@ -216,7 +216,15 @@ export default function CommunitySubmit() {
           <p className="text-xs leading-relaxed text-muted-foreground">
             By submitting, you confirm the information is accurate to the best of your
             knowledge. False reports undermine community trust. Contact details are
-            optional and are used only for follow-up questions.
+            optional and are used only for follow-up questions. See our{" "}
+            <Link to="/privacy" className="underline underline-offset-4 hover:text-foreground">
+              Privacy Policy
+            </Link>{" "}
+            and{" "}
+            <Link to="/terms" className="underline underline-offset-4 hover:text-foreground">
+              Terms of Use
+            </Link>
+            .
           </p>
 
           <Button type="submit" size="lg" disabled={busy}>

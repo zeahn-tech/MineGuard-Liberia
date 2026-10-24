@@ -1,3 +1,4 @@
+import { LegalLinks } from "@/components/LegalLayout";
 import { Link } from "react-router";
 import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
@@ -195,7 +196,10 @@ export default function Landing() {
             MineGuard Liberia — v1.0 · Government-ready architecture, designed for
             potential government adoption.
           </span>
-          <span>Statistics shown, if any, are computed from live platform data only.</span>
+          <span className="flex flex-col gap-1 md:items-end">
+            <LegalLinks className="flex flex-wrap gap-x-1" />
+            <span>Statistics shown, if any, are computed from live platform data only.</span>
+          </span>
         </div>
       </footer>
     </div>

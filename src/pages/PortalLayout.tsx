@@ -1,3 +1,4 @@
+import { LegalLinks } from "@/components/LegalLayout";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { useMutation } from "@/lib/backend-react";
@@ -397,7 +398,8 @@ export default function PortalLayout() {
 
           <footer className="border-t border-border px-4 py-4 text-[11px] text-muted-foreground md:px-8">
             MineGuard Liberia — government-ready architecture, designed for potential
-            government adoption. Not an official Government of Liberia system.
+            government adoption. Not an official Government of Liberia system.{" "}
+            <LegalLinks />
           </footer>
         </div>
       </div>

@@ -1,3 +1,4 @@
+import { LegalLinks } from "@/components/LegalLayout";
 import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import {
@@ -604,7 +605,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             )}
 
             <div className="rounded-b-lg border-t border-border bg-muted px-6 py-3 text-center text-[11px] leading-relaxed text-muted-foreground">
-              Access is for authorized oversight operations.
+              Access is for authorized oversight operations. By continuing you agree to
+              the <LegalLinks />.
               {notice ? ` ${notice}` : ""}
             </div>
           </Card>
