@@ -6,6 +6,7 @@ import {
   formatLegalDate,
   legalContactEmail,
 } from "@/lib/legal";
+import { reopenConsent } from "@/lib/consent";
 import { ArrowLeft } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
@@ -23,6 +24,18 @@ export function LegalLinks({ className = "" }: { className?: string }) {
       <Link to="/privacy" className="underline underline-offset-4 hover:text-foreground">
         Privacy Policy
       </Link>
+      <span aria-hidden="true"> · </span>
+      <Link to="/cookies" className="underline underline-offset-4 hover:text-foreground">
+        Cookie Policy
+      </Link>
+      <span aria-hidden="true"> · </span>
+      <button
+        type="button"
+        onClick={reopenConsent}
+        className="underline underline-offset-4 hover:text-foreground"
+      >
+        Cookie settings
+      </button>
     </span>
   );
 }
@@ -151,7 +164,7 @@ export function LegalLayout({
 
         <footer className="mt-14 border-t border-border pt-6 text-xs text-muted-foreground">
           <p>
-            {LEGAL_PRODUCT} · Terms and Privacy version {LEGAL_VERSION}, effective{" "}
+            {LEGAL_PRODUCT} · Terms, Privacy and Cookie Policy version {LEGAL_VERSION}, effective{" "}
             {formatLegalDate(LEGAL_UPDATED)}. Not an official Government of Liberia system;
             designed for potential government adoption.
           </p>

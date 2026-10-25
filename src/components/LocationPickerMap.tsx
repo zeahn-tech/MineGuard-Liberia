@@ -1,9 +1,9 @@
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { useEffect } from "react";
-import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import { ConsentTileLayer, MapTilesNotice } from "@/components/ConsentTileLayer";
+import { MapContainer, Marker, useMap, useMapEvents } from "react-leaflet";
 import { LIBERIA_BBOX, LIBERIA_CENTER, styleFor, symbolSvg } from "@/lib/gis";
-import { tileAttribution, tileCrossOrigin, tileTemplate } from "@/lib/map-tiles";
 
 /** Whole-country view with a little slack; the picker can't be panned away. */
 const BOUNDS: L.LatLngBoundsExpression = [
@@ -65,7 +65,7 @@ export default function LocationPickerMap({
 }) {
   return (
     <div
-      className="h-64 w-full overflow-hidden rounded-sm border border-border"
+      className="relative h-64 w-full overflow-hidden rounded-sm border border-border"
       role="application"
       aria-label="Map: click to set the site position"
     >
@@ -76,18 +76,13 @@ export default function LocationPickerMap({
         maxBounds={BOUNDS}
         className="size-full"
       >
-        <TileLayer
-          attribution={tileAttribution()}
-          url={tileTemplate()}
-          crossOrigin={tileCrossOrigin()}
-          minZoom={5}
-          maxZoom={14}
-        />
+        <ConsentTileLayer />
         <SizeFix />
         <ClickToPick onPick={onPick} />
         <Follow position={position} />
         {position && <Marker position={[position.lat, position.lng]} icon={PICK_ICON} />}
       </MapContainer>
+      <MapTilesNotice />
     </div>
   );
 }

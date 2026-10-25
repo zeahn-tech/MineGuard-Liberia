@@ -10,9 +10,9 @@
 // showing a made-up address.
 // ---------------------------------------------------------------------------
 
-export const LEGAL_VERSION = "1.0";
+export const LEGAL_VERSION = "1.1";
 /** ISO date the current wording took effect. */
-export const LEGAL_UPDATED = "2026-10-24";
+export const LEGAL_UPDATED = "2026-10-25";
 
 export const LEGAL_PRODUCT = "MineGuard Liberia";
 
