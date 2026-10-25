@@ -3,7 +3,6 @@ import { toast } from "sonner";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   MapContainer,
-  TileLayer,
   Marker,
   Popup,
   GeoJSON,
@@ -35,7 +34,7 @@ import {
   type MapFilters,
   sameCountyName,
 } from "@/lib/gis";
-import { tileAttribution, tileCrossOrigin, tileTemplate } from "@/lib/map-tiles";
+import { ConsentTileLayer, MapTilesNotice } from "@/components/ConsentTileLayer";
 
 const LEVELS: GeoVerificationLevel[] = ["verified", "unverified", "reported"];
 
@@ -323,13 +322,7 @@ export default function NationalMap() {
              *  tiles inside Liberia are cached (bounded, no prefetch) per the
              *  provider's tile usage policy; VITE_TILE_URL swaps in a licensed
              *  offline bundle. */}
-            <TileLayer
-              attribution={tileAttribution()}
-              url={tileTemplate()}
-              crossOrigin={tileCrossOrigin()}
-              minZoom={5}
-              maxZoom={14}
-            />
+            <ConsentTileLayer />
             <MapBridge onZoom={setZoom} target={focus} />
 
             {shownAdminBoundaries.map((b) => {
@@ -399,6 +392,7 @@ export default function NationalMap() {
               </LayerGroup>
             ))}
           </MapContainer>
+          <MapTilesNotice />
         </div>
 
         <aside className="w-full shrink-0 overflow-hidden rounded-sm border border-border bg-card lg:w-80">

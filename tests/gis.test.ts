@@ -1293,7 +1293,11 @@ describe("offline tile strategy", () => {
   });
 
   test("the page uses the configurable tile template + documents the alternative", () => {
-    const src = readFileSync(join(ROOT, "src/pages/NationalMap.tsx"), "utf8");
+    // The tile layer now lives in the consent-gated component (opt-in map
+    // background); the page must use that component, which uses the template.
+    const page = readFileSync(join(ROOT, "src/pages/NationalMap.tsx"), "utf8");
+    expect(page).toContain("<ConsentTileLayer />");
+    const src = readFileSync(join(ROOT, "src/components/ConsentTileLayer.tsx"), "utf8");
     expect(src).toContain("tileTemplate()");
     const doc = readFileSync(join(ROOT, "docs/06_GIS_ARCHITECTURE.MD"), "utf8");
     expect(doc).toMatch(/Offline tiles/);

@@ -213,8 +213,12 @@ const sections: LegalSection[] = [
     body: (
       <>
         <P>
-          The platform does not use advertising or tracking cookies. It stores data in your browser so
-          the app can work, including offline:
+          The platform sets no cookies and uses no advertising or tracking technologies. It stores data
+          in your browser so the app can work, including offline (the full, itemised list is in our{" "}
+          <Link to="/cookies" className="underline underline-offset-4">
+            Cookie Policy
+          </Link>
+          ):
         </P>
         <UL>
           <li>Your sign-in session, so you stay signed in.</li>
@@ -222,7 +226,7 @@ const sections: LegalSection[] = [
             An offline queue: inspections, incidents, observations and evidence files you saved while
             offline, held on your device until they are sent, plus unfinished field drafts.
           </li>
-          <li>A cached copy of the app, and a limited number of map tiles you have viewed.</li>
+          <li>A cached copy of the app and, only if you allow the map background, a limited number of map tiles you have viewed.</li>
           <li>Small settings, such as pacing of the &quot;install the app&quot; reminder.</li>
         </UL>
         <P>

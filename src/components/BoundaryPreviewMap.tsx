@@ -1,9 +1,9 @@
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { useEffect } from "react";
-import { GeoJSON, MapContainer, TileLayer, useMap } from "react-leaflet";
+import { ConsentTileLayer, MapTilesNotice } from "@/components/ConsentTileLayer";
+import { GeoJSON, MapContainer, useMap } from "react-leaflet";
 import { LIBERIA_CENTER, boundaryStyle, parseBoundaryGeometry } from "@/lib/gis";
-import { tileAttribution, tileCrossOrigin, tileTemplate } from "@/lib/map-tiles";
 
 export interface PreviewShape {
   id: string;
@@ -42,18 +42,12 @@ export default function BoundaryPreviewMap({
 }) {
   return (
     <div
-      className="h-72 w-full overflow-hidden rounded-sm border border-border"
+      className="relative h-72 w-full overflow-hidden rounded-sm border border-border"
       role="img"
       aria-label={`Preview of ${shapes.length} boundary shape${shapes.length === 1 ? "" : "s"} to be loaded`}
     >
       <MapContainer center={LIBERIA_CENTER} zoom={7} minZoom={5} className="size-full">
-        <TileLayer
-          attribution={tileAttribution()}
-          url={tileTemplate()}
-          crossOrigin={tileCrossOrigin()}
-          minZoom={5}
-          maxZoom={14}
-        />
+        <ConsentTileLayer />
         <FitToShapes shapes={shapes} />
         {shapes.map((s) => {
           const geom = parseBoundaryGeometry(s.geometryGeoJson);
@@ -62,6 +56,7 @@ export default function BoundaryPreviewMap({
           ) : null;
         })}
       </MapContainer>
+      <MapTilesNotice />
     </div>
   );
 }

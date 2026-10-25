@@ -10,6 +10,7 @@ import { RequireStaff } from "@/components/RequireAuth";
 import "./index.css";
 import { installChunkRecovery } from "@/lib/chunk-recovery";
 import { startInstallPrompt } from "@/lib/install-prompt";
+import { CookieBanner } from "@/components/CookieBanner";
 import { InstallBanner } from "@/components/InstallBanner";
 
 installChunkRecovery();
@@ -46,6 +47,7 @@ const TemplateEditor = lazy(() =>
 const Boundaries = lazy(() => import("./pages/Boundaries.tsx"));
 const Terms = lazy(() => import("./pages/Terms.tsx"));
 const Privacy = lazy(() => import("./pages/Privacy.tsx"));
+const Cookies = lazy(() => import("./pages/Cookies.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 const OperatorLayout = lazy(() => import("./pages/operate/OperatorLayout.tsx"));
 const OperatorOverview = lazy(() => import("./pages/operate/OperatorOverview.tsx"));
@@ -108,6 +110,7 @@ createRoot(document.getElementById("root")!).render(
             />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
+            <Route path="/cookies" element={<Cookies />} />
             <Route path="/report" element={<CommunitySubmit />} />
             <Route path="/report/track" element={<CommunityTrack />} />
 
@@ -168,6 +171,7 @@ createRoot(document.getElementById("root")!).render(
           </Routes>
         </Suspense>
        </RecoveryGate>
+       <CookieBanner />
        <InstallBanner />
       </HashRouter>
       <Toaster />
