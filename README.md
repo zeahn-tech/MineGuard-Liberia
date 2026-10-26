@@ -52,11 +52,11 @@ Static hosting anywhere (Netlify, Vercel, Cloudflare Pages, any web server):
 bun run build        # output in dist/
 ```
 
-**GitHub Pages** — a workflow is included at `.github/workflows/deploy-pages.yml`:
+**GitHub Pages** — the production workflow is `.github/workflows/deploy-production.yml`:
 
 1. Push the repository to GitHub
 2. **Settings → Pages → Source: GitHub Actions** (not "Deploy from a branch")
-3. Push to `main` (or `master`) — the site builds and deploys to `https://<user>.github.io/<repo>/`
+3. Push or merge to `main` — CI and the security tests run first, then the site builds and deploys automatically to `https://<user>.github.io/<repo>/`
 
 The build is repository-aware: on GitHub Pages it automatically serves from `/<repo>/` (override with `PUBLIC_PATH=/custom/base/`). Routing uses `HashRouter`, so deep links work with zero server configuration. A service worker provides the offline app shell.
 
@@ -66,18 +66,21 @@ The build is repository-aware: on GitHub Pages it automatically serves from `/<r
 >    "Deploy from a branch", Pages publishes raw repo files (the raw
 >    `index.html` references `/src/main.tsx`, which only exists in dev → blank
 >    screen; `manifest.webmanifest` 404s because it lives in `public/`).
-> 2. The workflow triggers on pushes to `main`/`master` — confirm the
->    workflow ran under the **Actions** tab and check its error logs.
-> 3. After fixing the source setting, push again (or use *Actions → Deploy to
->    GitHub Pages → Run workflow*) and hard-refresh (Ctrl+Shift+R).
+> 2. The **Deploy production** workflow triggers on pushes to `main` — confirm it
+>    ran under the **Actions** tab (all of its `CI gate` jobs must be green) and
+>    check its error logs.
+> 3. After fixing the source setting, push again (or use *Actions → Deploy production →
+>    Run workflow* on `main`) and hard-refresh (Ctrl+Shift+R).
 
 ### GitHub Actions setup checklist
 
 | Workflow | Trigger | Needs |
 |----------|---------|-------|
-| `deploy-pages.yml` | push to `main`/`master`, manual | **Settings → Pages → Source = GitHub Actions** (nothing else) |
-| `backup.yml` | nightly 03:30 UTC (+ Sunday drill), manual | Repo **variables** `SUPABASE_PROJECT_REF`, `SUPABASE_DB_HOST` (session-pooler host), `SUPABASE_DB_USER` (`postgres.<ref>`); **secret** `SUPABASE_DB_PASSWORD`. Skipped (not failed) until `SUPABASE_PROJECT_REF` is set |
-| `deploy-production.yml` | manual only | Environment `production` with reviewers + the same Supabase variables/secret |
+| `deploy-production.yml` | push / merge to `main` (automatic), manual re-run | **Settings → Pages → Source = GitHub Actions** (nothing else; no backup secret, no approval step). Runs the CI gate first |
+| `ci.yml` | pull requests, manual; reused by the deploy workflow | Nothing. Never deploys |
+| `backup.yml` | nightly 03:30 UTC (+ Sunday drill), manual — **optional** | Repo **variables** `SUPABASE_PROJECT_REF`, `SUPABASE_DB_HOST`, `SUPABASE_DB_USER`; **secrets** `SUPABASE_DB_PASSWORD`, `BACKUP_PASSPHRASE`. Skipped cleanly until configured; never blocks a deploy |
+
+> Frontend deployment does **not** apply database migrations. Apply them separately (docs/14).
 
 Live-database tests (`tests/live-anon.test.ts`) are opt-in: `RUN_LIVE_TESTS=1 bun test tests/live-anon.test.ts`.
 

@@ -1,12 +1,14 @@
 # 14 — Deployment & Operations
 
-**Status:** dev deployment verified (GitHub Pages via `deploy-pages.yml`, all
-gates green). PRODUCTION deploy path + backup schedule IMPLEMENTED 2026-09-27
-(Priority D): `.github/workflows/deploy-production.yml`,
-`.github/workflows/backup.yml`, `scripts/backup-supabase.sh`,
-`scripts/restore-supabase.sh`. Owner prerequisites below remain (project ref +
-DB password as repository variables/secrets; GitHub environment `production`
-with required reviewers).
+**Status [2026-10-26 — automatic production deployment]:** every push or merge
+to `main` deploys to GitHub Pages **automatically**, after the CI and security
+gate passes (`.github/workflows/deploy-production.yml` is the ONE canonical
+publishing workflow; the old `deploy-pages.yml` was retired). The deploy has
+**no backup, passphrase or manual-confirmation requirement**. Database backups
+(`.github/workflows/backup.yml`, `scripts/backup-supabase.sh`,
+`scripts/restore-supabase.sh`) are an **optional, independent** operation.
+**Frontend deployment never applies database migrations** — see "Database
+migrations" below.
 
 ## Current topology
 
@@ -15,10 +17,10 @@ with required reviewers).
   any static host), repository-aware `base` path, offline service worker
   (`public/sw.js`), installable PWA manifest with the MineGuard Liberia
   brand icons (`public/icons/`; SVG masters and export steps in `branding/`). GitHub Pages deployment
-  ships via `.github/workflows/deploy-pages.yml` (Settings → Pages → Source:
+  ships via `.github/workflows/deploy-production.yml` (Settings → Pages → Source:
   GitHub Actions). Other static hosts: `bun run build` → serve `dist/`.
-  **`.nojekyll` ships in `public/` and is also forced into `dist/` by both
-  deploy workflows (added 2026-09-29): without it, GitHub Pages runs Jekyll
+  **`.nojekyll` ships in `public/` and is also forced into `dist/` by the
+  deploy workflow (added 2026-09-29): without it, GitHub Pages runs Jekyll
   over the bundle and 404s `manifest.webmanifest` (observed live).**
 - Supabase project (Postgres + Auth + Storage under the Supabase project;
   migrations in `supabase/migrations/` are the schema source of truth):
@@ -63,43 +65,82 @@ with required reviewers).
 
 | Environment | Purpose | Data | Deploy mechanism |
 |-------------|---------|------|------------------|
-| Development | Feature work; demo seed allowed | Synthetic only | push to main → `deploy-pages.yml` |
-| Production | Pilot operations; seed disabled | Real records | manual `deploy-production.yml` |
+| Development | Feature work; demo seed allowed | Synthetic only | local `bun run dev`; pull requests are validated by `ci.yml` but never published |
+| Production | Pilot operations; seed disabled | Real records | push / merge to `main` → `deploy-production.yml` (automatic) |
 
-## Production deploy path [IMPLEMENTED 2026-09-27]
+## Production deploy path [AUTOMATIC since 2026-10-26]
 
-**One-time owner prerequisites:**
+```
+push / merge to main
+  → CI gate (ci.yml, called as a reusable workflow)
+  → production build (VITE_MINEGUARD_ENV=production + bundle checks)
+  → GitHub Pages deployment
+  → post-deploy verification
+```
 
-1. Create the Supabase **production project**; run all migrations
-   (`supabase/migrations/*.sql`) against it.
-2. GitHub repository **variable** `SUPABASE_PROJECT_REF` (production ref) and
-   **secret** `SUPABASE_DB_PASSWORD` (production DB password).
-3. GitHub **environment** `production` with **required reviewers** — the
-   human approval gate for every production deploy.
-4. GitHub Pages enabled with Source: GitHub Actions.
+**Required configuration (all of it):**
 
-**The deploy workflow (`deploy-production.yml`) — differences from dev, by
-design:**
+1. GitHub Pages enabled with **Settings → Pages → Source = GitHub Actions**.
+2. The `github-pages` environment must allow deployments from `main` (the
+   default). If you added **required reviewers** or a branch restriction to
+   `github-pages`, deployment waits for approval or is refused — remove the
+   reviewers there if you want fully automatic releases.
+3. *Optional:* branch protection / rulesets on `main` that require the `Validate`
+   and `rls-security-test` checks for pull requests (recommended — merged code
+   has then already passed review checks).
 
-1. **Manual gate only.** `workflow_dispatch` with a typed confirmation phrase
-   (`deploy-production`) plus the `production` environment's required
-   reviewers. Production deploys are deliberate acts, never a push side
-   effect.
-2. **Forced fresh backup first.** The `guard` job runs
-   `scripts/backup-supabase.sh` and uploads the dump (90-day retention) — the
-   deploy job `needs: guard`, so **no production deploy ever proceeds without
-   a current recovery point**. Typecheck + full test suite must also pass
-   before any deploy step.
-3. **Production build flags.** `VITE_MINEGUARD_ENV=production` — the demo
-   seed button is compiled out of the UI and the seed call site refuses the
-   action (defense in depth; item 4 of the deploy checklist).
-4. **Deploy verification.** Post-deploy, the workflow requires the production
-   endpoint to answer HTTP 200 or FAILS — a half-shipped deploy is loud, not
-   silent. A bundle sanity check also fails the build if the demo-seed UI
-   ever reappears in a production artifact.
+Nothing else. **No backup secret or variable, no `BACKUP_PASSPHRASE`, no
+Supabase credential and no confirmation phrase is needed to deploy.** (The
+frontend only ships the public Supabase URL and anon/publishable key that are
+already part of the build.)
 
-Rollback: redeploy the previous known-good artifact (Pages keeps deployment
-history) and, for data-level incidents, the restore path below.
+**What must pass before anything is published** (any failure stops the release;
+nothing is allowed to fail):
+
+| Stage | Checks |
+|-------|--------|
+| `ci` → `Validate` | `bun install --frozen-lockfile`, TypeScript (`tsc -b --noEmit`), ESLint, `vite build`, the **full** test suite (`bun test --timeout 60000`) |
+| `ci` → `rls-security-test` | `tests/rls.test.ts`, `tests/migration-apply.test.ts`, `tests/audit-hardening.test.ts`, `tests/rate-limit.test.ts` |
+| `build` | Production build with `VITE_MINEGUARD_ENV=production`; the bundle must not contain the demo-seed UI, must reference the repository base path, must contain `index.html`, `manifest.webmanifest`, `sw.js`, `icons/`, and the production CSP meta tag; no raw dev entry |
+| `deploy` | GitHub Pages deploy, then the live URL must answer 200, serve the built bundle, and serve `manifest.webmanifest` |
+
+**Behaviour notes**
+
+- A newer push waits for the running deployment to finish; it never cancels a
+  deploy mid-flight, so Pages is never left half-published.
+- `build` and `deploy` run **only for `main`**. A manual run of the workflow from
+  any other branch runs the CI gate and stops.
+- Pull requests are validated by `ci.yml` and are **never deployed**.
+- `workflow_dispatch` remains available to re-run a deployment of `main`.
+- CodeQL (`codeql.yml`) runs separately on its own schedule; it is not a
+  deployment gate.
+
+**Optional backups are independent of deployment.** `backup.yml` runs nightly
+only once `SUPABASE_PROJECT_REF` (variable), `SUPABASE_DB_*` settings and a
+`BACKUP_PASSPHRASE` secret are all configured; otherwise it skips cleanly. The
+dump is encrypted before upload because this repository may be public. A backup
+failure cannot block or cancel a deployment. You may still run it manually
+(Actions → Nightly backup → Run workflow) before risky database work.
+
+### Database migrations (separate from the frontend release)
+
+Deploying the frontend does **not** apply `supabase/migrations/*.sql` to your
+database, and a green deploy is **not** evidence that a migration is live. Apply
+migrations deliberately, in filename order, using the procedure in "Applying
+migrations safely" below (check `supabase/checks/migration_state.sql` first;
+staging first when possible). In particular
+`0023_security_audit_hardening.sql` (server-minted tracking codes, input limits,
+non-enumerable tracking lookup, global report rate limit, evidence MIME
+allow-list) takes effect only after it is applied to the Supabase project the
+live site talks to. The frontend is written to work **before and after** 0023
+(it still sends a client tracking code that migrated servers ignore, and the
+tracking page falls back to the old lookup only while `track_community_report`
+does not exist), so release order is not critical — but the security
+protections are not live until 0023 is applied, so do not leave it pending.
+
+Rollback: redeploy the previous known-good commit (re-run the workflow on it, or
+revert on `main`; Pages keeps deployment history) and, for data-level incidents,
+the restore path below.
 
 ## Making someone an administrator [ADDED 2026-10-13]
 
@@ -324,7 +365,7 @@ deploy job never ran and the broken state persisted.
 **Fixes applied in-repo:**
 1. Test failures fixed (see docs/11 — risk-model score invariant +
    order-tolerant AI suite).
-2. `deploy-pages.yml` now verifies post-deploy that the served page contains
+2. The deploy workflow (formerly `deploy-pages.yml`) now verifies post-deploy that the served page contains
    the built bundle (`/assets/index-…`) **and** `manifest.webmanifest`
    answers 200 — a stale/wrong-source deployment fails loudly instead of
    showing a blank screen.

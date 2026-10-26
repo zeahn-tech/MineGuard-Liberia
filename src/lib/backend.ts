@@ -76,6 +76,7 @@ import {
   MAP_LAYER_CONFIGS,
   canAccessSite,
   isStaffRole,
+  makeTrackingCode,
   nextSiteCodeFrom,
   type AdminBoundary,
   type AuditEntry,
@@ -3575,7 +3576,10 @@ export const api = {
       // the security-definer RPC (30 reports/minute cap).
       const { data, error } = await supabase.rpc("submit_community_report", {
         // Ignored by the server (0023): it mints the code. Kept for signature parity.
-        p_tracking_code: "",
+        // Migration 0023+ ignores this and mints its own code; databases not yet
+        // migrated still need a client-supplied one, so the release order of the
+        // frontend and the migration does not matter.
+        p_tracking_code: makeTrackingCode(),
         p_category: args.category,
         p_description: args.description,
         p_county: args.county,
@@ -3602,7 +3606,25 @@ export const api = {
         const { data, error } = await supabase.rpc("track_community_report", {
           p_code: code,
         });
-        if (error) throw backendError(error);
+        if (error) {
+          // Database not migrated to 0023 yet (function absent): fall back to the
+          // pre-0023 direct lookup so tracking keeps working until it is applied.
+          const missing =
+            error.code === "PGRST202" || /could not find the function/i.test(error.message ?? "");
+          if (!missing) throw backendError(error);
+          const legacy = await supabase
+            .from("report_tracking")
+            .select("tracking_code,status,created_at")
+            .eq("tracking_code", code)
+            .maybeSingle();
+          if (legacy.error) throw backendError(legacy.error);
+          if (!legacy.data) return null;
+          return {
+            trackingCode: legacy.data.tracking_code as string,
+            status: legacy.data.status as string,
+            createdAt: toMs(legacy.data.created_at as string),
+          };
+        }
         if (!data) return null;
         const d = data as { trackingCode: string; status: string; createdAt: string };
         return {
