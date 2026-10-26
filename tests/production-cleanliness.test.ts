@@ -124,7 +124,7 @@ describe("CLN-1: nothing dev-only runs in production", () => {
 
   test("index.html loads exactly one script: the app entry", () => {
     const html = read("index.html");
-    const scripts = [...html.matchAll(/<script\b[^>]*>/g)].map((m) => m[0]);
+    const scripts = [...html.matchAll(/<script\b[^>]*>/gi)].map((m) => m[0]);
     expect(scripts).toHaveLength(1);
     expect(scripts[0]).toContain("/src/main.tsx");
   });
