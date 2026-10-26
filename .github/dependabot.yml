@@ -1,0 +1,26 @@
+#version: 2
+updates:
+  # App dependencies (your project uses Bun, which has its own ecosystem)
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7        # ignore releases newer than 7 days (supply-chain safety)
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # GitHub Actions in .github/workflows (also keeps SHA-pinned actions current)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"] To get started with Dependabot version updates, you'll need to specify which
+# package ecosystems to update and where the package manifests are located.
+# Please see the documentation for all configuration options:
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
