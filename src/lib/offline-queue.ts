@@ -194,7 +194,13 @@ export function readDraft(clientRef: string): LocalDraft | undefined {
 export function newClientRef(): string {
   const c = globalThis.crypto as Crypto | undefined;
   if (c && typeof c.randomUUID === "function") return c.randomUUID();
-  return `cr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  if (c && typeof c.getRandomValues === "function") {
+    const bytes = new Uint8Array(8);
+    c.getRandomValues(bytes);
+    const suffix = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    return `cr-${Date.now().toString(36)}-${suffix}`;
+  }
+  throw new Error("Secure random generator unavailable for clientRef creation.");
 }
 
 // ---------------------------------------------------------------------------
