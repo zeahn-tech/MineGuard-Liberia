@@ -1,133 +1,58 @@
 # =============================================================================
-# PRODUCTION DEPLOYMENT (doc 14 — deploy path)
+# PRODUCTION DEPLOYMENT — the ONE canonical path to the live site.
 #
-# The dev deployment (deploy-pages.yml on push to main) is the developer
-# surface. This workflow is the PRODUCTION path and differs in the points
-# doc 14 requires:
+#   push / merge to main
+#     -> CI gate        (reusable ci.yml: typecheck, lint, build, full test
+#                        suite, RLS / migration / audit-hardening / rate-limit
+#                        security suites — any failure stops the release)
+#     -> production build (VITE_MINEGUARD_ENV=production, bundle checks)
+#     -> GitHub Pages deployment
+#     -> post-deploy verification (page, bundle, manifest answer 200)
 #
-#   1. MANUAL GATE ONLY (workflow_dispatch with a required environment
-#      selection) — production deploys are deliberate acts, never a side
-#      effect of a push.
-#   2. FORCED BACKUP FIRST — the deploy job waits for a fresh Supabase
-#      backup (backup-supabase.sh) so no deploy ever proceeds on a stale
-#      recovery point.
-#   3. PRODUCTION BUILD — VITE_MINEGUARD_ENV=production: demo seeding is
-#      compiled out of the UI and refused at the call site (doc 14 item 4).
-#   4. DEPLOY VERIFICATION — the workflow fails if the SPA endpoint does
-#      not answer, so a half-shipped deploy is visible, not silent.
+# No backup step, no encryption passphrase, no typed confirmation and no manual
+# approval are part of this pipeline. Database backups are an OPTIONAL,
+# separate workflow (backup.yml) that cannot block or cancel a deployment.
 #
-# Prerequisites (documented in docs/14_DEPLOYMENT_OPERATIONS.MD):
-#   - GitHub environment "production" created with required reviewers.
-#   - Repository variables: SUPABASE_PROJECT_REF (production project ref),
-#     SUPABASE_DB_HOST (session-pooler host; runners are IPv4-only) and
-#     SUPABASE_DB_USER ("postgres.<project-ref>").
-#   - Secrets: SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD (production).
-#   - GitHub Pages source: GitHub Actions (same as dev deploy).
+# This workflow deploys the FRONTEND only. It never applies database
+# migrations; those are a deliberate, separate step (docs/14_DEPLOYMENT_
+# OPERATIONS.MD, "Database migrations").
+#
+# Requirements: Settings -> Pages -> Source = "GitHub Actions". Nothing else.
 # =============================================================================
 
 name: Deploy production
 
 on:
-  workflow_dispatch:
-    inputs:
-      confirm_prod:
-        description: 'Type "deploy-production" to confirm'
-        required: true
-        default: ""
+  push:
+    branches: [main]
+  workflow_dispatch: # authorised manual RE-run of main; deploys nothing else
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
+# One production deploy at a time; a newer push waits its turn (never cancels a
+# deploy mid-flight, so Pages is never left half-published).
 concurrency:
   group: production-pages
   cancel-in-progress: false
 
 jobs:
-  guard:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment: production # requires approval from configured reviewers
-    outputs:
-      backup_artifact: ${{ steps.backup.outputs.artifact }}
-    steps:
-      - name: Confirm typed gate
-        env:
-          CONFIRM: ${{ github.event.inputs.confirm_prod }}
-        run: |
-          if [ "$CONFIRM" != "deploy-production" ]; then
-            echo "Refusing to deploy: confirmation phrase not typed exactly."
-            exit 1
-          fi
-
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.4"
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Typecheck + tests must be green before a prod deploy
-        run: |
-          bun run typecheck
-          bun run test
-
-      # pg_dump refuses to dump a server newer than itself; Supabase runs
-      # PostgreSQL 17, while ubuntu-latest ships an older client by default.
-      - name: Install PostgreSQL 17 client
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-common
-          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
-          sudo apt-get install -y -qq postgresql-client-17
-          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
-
-      # Backup BEFORE build/deploy: doc 14 rule — never deploy without a
-      # fresh recovery point. The backup script uploads nothing to third
-      # parties; the dump is stored as a build artifact and (optionally)
-      # synced to object storage by the operator.
-      - name: Backup production database
-        id: backup
-        env:
-          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
-          SUPABASE_DB_HOST: ${{ vars.SUPABASE_DB_HOST }}
-          SUPABASE_DB_USER: ${{ vars.SUPABASE_DB_USER }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: |
-          OUT="$(bash scripts/backup-supabase.sh ./backups)"
-          echo "artifact=$OUT" >> "$GITHUB_OUTPUT"
-
-      - name: Encrypt backup (never upload plaintext — this repo may be public)
-        env:
-          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
-        run: |
-          set -euo pipefail
-          test -n "$BACKUP_PASSPHRASE" || { echo "::error::BACKUP_PASSPHRASE secret is required"; exit 1; }
-          mkdir -p backups-enc
-          for f in backups/*; do
-            printf %s "$BACKUP_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
-              --passphrase-fd 0 --symmetric --cipher-algo AES256 \
-              -o "backups-enc/$(basename "$f").gpg" "$f"
-          done
-          ls -l backups-enc
-
-      - name: Upload ENCRYPTED backup artifact (retain 90 days)
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.backup.outputs.artifact }}
-          path: backups-enc/
-          retention-days: 90
-          if-no-files-found: error
+  ci:
+    name: CI gate
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
 
   build:
-    needs: guard
+    name: Production build
+    needs: ci
+    # Manual runs from any other branch validate but never publish.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -164,6 +89,12 @@ jobs:
           grep -q "src=\"${REPO_BASE}assets/" dist/index.html || {
             echo "FAIL: dist/index.html does not reference ${REPO_BASE}assets/"; exit 1;
           }
+          if grep -q '/src/main.tsx' dist/index.html; then
+            echo "FAIL: raw dev entry in built index.html"; exit 1
+          fi
+          grep -q "Content-Security-Policy" dist/index.html || {
+            echo "FAIL: production CSP meta tag missing from dist/index.html"; exit 1;
+          }
 
       - name: SPA fallback + nojekyll (Pages must not Jekyll-process the bundle)
         run: |
@@ -175,13 +106,16 @@ jobs:
         with:
           path: dist
 
-  # actions/deploy-pages authenticates against the "github-pages" environment;
-  # running it inside the "production" environment fails the OIDC check. The
-  # production approval gate already happened in the guard job above.
+  # actions/deploy-pages authenticates against the "github-pages" environment.
   deploy:
+    name: Deploy to GitHub Pages
     needs: build
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
