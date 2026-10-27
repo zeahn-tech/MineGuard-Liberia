@@ -96,6 +96,10 @@ import {
   type Site,
   type SiteBoundary,
   type UserProfile,
+  type Company,
+  type CompanyInvitation,
+  type CompanyStatus,
+  type PendingInvitation,
   ROLES,
 } from "./types";
 
@@ -2004,8 +2008,165 @@ async function deriveNotifications(
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// COMPANIES & INVITATIONS (migration 0025, Phase B). Every privileged step is a
+// narrow server-side RPC / edge function; the client never sends a role, a
+// company binding or a status directly.
+// ---------------------------------------------------------------------------
+const INVITE_ERRORS: Record<string, string> = {
+  FORBIDDEN: "You do not have permission to do that.",
+  INVALID_EMAIL: "Enter a valid email address.",
+  INVALID_NAME: "Enter a company name of 2–200 characters.",
+  DUPLICATE_ORGANIZATION: "A company with this name already exists.",
+  ORG_NOT_APPROVED: "Only an approved company can receive an administrator.",
+  INELIGIBLE_ACCOUNT: "Government accounts cannot be company administrators.",
+  ALREADY_MEMBER_OTHER_ORG: "This account already belongs to another company.",
+  INVITATION_NOT_PENDING: "This invitation is no longer pending.",
+  INVITATION_EXPIRED: "This invitation has expired. Ask for a new one.",
+  INVITATION_INVALID: "This invitation is not valid for your account.",
+  EMAIL_NOT_VERIFIED: "Verify your email address before accepting.",
+  RESEND_TOO_SOON: "Wait a minute before resending.",
+  SEND_LIMIT: "Too many sends. Revoke this invitation and create a new one.",
+  REASON_REQUIRED: "Record a reason (at least 5 characters).",
+  EMAIL_FAILED: "The invitation was saved but the email could not be sent. Try resending.",
+  NOT_CONFIGURED: "Invitation email is not configured yet. Contact the platform operator.",
+};
+
+/** Maps a PostgREST / edge-function failure to a short, safe message. */
+function friendlyInviteError(raw: string): Error {
+  const code = /([A-Z][A-Z_]{3,})/.exec(raw)?.[1] ?? "";
+  return new Error(INVITE_ERRORS[code] ?? "The request could not be completed. Try again.");
+}
+
+async function inviteFunction(body: Record<string, unknown>): Promise<{ invitationId: string; delivery: string }> {
+  const { data, error } = await supabase.functions.invoke("company-admin-invite", { body });
+  if (error) {
+    let code = "";
+    try {
+      const ctx = (error as { context?: Response }).context;
+      const parsed = ctx ? ((await ctx.json()) as { error?: string }) : null;
+      code = parsed?.error ?? "";
+    } catch {
+      /* not JSON */
+    }
+    throw friendlyInviteError(code || error.message || "");
+  }
+  return data as { invitationId: string; delivery: string };
+}
+
 export const api = {
   // ----------------------------------------------------------------- users
+  companies: {
+    /** Ministry view: every company with its status, invitations and members. */
+    list: () =>
+      live<Company[]>(
+        async () => {
+          await requireAdminUser(true);
+          const [orgs, invs, members, profiles, sites] = await Promise.all([
+            allRows<AnyRow>("organizations"),
+            allRows<AnyRow>("organization_invitations"),
+            allRows<AnyRow>("organization_members"),
+            allRows<AnyRow>("profiles"),
+            allRows<AnyRow>("sites"),
+          ]);
+          const byId = new Map(profiles.map((p) => [p.id as string, p]));
+          return orgs
+            .map((o) => ({
+              id: o.id as string,
+              name: o.name as string,
+              status: ((o.status as CompanyStatus) ?? "approved") as CompanyStatus,
+              statusReason: (o.status_reason as string) ?? undefined,
+              siteCount: sites.filter((s) => s.organization_id === o.id).length,
+              invitations: invs
+                .filter((i) => i.organization_id === o.id)
+                .map((i) => ({
+                  id: i.id as string,
+                  organizationId: o.id as string,
+                  email: i.email as string,
+                  orgRole: i.org_role as string,
+                  status: i.status as CompanyInvitation["status"],
+                  expiresAt: Date.parse(i.expires_at as string),
+                  lastSentAt: i.last_sent_at ? Date.parse(i.last_sent_at as string) : undefined,
+                  sendCount: Number(i.send_count ?? 0),
+                  createdAt: Date.parse(i.created_at as string),
+                }))
+                .sort((a, b) => b.createdAt - a.createdAt),
+              members: members
+                .filter((m) => m.organization_id === o.id && m.status !== "revoked")
+                .map((m) => ({
+                  userId: m.user_id as string,
+                  email: (byId.get(m.user_id as string)?.email as string) ?? null,
+                  name: (byId.get(m.user_id as string)?.name as string) ?? null,
+                  orgRole: m.org_role as string,
+                  status: m.status as string,
+                })),
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+        },
+        ["organizations", "organization_invitations", "organization_members", "sites"],
+      ),
+
+    register: async (args: { name: string }): Promise<string> => {
+      await requireAdminUser();
+      const { data, error } = await supabase.rpc("mg_register_company", { p_name: args.name });
+      if (error) throw friendlyInviteError(error.message);
+      return data as string;
+    },
+
+    /** Create (or reuse) the company-administrator invitation and send the email. */
+    inviteAdmin: async (args: { organizationId: string; email: string }) => {
+      await requireAdminUser();
+      return inviteFunction({ organizationId: args.organizationId, email: args.email });
+    },
+
+    resendInvitation: async (args: { invitationId: string }) => {
+      await requireAdminUser();
+      return inviteFunction({ invitationId: args.invitationId });
+    },
+
+    revokeInvitation: async (args: { invitationId: string }) => {
+      await requireAdminUser();
+      const { error } = await supabase.rpc("mg_revoke_invitation", { p_id: args.invitationId });
+      if (error) throw friendlyInviteError(error.message);
+    },
+
+    setStatus: async (args: { organizationId: string; status: CompanyStatus; reason?: string }) => {
+      await requireAdminUser();
+      const { error } = await supabase.rpc("mg_set_company_status", {
+        p_org: args.organizationId,
+        p_status: args.status,
+        p_reason: args.reason ?? null,
+      });
+      if (error) throw friendlyInviteError(error.message);
+    },
+
+    /** Invitations addressed to the signed-in person's verified email. */
+    myInvitations: () =>
+      live<PendingInvitation[]>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase.rpc("mg_my_pending_invitations");
+          if (error) throw backendError(error);
+          return ((data ?? []) as AnyRow[]).map((r) => ({
+            id: r.id as string,
+            organizationId: r.organization_id as string,
+            organizationName: r.organization_name as string,
+            orgRole: r.org_role as string,
+            expiresAt: Date.parse(r.expires_at as string),
+          }));
+        },
+        ["organization_invitations"],
+      ),
+
+    acceptInvitation: async (args: { invitationId: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_accept_invitation", { p_id: args.invitationId });
+      if (error) throw friendlyInviteError(error.message);
+      // Role + company binding changed server-side: re-derive every auth-bound subscription.
+      bumpProfileVersion();
+    },
+  },
+
   users: {
     currentUser: () =>
       liveDoc<UserProfile>(() => {
@@ -3997,7 +4158,11 @@ export const api = {
           role: args.role,
           scope: args.scope ?? target.scope ?? null,
           county: args.county ?? target.county ?? null,
-          operator_name: args.operatorName ?? target.operatorName ?? null,
+          // A role-less target's operator_name is an unreviewed claim (legacy
+          // self-service form, pre-0024): never inherit it. Only an explicit
+          // administrator choice, or an already-assigned binding, carries over.
+          operator_name:
+            args.operatorName ?? (target.role ? (target.operatorName ?? null) : null),
           profile_complete: true,
         })
         .eq("id", args.userId);

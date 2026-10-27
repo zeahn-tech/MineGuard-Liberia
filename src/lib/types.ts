@@ -41,6 +41,49 @@ export interface UserProfile {
   createdAt: number;
 }
 
+/** Company lifecycle (migration 0025). */
+export type CompanyStatus = "pending_review" | "approved" | "suspended" | "deactivated";
+
+export interface CompanyInvitation {
+  id: string;
+  organizationId: string;
+  email: string;
+  orgRole: string;
+  /** pending | accepted | revoked | expired — `expired` is also derived from expiresAt. */
+  status: "pending" | "accepted" | "revoked" | "expired";
+  expiresAt: number;
+  lastSentAt?: number;
+  sendCount: number;
+  createdAt: number;
+}
+
+export interface CompanyAdminMember {
+  userId: string;
+  email: string | null;
+  name: string | null;
+  orgRole: string;
+  status: string;
+}
+
+export interface Company {
+  id: string;
+  name: string;
+  status: CompanyStatus;
+  statusReason?: string;
+  siteCount: number;
+  invitations: CompanyInvitation[];
+  members: CompanyAdminMember[];
+}
+
+/** An invitation addressed to the signed-in person's own verified email. */
+export interface PendingInvitation {
+  id: string;
+  organizationId: string;
+  organizationName: string;
+  orgRole: string;
+  expiresAt: number;
+}
+
 export interface Site {
   _id: string;
   code: string;
