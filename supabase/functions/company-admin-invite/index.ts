@@ -5,7 +5,8 @@
 // nomination. Deploy with JWT verification ON (default):
 //     supabase functions deploy company-admin-invite
 // Secrets (never in the repo or the browser):
-//     INVITE_REDIRECT_URL   exact landing URL, e.g. https://app.example.org/invitation
+//     INVITE_REDIRECT_URL   the SITE ROOT (the app uses a hash router, so the invite
+//                           link cannot carry a path), e.g. https://<user>.github.io/<repo>/
 //     INVITE_ALLOWED_ORIGIN exact site origin for CORS (unset = no browser origin)
 // SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY are platform-provided.
 // The service-role client is used ONLY for the mail call, and only after the

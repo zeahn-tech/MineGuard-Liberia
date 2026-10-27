@@ -11,10 +11,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { Building2, FileCheck2, Loader2, MapPin } from "lucide-react";
+import { useState } from "react";
 import { Link, useParams } from "react-router";
+import { toast } from "sonner";
 
 export function OperatorSites() {
   const sitesQ = useQuery(api.sites.list);
@@ -65,6 +69,83 @@ export function OperatorSites() {
         ))}
       </div>
     </div>
+  );
+}
+
+
+const SITE_ROLE_LABEL: Record<string, string> = {
+  site_manager: "Site manager",
+  safety_officer: "Safety officer",
+  worker: "Worker",
+};
+
+/**
+ * SITE TEAM (Phase D). Shown only to those the backend lets manage this site's
+ * people: company administrators and site managers assigned to THIS site. The
+ * server re-checks every call; hiding this card is only a convenience.
+ */
+function SiteTeam({ siteId }: { siteId: string }) {
+  const me = useQuery(api.workforce.myMembership);
+  const eligible = me?.memberStatus === "active" && (me.orgRole === "company_admin" || me.orgRole === "site_manager");
+  const roster = useQuery(api.workforce.siteRoster, eligible ? { siteId } : "skip");
+  const [busy, setBusy] = useState<string | null>(null);
+  if (!eligible || roster === undefined) return null;
+
+  async function toggle(memberId: string, assigned: boolean) {
+    setBusy(memberId);
+    try {
+      if (assigned) await api.workforce.unassignSite({ memberId, siteId });
+      else await api.workforce.assignSite({ memberId, siteId });
+      toast.success(assigned ? "Removed from this site." : "Assigned to this site.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not update the assignment.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const canTouch = (role: string) => me.orgRole === "company_admin" || role === "worker" || role === "safety_officer";
+
+  return (
+    <Card className="paper rounded-none border-border shadow-none">
+      <CardHeader className="pb-2">
+        <p className="kicker">Personnel</p>
+        <CardTitle className="display text-lg">Site team</CardTitle>
+        <CardDescription>
+          People assigned here can work on this site. Workers with no site assignment keep company-wide access;
+          a site manager sees only the sites they are assigned to.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {roster.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No company members to assign yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {roster.map((m) => (
+              <li key={m.memberId} className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border p-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium break-words">{m.name ?? "Unnamed"}</p>
+                  <p className="break-all text-xs text-muted-foreground">
+                    {m.email} · {SITE_ROLE_LABEL[m.orgRole] ?? m.orgRole}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {m.assigned && <Badge variant="secondary">Assigned</Badge>}
+                  {canTouch(m.orgRole) && (
+                    <Button size="sm" variant={m.assigned ? "ghost" : "outline"} disabled={busy !== null}
+                      onClick={() => void toggle(m.memberId, m.assigned)}
+                      aria-label={`${m.assigned ? "Remove" : "Assign"} ${m.email ?? "member"} ${m.assigned ? "from" : "to"} this site`}>
+                      {busy === m.memberId && <Loader2 className="size-3.5 animate-spin" />}
+                      {m.assigned ? "Remove" : "Assign"}
+                    </Button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -152,6 +233,8 @@ export function OperatorSiteDetail() {
               </Card>
             </Link>
           </div>
+
+          <SiteTeam siteId={siteQ._id} />
         </>
       )}
     </div>

@@ -23,6 +23,7 @@ beforeAll(async () => {
     "0024_self_service_tenant_lockdown.sql",
     "0025_company_status_membership_invitations.sql",
     "0026_company_workforce.sql",
+    "0027_site_scoped_access.sql",
   ]) {
     await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", m), "utf8"));
   }

@@ -148,10 +148,10 @@ Verified by `tests/evidence-url.test.ts` and live (docs/11).
    an auth hook (PROPOSED, requires owner confirmation).
 3. Encryption at rest is inherited from the Supabase platform; field-level
    encryption for sensitive attachments is planned.
-4. Role assignment currently requires the target user to have signed in once
-   (`provision_user_by_email` matches on the profiles row); a full
-   account-lifecycle workflow (invite emails, admin-created accounts) requires
-   organizational confirmation.
+4. Role assignment for GOVERNMENT roles still requires the target user to have
+   signed in once (`provision_user_by_email` matches on the profiles row).
+   Company accounts now have an invitation / membership-request lifecycle —
+   see [`18_MULTI_COMPANY_ADMINISTRATION.MD`](18_MULTI_COMPANY_ADMINISTRATION.MD).
 5. County/operator LIST scoping is enforced by RLS per document, not merely the
    data layer: every site-scoped record carries a denormalized `county` +
    `operator_name` stamped by triggers at write time (and refreshed by
