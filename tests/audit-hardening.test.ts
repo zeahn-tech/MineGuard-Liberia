@@ -4,6 +4,8 @@
 // Each test asserts a SECURITY PROPERTY that fails if the fix is removed.
 // =============================================================================
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { getFixture, withRole, asUser, IDS } from "./helpers/pglite-db";
 import { sanitizeEvidenceFileName } from "../src/lib/backend";
 
@@ -194,5 +196,17 @@ describe("F8 — evidence filename sanitiser", () => {
     expect(sanitizeEvidenceFileName("...")).toBe("file");
     expect(sanitizeEvidenceFileName("photo 1 (2).jpg")).toBe("photo 1 (2).jpg");
     expect(sanitizeEvidenceFileName("a".repeat(500) + ".jpg").length).toBeLessThanOrEqual(120);
+  });
+});
+
+describe("release order: frontend works before AND after migration 0023", () => {
+  const src = readFileSync(join(import.meta.dir, "..", "src", "lib", "backend.ts"), "utf8");
+  test("submit still sends a client code (needed by un-migrated databases)", () => {
+    expect(src).toContain("p_tracking_code: makeTrackingCode()");
+  });
+  test("tracking falls back to the pre-0023 lookup only when the RPC is absent", () => {
+    expect(src).toContain('error.code === "PGRST202"');
+    expect(src).toContain("could not find the function");
+    expect(src).toContain('.from("report_tracking")');
   });
 });

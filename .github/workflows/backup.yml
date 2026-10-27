@@ -41,10 +41,33 @@ concurrency:
   group: nightly-backup
   cancel-in-progress: false
 
+# OPTIONAL. This workflow is independent of deployment: nothing in
+# deploy-production.yml depends on it, and its failure cannot block or cancel
+# a release. It stays dormant until SUPABASE_PROJECT_REF *and* BACKUP_PASSPHRASE
+# are configured (the dump is encrypted before upload because this repository
+# may be public).
 jobs:
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.chk.outputs.enabled }}
+    steps:
+      - id: chk
+        env:
+          PASS: ${{ secrets.BACKUP_PASSPHRASE }}
+          REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          if [ -n "$PASS" ] && [ -n "$REF" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Optional backups not configured (needs SUPABASE_PROJECT_REF variable and BACKUP_PASSPHRASE secret) - skipping."
+          fi
+
   backup:
-    # Not configured yet -> skip cleanly rather than fail every night.
-    if: ${{ vars.SUPABASE_PROJECT_REF != '' }}
+    needs: config
+    # Not configured -> skip cleanly rather than fail every night.
+    if: ${{ needs.config.outputs.enabled == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
