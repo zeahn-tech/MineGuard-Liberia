@@ -93,6 +93,8 @@ function CompanyCard({ company }: { company: Company }) {
 
   const admins = company.members.filter((m) => m.orgRole === "company_admin" && m.status === "active");
   const approved = company.status === "approved";
+  const activeCount = company.members.filter((m) => m.status === "active").length;
+  const pendingCount = company.members.filter((m) => m.status === "pending").length;
 
   async function run<T>(fn: () => Promise<T>, ok: string) {
     setBusy(true);
@@ -128,6 +130,8 @@ function CompanyCard({ company }: { company: Company }) {
         </div>
         <p className="text-xs text-muted-foreground">
           {company.siteCount} registered site{company.siteCount === 1 ? "" : "s"}
+          {` · ${activeCount} active member${activeCount === 1 ? "" : "s"}`}
+          {pendingCount > 0 ? ` · ${pendingCount} awaiting approval` : ""}
           {company.statusReason ? ` · ${company.statusReason}` : ""}
         </p>
       </CardHeader>

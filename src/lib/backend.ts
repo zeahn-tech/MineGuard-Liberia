@@ -2107,7 +2107,7 @@ export const api = {
                 }))
                 .sort((a, b) => b.createdAt - a.createdAt),
               members: members
-                .filter((m) => m.organization_id === o.id && m.status !== "revoked")
+                .filter((m) => m.organization_id === o.id && (m.status === "active" || m.status === "pending"))
                 .map((m) => ({
                   userId: m.user_id as string,
                   email: (byId.get(m.user_id as string)?.email as string) ?? null,
@@ -2190,6 +2190,11 @@ export const api = {
         async () => {
           await requireAuthed(true);
           const { data, error } = await supabase.rpc("mg_my_membership");
+          // Release order: the frontend may be live before migration 0026 is applied.
+          // Until then nobody has a company-administration membership: not an error.
+          if (error && (error.code === "PGRST202" || /could not find the function/i.test(error.message ?? ""))) {
+            return null;
+          }
           if (error) throw backendError(error);
           const r = ((data ?? []) as AnyRow[])[0];
           return r

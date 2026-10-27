@@ -45,6 +45,20 @@ select migration, applied
        to_regclass('public.notifications') is not null
        and exists (select 1 from fns where proname = 'mg_notifications_sync')
        and exists (select 1 from fns where proname = 'mg_summary_report')),
+    ('0024 self-service tenant lockdown',
+       exists (select 1 from pg_trigger where tgname = 'profiles_self_tenant_guard' and not tgisinternal)),
+    ('0025 company status, membership, invitations',
+       to_regclass('public.organization_invitations') is not null
+       and to_regclass('public.organization_members') is not null
+       and exists (select 1 from fns where proname = 'mg_accept_invitation')),
+    ('0026 company workforce administration',
+       exists (select 1 from fns where proname = 'mg_can_manage_company')
+       and exists (select 1 from fns where proname = 'mg_decide_membership_request')),
+    ('0027 site-scoped company access',
+       exists (select 1 from fns where proname = 'mg_operator_site_ok')
+       and exists (
+         select 1 from information_schema.columns
+          where table_schema = 'public' and table_name = 'site_assignments' and column_name = 'revoked_at')),
     ('0018 boundaries published to Realtime',
        exists (
          select 1 from pg_publication_tables

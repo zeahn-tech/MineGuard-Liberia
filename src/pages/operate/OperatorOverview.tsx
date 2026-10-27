@@ -22,7 +22,9 @@ import {
   ClipboardList,
   FileCheck2,
   Loader2,
+  Users,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router";
 import { useNow } from "@/hooks/use-now";
 
@@ -34,6 +36,9 @@ export default function OperatorOverview() {
   const sitesQ = useQuery(api.sites.list);
   const obligationsQ = useQuery(api.inspections.listMyCorrectiveActions);
   const findingsQ = useQuery(api.inspections.listMyFindings);
+  const me = useQuery(api.workforce.myMembership);
+  const isCompanyAdmin = me?.orgRole === "company_admin" && me.memberStatus === "active" && me.companyStatus === "approved";
+  const teamQ = useQuery(api.workforce.list, isCompanyAdmin && me ? { organizationId: me.organizationId } : "skip");
 
   const obligations = obligationsQ ?? [];
   const findings = findingsQ ?? [];
@@ -58,6 +63,28 @@ export default function OperatorOverview() {
           records only — isolation is enforced by the server, not by this page.
         </p>
       </div>
+
+      {isCompanyAdmin && teamQ && (
+        <Link to="/operate/team" className="block">
+          <Card className="paper rounded-none border-border shadow-none transition-colors hover:bg-muted/30">
+            <CardContent className="flex flex-wrap items-center gap-3 pt-4">
+              <Users className="size-5 text-muted-foreground" strokeWidth={1.5} />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">Team</p>
+                <p className="text-xs text-muted-foreground">
+                  {teamQ.members.filter((m) => m.status === "active").length} active members ·{" "}
+                  {teamQ.invitations.filter((i) => i.status === "pending" && i.expiresAt > now).length} invitations pending
+                </p>
+              </div>
+              {teamQ.members.some((m) => m.status === "pending") && (
+                <Badge variant="secondary">
+                  {teamQ.members.filter((m) => m.status === "pending").length} awaiting approval
+                </Badge>
+              )}
+            </CardContent>
+          </Card>
+        </Link>
+      )}
 
       {/* Counters */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
