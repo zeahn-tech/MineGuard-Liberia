@@ -99,6 +99,7 @@ import {
   type Company,
   type CompanySearchResult,
   type MyMembership,
+  type SiteRosterMember,
   type WorkforceMember,
   type CompanyInvitation,
   type CompanyStatus,
@@ -2033,6 +2034,7 @@ const INVITE_ERRORS: Record<string, string> = {
   REASON_REQUIRED: "Record a reason (at least 5 characters).",
   EMAIL_FAILED: "The invitation was saved but the email could not be sent. Try resending.",
   NOT_CONFIGURED: "Invitation email is not configured yet. Contact the platform operator.",
+  INVALID_TARGET: "That person already reaches every site.",
   INVALID_ROLE: "That role cannot be assigned here. Company administrators are appointed by the Ministry.",
   MEMBERSHIP_NOT_PENDING: "This request has already been decided.",
   MEMBERSHIP_NOT_ACTIVE: "This person is no longer an active member.",
@@ -2274,6 +2276,35 @@ export const api = {
     revokeMember: async (args: { memberId: string }) => {
       await requireAuthed();
       const { error } = await supabase.rpc("mg_revoke_member", { p_member_id: args.memberId });
+      if (error) throw friendlyInviteError(error.message);
+    },
+
+    /** A site's people (company administrator, or a site manager assigned to that site). */
+    siteRoster: (args: { siteId: string }) =>
+      live<SiteRosterMember[]>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase.rpc("mg_site_roster", { p_site_id: args.siteId });
+          if (error) throw backendError(error);
+          return ((data ?? []) as AnyRow[]).map((r) => ({
+            memberId: r.member_id as string,
+            userId: r.user_id as string,
+            email: (r.email as string) ?? null,
+            name: (r.name as string) ?? null,
+            orgRole: r.org_role as string,
+            assigned: Boolean(r.assigned),
+          }));
+        },
+        ["site_assignments", "organization_members"],
+      ),
+    assignSite: async (args: { memberId: string; siteId: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_assign_member_site", { p_member_id: args.memberId, p_site_id: args.siteId });
+      if (error) throw friendlyInviteError(error.message);
+    },
+    unassignSite: async (args: { memberId: string; siteId: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_unassign_member_site", { p_member_id: args.memberId, p_site_id: args.siteId });
       if (error) throw friendlyInviteError(error.message);
     },
 

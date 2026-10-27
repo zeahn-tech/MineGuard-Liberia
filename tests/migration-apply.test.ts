@@ -35,6 +35,7 @@ afterEach(async () => {
     "0024_self_service_tenant_lockdown.sql",
     "0025_company_status_membership_invitations.sql",
     "0026_company_workforce.sql",
+    "0027_site_scoped_access.sql",
   ]) {
     await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
   }
@@ -706,7 +707,8 @@ describe("0010 organizations, scopes & permissions (SEC-5/SITE-1)", () => {
       ["admin_areas", 3],
       ["organizations", 3],
       ["permissions", 1],
-      ["site_assignments", 3],
+      // 0027 adds one extra read policy (company managers read their company's assignments).
+      ["site_assignments", 4],
     ]);
   });
 });
@@ -750,6 +752,8 @@ describe("GAP-0: function execute surface (0011)", () => {
     "evidence_url(uuid, integer)",
     "mg_accept_invitation(uuid)",
     "mg_any_profile_role()",
+    // 0027 (Phase D): site-scoped personnel
+    "mg_assign_member_site(uuid, uuid)",
     "mg_can_access_site(uuid)",
     "mg_can_access_site_row(uuid, text, text, text, uuid)",
     // 0026 (Phase C): company workforce administration (each self-authorizes)
@@ -791,11 +795,13 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_search_companies(text)",
     "mg_set_company_status(uuid, text, text)",
     "mg_set_member_role(uuid, text)",
+    "mg_site_roster(uuid)",
     // 0021 (Session 9): summary report + trend source/geo/series (invoker)
     "mg_summary_report(date, date)",
     "mg_trend_events(text)",
     "mg_trend_geo(text, date, date)",
     "mg_trend_series(text, text, date, date)",
+    "mg_unassign_member_site(uuid, uuid)",
     // 0015 (GIS): pure definer validator the boundary CHECK constraints call.
     "mg_valid_geojson_polygon(jsonb)",
     "provision_user_by_email(text, text, text, text, text)",

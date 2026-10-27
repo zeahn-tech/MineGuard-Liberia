@@ -96,6 +96,16 @@ export interface MyMembership {
   companyStatus: CompanyStatus;
 }
 
+/** One person in a site's roster (migration 0027). `assigned` = actively assigned to this site. */
+export interface SiteRosterMember {
+  memberId: string;
+  userId: string;
+  email: string | null;
+  name: string | null;
+  orgRole: string;
+  assigned: boolean;
+}
+
 export interface CompanySearchResult {
   id: string;
   name: string;
