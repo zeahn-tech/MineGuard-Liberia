@@ -30,12 +30,14 @@ beforeAll(() => getFixture());
 // the other files that run afterwards — always see the real end state.
 afterEach(async () => {
   const db = await getDb();
-  await db.exec(
-    readFileSync(
-      join(ROOT, "supabase", "migrations", "0023_security_audit_hardening.sql"),
-      "utf8",
-    ),
-  );
+  for (const m of [
+    "0023_security_audit_hardening.sql",
+    "0024_self_service_tenant_lockdown.sql",
+    "0025_company_status_membership_invitations.sql",
+    "0026_company_workforce.sql",
+  ]) {
+    await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
+  }
 });
 
 const ROOT = join(import.meta.dir, "..");
@@ -75,7 +77,8 @@ describe("migrations apply to a clean database", () => {
       // (organizations, admin_areas, site_assignments, permissions) + 0015's
       // two GIS boundary tables (admin_boundaries, site_boundaries) + 0019's
       // risk_config_versions + 0020's ai_request_log + 0021's notifications.
-      expect(Number(scalar(tables))).toBe(24);
+      // …+ 0025's organization_members and organization_invitations.
+      expect(Number(scalar(tables))).toBe(26);
 
       const rls = await one(
         run,
@@ -84,7 +87,8 @@ describe("migrations apply to a clean database", () => {
       );
       // every table above has RLS, including 0015's two boundary tables and
       // 0019's risk_config_versions + 0020's ai_request_log + 0021's notifications
-      expect(Number(scalar(rls))).toBe(24);
+      // …and 0025's two RPC-only tables.
+      expect(Number(scalar(rls))).toBe(26);
 
       const guards = await one(
         run,
@@ -469,12 +473,13 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
            where tgname like '%\\_audit' and not tgisinternal) as audit`,
     );
     // 10 domain tables + organizations (0010's integrity stamps).
-    expect(Number(trig.rows[0]?.touch)).toBe(11);
+    // 0025 adds organization_members + organization_invitations.
+    expect(Number(trig.rows[0]?.touch)).toBe(13);
     // …and organizations + site_assignments join the audit trail: exactly one
     // row per mutation, one trigger per table. 0015 adds the two boundary
     // tables (admin_boundaries, site_boundaries) to the trail; 0019 adds
     // risk_config_versions (one audit row per published version).
-    expect(Number(trig.rows[0]?.audit)).toBe(15);
+    expect(Number(trig.rows[0]?.audit)).toBe(17);
     // "audit append" (0001) stays gone; only the staff-read policy remains.
     const pol = await db.query<{ n: string }>(
       `select count(*)::text as n from pg_policies
@@ -537,7 +542,10 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
     expect(rows.length).toBeGreaterThanOrEqual(15);
     for (const r of rows) {
       expect(r.a_del, `authenticated must not hold DELETE on ${r.t}`).toBe(false);
-      expect(r.a_ins, `authenticated INSERT on ${r.t}`).toBe(r.t !== "audit_log");
+      // audit_log (0009) and 0025's RPC-only membership/invitation tables are
+      // read-only for clients: every write goes through a definer RPC.
+      const READ_ONLY = new Set(["audit_log", "organization_members", "organization_invitations"]);
+      expect(r.a_ins, `authenticated INSERT on ${r.t}`).toBe(!READ_ONLY.has(r.t));
       expect(r.n_ins, `anon must not hold INSERT on ${r.t}`).toBe(false);
       // 0023 (audit F4): report_tracking is no longer anon-readable.
       const anonReadable = r.t === "meta";
@@ -740,23 +748,39 @@ describe("GAP-0: function execute surface (0011)", () => {
     "complete_staff_profile(text, text, text, text, text)",
     "evidence_for_parent(text, uuid)",
     "evidence_url(uuid, integer)",
+    "mg_accept_invitation(uuid)",
     "mg_any_profile_role()",
     "mg_can_access_site(uuid)",
     "mg_can_access_site_row(uuid, text, text, text, uuid)",
+    // 0026 (Phase C): company workforce administration (each self-authorizes)
+    "mg_can_manage_company(uuid)",
+    "mg_cancel_membership_request()",
     "mg_command_center_stats()",
+    "mg_company_workforce(uuid)",
     // 0014's five scale surfaces — SECURITY INVOKER row sources 0011 must
     // keep granted when it re-runs (see 0011 header, bullet E).
     "mg_compliance_page(timestamp with time zone, uuid, integer)",
+    // 0025 (Phase B): company lifecycle + invitations (each self-authorizes)
+    "mg_create_company_admin_invitation(uuid, text)",
+    "mg_create_org_invitation(uuid, text, text)",
+    "mg_decide_membership_request(uuid, boolean, text)",
     "mg_has_permission(text)",
     "mg_incidents_page(timestamp with time zone, uuid, integer)",
     "mg_inspections_page(timestamp with time zone, uuid, integer)",
     "mg_is_admin()",
     "mg_is_reviewer()",
     "mg_is_staff()",
+    "mg_my_membership()",
+    "mg_my_pending_invitations()",
     // 0021 (Session 9): notification sync
     "mg_notifications_sync(jsonb)",
     "mg_operator_name()",
+    "mg_prepare_invitation_send(uuid)",
     "mg_profile()",
+    "mg_register_company(text)",
+    "mg_request_membership(uuid)",
+    "mg_revoke_invitation(uuid)",
+    "mg_revoke_member(uuid)",
     // 0019: risk config reader/builder + the (version, as_of) readers that
     // replaced the 0014 zero-config signatures.
     "mg_risk_build(jsonb, jsonb, integer)",
@@ -764,6 +788,9 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_risk_explanation(uuid, integer, timestamp with time zone)",
     "mg_risk_scores(integer, timestamp with time zone)",
     "mg_role()",
+    "mg_search_companies(text)",
+    "mg_set_company_status(uuid, text, text)",
+    "mg_set_member_role(uuid, text)",
     // 0021 (Session 9): summary report + trend source/geo/series (invoker)
     "mg_summary_report(date, date)",
     "mg_trend_events(text)",
