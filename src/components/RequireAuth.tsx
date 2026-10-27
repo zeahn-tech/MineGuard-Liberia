@@ -10,6 +10,8 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
+import { api } from "@/lib/backend";
+import { useQuery } from "@/lib/backend-react";
 import { Link, Navigate, useLocation } from "react-router";
 
 /** Full-screen gate while auth resolves. BOUNDED: if the profile query
@@ -130,27 +132,37 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }
 
   if (!user?.role) {
-    // A signed-in account with no assigned role has no portal surface at all.
-    return (
-      <main className="flex min-h-dvh items-center justify-center bg-background p-6">
-        <div className="max-w-md text-center">
-          <p className="display text-lg">No portal role assigned</p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            This account is signed in but has not been assigned a platform role.
-            The program office assigns roles; until then there is no surface to
-            show.
-          </p>
-          <p className="mt-4 text-sm">
-            <Link className="underline" to="/invitation">I have an invitation</Link>
-            {" · "}
-            <Link className="underline" to="/join">Request to join a company</Link>
-          </p>
-        </div>
-      </main>
-    );
+    // No assigned role: the only surface is accepting an invitation / requesting to join.
+    return <NoRoleScreen />;
   }
 
   return children;
+}
+
+/** An invite email lands on the site root (the app uses a hash router, so the
+ *  email cannot deep-link). If the signed-in person has an invitation waiting,
+ *  send them straight to it; otherwise show the notice with the next steps. */
+function NoRoleScreen() {
+  const invitations = useQuery(api.companies.myInvitations);
+  if (invitations === undefined) return <AuthLoading />;
+  if (invitations.length > 0) return <Navigate to="/invitation" replace />;
+  return (
+    <main className="flex min-h-dvh items-center justify-center bg-background p-6">
+      <div className="max-w-md text-center">
+        <p className="display text-lg">No portal role assigned</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          This account is signed in but has not been assigned a platform role.
+          The program office assigns roles; until then there is no surface to
+          show.
+        </p>
+        <p className="mt-4 text-sm">
+          <Link className="underline" to="/invitation">I have an invitation</Link>
+          {" · "}
+          <Link className="underline" to="/join">Request to join a company</Link>
+        </p>
+      </div>
+    </main>
+  );
 }
 
 /** STAFF SECTION GATE — admin / supervisor / inspector only. An operator or

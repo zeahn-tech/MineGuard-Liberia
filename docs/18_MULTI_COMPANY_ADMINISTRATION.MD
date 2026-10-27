@@ -73,7 +73,8 @@ migrations. Therefore:
 1. Staging first: apply `0024 → 0025 → 0026 → 0027` (idempotent), run
    `supabase/checks/migration_state.sql`.
 2. Deploy the `company-admin-invite` function; secrets `INVITE_REDIRECT_URL`
-   (the `/invitation` URL) and `INVITE_ALLOWED_ORIGIN`; add the URL to the Auth
+   (the site ROOT — the app uses a hash router, so the email link cannot carry a
+   path; a signed-in invitee with a waiting invitation is routed to `/invitation` automatically) and `INVITE_ALLOWED_ORIGIN`; add the URL to the Auth
    redirect allow-list; configure SMTP + invite template; keep "confirm email" ON.
 3. Only then merge to `main`. (The frontend tolerates a database that is behind:
    the layout treats a missing membership RPC as "no membership".)

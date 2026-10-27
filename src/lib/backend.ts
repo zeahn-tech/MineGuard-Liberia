@@ -2161,6 +2161,10 @@ export const api = {
         async () => {
           await requireAuthed(true);
           const { data, error } = await supabase.rpc("mg_my_pending_invitations");
+          // Release order: tolerate a database that has not received migration 0025 yet.
+          if (error && (error.code === "PGRST202" || /could not find the function/i.test(error.message ?? ""))) {
+            return [];
+          }
           if (error) throw backendError(error);
           return ((data ?? []) as AnyRow[]).map((r) => ({
             id: r.id as string,
