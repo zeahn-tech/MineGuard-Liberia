@@ -24,6 +24,8 @@ const CommandCenter = lazy(() => import("./pages/CommandCenter.tsx"));
 const OperatorPortal = lazy(() => import("./pages/OperatorPortal.tsx"));
 const Companies = lazy(() => import("./pages/Companies.tsx"));
 const Invitation = lazy(() => import("./pages/Invitation.tsx"));
+const Join = lazy(() => import("./pages/Join.tsx"));
+const OperatorTeam = lazy(() => import("./pages/operate/OperatorTeam.tsx"));
 const Sites = lazy(() => import("./pages/Sites.tsx"));
 const SiteDetail = lazy(() => import("./pages/SiteDetail.tsx"));
 const NationalMap = lazy(() => import("./pages/NationalMap.tsx"));
@@ -112,6 +114,7 @@ createRoot(document.getElementById("root")!).render(
             />
             {/* Phase B: invitee landing — any signed-in account (no role yet). */}
             <Route path="/invitation" element={<Invitation />} />
+            <Route path="/join" element={<Join />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/cookies" element={<Cookies />} />
@@ -132,6 +135,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="findings" element={<OperatorFindings />} />
               <Route path="corrective-actions" element={<OperatorCorrectiveActions />} />
               <Route path="incidents" element={<OperatorIncidents />} />
+              <Route path="team" element={<OperatorTeam />} />
               <Route path="security" element={<OperatorSecurity />} />
             </Route>
 

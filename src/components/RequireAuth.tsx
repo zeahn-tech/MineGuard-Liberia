@@ -10,7 +10,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { Navigate, useLocation } from "react-router";
+import { Link, Navigate, useLocation } from "react-router";
 
 /** Full-screen gate while auth resolves. BOUNDED: if the profile query
  *  cannot load (network/backend failure), the gate used to spin forever —
@@ -139,6 +139,11 @@ export function RequireAuth({ children }: { children: ReactNode }) {
             This account is signed in but has not been assigned a platform role.
             The program office assigns roles; until then there is no surface to
             show.
+          </p>
+          <p className="mt-4 text-sm">
+            <Link className="underline" to="/invitation">I have an invitation</Link>
+            {" · "}
+            <Link className="underline" to="/join">Request to join a company</Link>
           </p>
         </div>
       </main>

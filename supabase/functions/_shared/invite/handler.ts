@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Company-administrator invitation handler (Phase B). Pure logic over injected
+// Company invitation handler (Phase B: company administrators; Phase C: workforce roles). Pure logic over injected
 // dependencies so it is unit/integration-testable without a Deno runtime.
 //
 // Security properties:
@@ -37,6 +37,7 @@ export interface InviteResult {
   body: Record<string, unknown>;
 }
 
+const ROLES = new Set(["company_admin", "site_manager", "safety_officer", "worker"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const STATUS_BY_CODE: Record<string, number> = {
@@ -45,6 +46,7 @@ const STATUS_BY_CODE: Record<string, number> = {
   NOT_FOUND: 404,
   INVALID_EMAIL: 400,
   INVALID_NAME: 400,
+  INVALID_ROLE: 400,
   ORG_NOT_APPROVED: 409,
   INELIGIBLE_ACCOUNT: 409,
   ALREADY_MEMBER_OTHER_ORG: 409,
@@ -75,7 +77,16 @@ export async function handleInviteRequest(deps: InviteDeps, body: unknown): Prom
   } else if (typeof b.organizationId === "string" && typeof b.email === "string") {
     if (!UUID.test(b.organizationId)) return { status: 400, body: { error: "BAD_REQUEST", message: "organizationId must be a UUID" } };
     if (b.email.length > 254) return { status: 400, body: { error: "INVALID_EMAIL", message: "Enter a valid email address" } };
-    const created = await deps.db.rpc("mg_create_company_admin_invitation", { p_org: b.organizationId, p_email: b.email });
+    const role = b.role === undefined ? "company_admin" : b.role;
+    if (typeof role !== "string" || !ROLES.has(role)) {
+      return { status: 400, body: { error: "INVALID_ROLE", message: "Unknown role" } };
+    }
+    // company_admin goes through the Ministry-only wrapper; every other role through the
+    // company-scoped function. Both authorize in the database as the CALLER.
+    const created =
+      role === "company_admin"
+        ? await deps.db.rpc("mg_create_company_admin_invitation", { p_org: b.organizationId, p_email: b.email })
+        : await deps.db.rpc("mg_create_org_invitation", { p_org: b.organizationId, p_email: b.email, p_role: role });
     if (created.error) return fromDbError(created.error.message);
     invitationId = String(created.data);
   } else {

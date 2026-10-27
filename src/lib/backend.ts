@@ -97,6 +97,9 @@ import {
   type SiteBoundary,
   type UserProfile,
   type Company,
+  type CompanySearchResult,
+  type MyMembership,
+  type WorkforceMember,
   type CompanyInvitation,
   type CompanyStatus,
   type PendingInvitation,
@@ -2030,11 +2033,20 @@ const INVITE_ERRORS: Record<string, string> = {
   REASON_REQUIRED: "Record a reason (at least 5 characters).",
   EMAIL_FAILED: "The invitation was saved but the email could not be sent. Try resending.",
   NOT_CONFIGURED: "Invitation email is not configured yet. Contact the platform operator.",
+  INVALID_ROLE: "That role cannot be assigned here. Company administrators are appointed by the Ministry.",
+  MEMBERSHIP_NOT_PENDING: "This request has already been decided.",
+  MEMBERSHIP_NOT_ACTIVE: "This person is no longer an active member.",
+  PENDING_REQUEST_EXISTS: "You already have a pending request. Cancel it before asking another company.",
+  REQUEST_COOLDOWN: "Your last request was declined. You can ask again after 24 hours.",
+  UNREGISTERED_USER: "Your account is not fully set up yet. Sign out and back in, then try again.",
 };
 
 /** Maps a PostgREST / edge-function failure to a short, safe message. */
 function friendlyInviteError(raw: string): Error {
   const code = /([A-Z][A-Z_]{3,})/.exec(raw)?.[1] ?? "";
+  // FORBIDDEN carries a server-authored reason after the colon ("you cannot change your own role").
+  const reason = code === "FORBIDDEN" ? /FORBIDDEN:\s*([^\n]{3,120})/.exec(raw)?.[1] : undefined;
+  if (reason) return new Error(reason.charAt(0).toUpperCase() + reason.slice(1) + ".");
   return new Error(INVITE_ERRORS[code] ?? "The request could not be completed. Try again.");
 }
 
@@ -2164,6 +2176,123 @@ export const api = {
       if (error) throw friendlyInviteError(error.message);
       // Role + company binding changed server-side: re-derive every auth-bound subscription.
       bumpProfileVersion();
+    },
+  },
+
+  /** Company workforce administration (migration 0026). Every call is authorized by the
+   *  database (mg_can_manage_company); nothing here trusts a client-side role. */
+  workforce: {
+    myMembership: () =>
+      live<MyMembership | null>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase.rpc("mg_my_membership");
+          if (error) throw backendError(error);
+          const r = ((data ?? []) as AnyRow[])[0];
+          return r
+            ? {
+                memberId: r.member_id as string,
+                organizationId: r.organization_id as string,
+                organizationName: r.organization_name as string,
+                orgRole: r.org_role as string,
+                memberStatus: r.member_status as MyMembership["memberStatus"],
+                companyStatus: r.company_status as CompanyStatus,
+              }
+            : null;
+        },
+        ["organization_members", "organizations"],
+      ),
+
+    list: (args: { organizationId: string }) =>
+      live<{ members: WorkforceMember[]; invitations: CompanyInvitation[] }>(
+        async () => {
+          await requireAuthed(true);
+          const [wf, invs] = await Promise.all([
+            supabase.rpc("mg_company_workforce", { p_org: args.organizationId }),
+            supabase
+              .from("organization_invitations")
+              .select("*")
+              .eq("organization_id", args.organizationId)
+              .order("created_at", { ascending: false })
+              .limit(200),
+          ]);
+          if (wf.error) throw backendError(wf.error);
+          if (invs.error) throw backendError(invs.error);
+          return {
+            members: ((wf.data ?? []) as AnyRow[]).map((r) => ({
+              memberId: r.member_id as string,
+              userId: r.user_id as string,
+              email: (r.email as string) ?? null,
+              name: (r.name as string) ?? null,
+              orgRole: r.org_role as string,
+              status: r.status as WorkforceMember["status"],
+              createdAt: Date.parse(r.created_at as string),
+            })),
+            invitations: ((invs.data ?? []) as AnyRow[]).map((i) => ({
+              id: i.id as string,
+              organizationId: i.organization_id as string,
+              email: i.email as string,
+              orgRole: i.org_role as string,
+              status: i.status as CompanyInvitation["status"],
+              expiresAt: Date.parse(i.expires_at as string),
+              lastSentAt: i.last_sent_at ? Date.parse(i.last_sent_at as string) : undefined,
+              sendCount: Number(i.send_count ?? 0),
+              createdAt: Date.parse(i.created_at as string),
+            })),
+          };
+        },
+        ["organization_members", "organization_invitations"],
+      ),
+
+    invite: async (args: { organizationId: string; email: string; role: string }) => {
+      await requireAuthed();
+      return inviteFunction({ organizationId: args.organizationId, email: args.email, role: args.role });
+    },
+    resendInvitation: async (args: { invitationId: string }) => {
+      await requireAuthed();
+      return inviteFunction({ invitationId: args.invitationId });
+    },
+    revokeInvitation: async (args: { invitationId: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_revoke_invitation", { p_id: args.invitationId });
+      if (error) throw friendlyInviteError(error.message);
+    },
+    decideRequest: async (args: { memberId: string; approve: boolean; role?: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_decide_membership_request", {
+        p_member_id: args.memberId,
+        p_approve: args.approve,
+        p_role: args.role ?? "worker",
+      });
+      if (error) throw friendlyInviteError(error.message);
+    },
+    setRole: async (args: { memberId: string; role: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_set_member_role", { p_member_id: args.memberId, p_role: args.role });
+      if (error) throw friendlyInviteError(error.message);
+    },
+    revokeMember: async (args: { memberId: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_revoke_member", { p_member_id: args.memberId });
+      if (error) throw friendlyInviteError(error.message);
+    },
+
+    /** Requester side: find an approved company (3+ characters) and ask to join. */
+    searchCompanies: async (args: { query: string }): Promise<CompanySearchResult[]> => {
+      await requireAuthed();
+      const { data, error } = await supabase.rpc("mg_search_companies", { p_query: args.query });
+      if (error) throw friendlyInviteError(error.message);
+      return ((data ?? []) as AnyRow[]).map((r) => ({ id: r.id as string, name: r.name as string }));
+    },
+    requestMembership: async (args: { organizationId: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_request_membership", { p_org: args.organizationId });
+      if (error) throw friendlyInviteError(error.message);
+    },
+    cancelRequest: async () => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_cancel_membership_request");
+      if (error) throw friendlyInviteError(error.message);
     },
   },
 

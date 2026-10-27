@@ -34,6 +34,7 @@ afterEach(async () => {
     "0023_security_audit_hardening.sql",
     "0024_self_service_tenant_lockdown.sql",
     "0025_company_status_membership_invitations.sql",
+    "0026_company_workforce.sql",
   ]) {
     await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
   }
@@ -751,18 +752,25 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_any_profile_role()",
     "mg_can_access_site(uuid)",
     "mg_can_access_site_row(uuid, text, text, text, uuid)",
+    // 0026 (Phase C): company workforce administration (each self-authorizes)
+    "mg_can_manage_company(uuid)",
+    "mg_cancel_membership_request()",
     "mg_command_center_stats()",
+    "mg_company_workforce(uuid)",
     // 0014's five scale surfaces — SECURITY INVOKER row sources 0011 must
     // keep granted when it re-runs (see 0011 header, bullet E).
     "mg_compliance_page(timestamp with time zone, uuid, integer)",
     // 0025 (Phase B): company lifecycle + invitations (each self-authorizes)
     "mg_create_company_admin_invitation(uuid, text)",
+    "mg_create_org_invitation(uuid, text, text)",
+    "mg_decide_membership_request(uuid, boolean, text)",
     "mg_has_permission(text)",
     "mg_incidents_page(timestamp with time zone, uuid, integer)",
     "mg_inspections_page(timestamp with time zone, uuid, integer)",
     "mg_is_admin()",
     "mg_is_reviewer()",
     "mg_is_staff()",
+    "mg_my_membership()",
     "mg_my_pending_invitations()",
     // 0021 (Session 9): notification sync
     "mg_notifications_sync(jsonb)",
@@ -770,7 +778,9 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_prepare_invitation_send(uuid)",
     "mg_profile()",
     "mg_register_company(text)",
+    "mg_request_membership(uuid)",
     "mg_revoke_invitation(uuid)",
+    "mg_revoke_member(uuid)",
     // 0019: risk config reader/builder + the (version, as_of) readers that
     // replaced the 0014 zero-config signatures.
     "mg_risk_build(jsonb, jsonb, integer)",
@@ -778,7 +788,9 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_risk_explanation(uuid, integer, timestamp with time zone)",
     "mg_risk_scores(integer, timestamp with time zone)",
     "mg_role()",
+    "mg_search_companies(text)",
     "mg_set_company_status(uuid, text, text)",
+    "mg_set_member_role(uuid, text)",
     // 0021 (Session 9): summary report + trend source/geo/series (invoker)
     "mg_summary_report(date, date)",
     "mg_trend_events(text)",

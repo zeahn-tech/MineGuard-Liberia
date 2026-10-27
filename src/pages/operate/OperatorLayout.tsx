@@ -34,7 +34,7 @@ import { QueueManagerButton } from "@/components/QueueManager";
 import { sectionJump } from "@/lib/utils";
 import { api, refreshAllData } from "@/lib/backend";
 import { useLatest } from "@/lib/use-latest";
-import { useMutation } from "@/lib/backend-react";
+import { useMutation, useQuery } from "@/lib/backend-react";
 import {
   Building2,
   ClipboardList,
@@ -45,6 +45,7 @@ import {
   RefreshCw,
   ShieldCheck,
   ShieldEllipsis,
+  Users,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
@@ -56,6 +57,7 @@ const OPERATOR_NAV = [
   { to: "/operate/findings", label: "Findings", icon: FileCheck2 },
   { to: "/operate/corrective-actions", label: "Corrective Actions", icon: ShieldCheck },
   { to: "/operate/incidents", label: "Incidents", icon: HeartPulse },
+  { to: "/operate/team", label: "Team", icon: Users, adminOnly: true },
   { to: "/operate/security", label: "Account Security", icon: ShieldEllipsis },
 ];
 
@@ -63,7 +65,7 @@ function OperatorNavLinks({
   items,
   onNavigate,
 }: {
-  items: typeof OPERATOR_NAV;
+  items: readonly { to: string; label: string; icon: typeof Building2; end?: boolean }[];
   onNavigate?: () => void;
 }) {
   return (
@@ -92,6 +94,12 @@ function OperatorNavLinks({
 
 export default function OperatorLayout() {
   const { user, signOut } = useAuth();
+  const membership = useQuery(api.workforce.myMembership);
+  const isCompanyAdmin = membership?.orgRole === "company_admin" && membership.memberStatus === "active";
+  const navItems = useMemo(
+    () => OPERATOR_NAV.filter((i) => !("adminOnly" in i && i.adminOnly) || isCompanyAdmin),
+    [isCompanyAdmin],
+  );
   const navigate = useNavigate();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [queue, setQueue] = useState<QueueItem[]>([]);
@@ -207,7 +215,7 @@ export default function OperatorLayout() {
               <span className="ml-auto stamp text-[9px] text-muted-foreground">V1.0</span>
             </div>
             <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-4">
-              <OperatorNavLinks items={OPERATOR_NAV} />
+              <OperatorNavLinks items={navItems} />
             </nav>
             <div className="border-t border-border p-3">
               <div className="mb-2 px-2 text-[11px] leading-snug text-muted-foreground">
@@ -312,6 +320,12 @@ export default function OperatorLayout() {
             </div>
 
             <main id="main-content" tabIndex={-1} className="min-w-0 flex-1">
+              {membership && membership.companyStatus !== "approved" && (
+                <p role="status" className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+                  {membership.organizationName} is currently {membership.companyStatus.replace("_", " ")}.
+                  Access to company records is paused by the Ministry; nothing has been deleted.
+                </p>
+              )}
               <Outlet />
             </main>
 

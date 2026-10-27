@@ -11,7 +11,7 @@ beforeAll(async () => {
   f = await getFixture();
   const { getDb } = await import("./helpers/pglite-db");
   const db = await getDb();
-  for (const m of ["0024_self_service_tenant_lockdown.sql", "0025_company_status_membership_invitations.sql"]) {
+  for (const m of ["0024_self_service_tenant_lockdown.sql", "0025_company_status_membership_invitations.sql", "0026_company_workforce.sql"]) {
     await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", m), "utf8"));
   }
 });
@@ -77,7 +77,7 @@ describe("company-admin-invite handler", () => {
       const { d, sent } = deps(run, {
         invite: async () => ({ error: { message: "A user with this email address has already been registered", status: 422 } }),
       });
-      const first = await handleInviteRequest(d, { organizationId: await org(run), email: "bob@agrilib.test" });
+      const first = await handleInviteRequest(d, { organizationId: await org(run), email: "returning.user@x.test" });
       expect(first.body.delivery).toBe("signin_link");
       expect(sent[0].kind).toBe("magic");
       const again = await handleInviteRequest(d, { invitationId: first.body.invitationId });
@@ -125,5 +125,32 @@ describe("company-admin-invite handler", () => {
     expect(fn).not.toMatch(/console\./);
     expect(handler.indexOf("mg_prepare_invitation_send")).toBeLessThan(handler.indexOf("deps.mail.invite"));
     expect(fn).not.toMatch(/\bVITE_|localStorage/);
+  });
+});
+
+describe("company-admin-invite handler: workforce roles (Phase C)", () => {
+  const XA = "aaaaaaaa-0000-4000-8000-0000000000a1";
+  test("a company administrator can email worker invitations for their company, but not company_admin or another company", async () => {
+    const { withRole } = await import("./helpers/pglite-db");
+    await withRole("postgres", null, async (run) => {
+      await run(`insert into auth.users (id, email) values ('${XA}','xa@agrilib.test')`);
+      const orgA = (await run("select id from public.organizations where name = 'AgriLib Mining'"))[0].id as string;
+      const orgB = (await run("select id from public.organizations where name = 'OreCo Liberia'"))[0].id as string;
+      await run("set local role authenticated");
+      const claim = (u: string) => run(`select set_config('request.jwt.claims', '{"sub":"${u}","role":"authenticated"}', true)`);
+      await claim(f.admin);
+      const inv = (await run(`select public.mg_create_company_admin_invitation('${orgA}', 'xa@agrilib.test') as id`))[0].id;
+      await claim(XA);
+      await run(`select public.mg_accept_invitation('${inv}')`);
+      const { d, sent } = deps(run);
+      const ok = await handleInviteRequest(d, { organizationId: orgA, email: "W@Agrilib.test", role: "worker" });
+      expect(ok.status).toBe(200);
+      expect(sent.map((s) => s.email)).toEqual(["w@agrilib.test"]);
+      expect((await handleInviteRequest(d, { organizationId: orgA, email: "b@agrilib.test", role: "company_admin" })).status).toBe(403);
+      expect((await handleInviteRequest(d, { organizationId: orgA, email: "b@agrilib.test" })).status).toBe(403); // default role is company_admin
+      expect((await handleInviteRequest(d, { organizationId: orgB, email: "c@oreco.test", role: "worker" })).status).toBe(403);
+      expect((await handleInviteRequest(d, { organizationId: orgA, email: "d@agrilib.test", role: "root" })).status).toBe(400);
+      expect(sent.length).toBe(1);
+    });
   });
 });

@@ -16,6 +16,7 @@ beforeAll(async () => {
   for (const m of [
     "0024_self_service_tenant_lockdown.sql",
     "0025_company_status_membership_invitations.sql",
+    "0026_company_workforce.sql",
   ]) {
     await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", m), "utf8"));
   }
@@ -174,17 +175,8 @@ describe("Invitee: accept", () => {
     });
   });
 
-  test("one company per user: a member of another company cannot accept", async () => {
+  test("one company per user: an active member of another company is refused (0026 backfills legacy operators)", async () => {
     await asUser(f.admin, async (run) => {
-      const org = (await run("select public.mg_register_company('Atlas Iron Liberia') as id"))[0].id;
-      expect(
-        await fails(run(`select public.mg_create_company_admin_invitation('${org}', 'bob@agrilib.test')`)),
-      ).toBe(""); // no live membership row yet (legacy binding lives on profiles)
-    });
-    await asPostgres(async (run) => {
-      await run(`insert into public.organization_members (organization_id, user_id, org_role) values ((select organization_id from public.profiles where id='${f.opA}'), '${f.opA}', 'worker')`);
-      await run(`select set_config('request.jwt.claims', '{"sub":"${f.admin}","role":"authenticated"}', true)`);
-      await run("set local role authenticated");
       const org = (await run("select public.mg_register_company('Atlas Iron Liberia') as id"))[0].id;
       expect(
         await fails(run(`select public.mg_create_company_admin_invitation('${org}', 'bob@agrilib.test')`)),

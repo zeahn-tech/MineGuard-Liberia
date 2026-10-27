@@ -75,6 +75,32 @@ export interface Company {
   members: CompanyAdminMember[];
 }
 
+/** One row of a company's workforce (migration 0026). */
+export interface WorkforceMember {
+  memberId: string;
+  userId: string;
+  email: string | null;
+  name: string | null;
+  orgRole: string;
+  status: "pending" | "active";
+  createdAt: number;
+}
+
+/** The signed-in person's own live membership (active, or a pending request). */
+export interface MyMembership {
+  memberId: string;
+  organizationId: string;
+  organizationName: string;
+  orgRole: string;
+  memberStatus: "pending" | "active";
+  companyStatus: CompanyStatus;
+}
+
+export interface CompanySearchResult {
+  id: string;
+  name: string;
+}
+
 /** An invitation addressed to the signed-in person's own verified email. */
 export interface PendingInvitation {
   id: string;
