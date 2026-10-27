@@ -66,7 +66,6 @@ describe("CLN-1: dead scaffolding is gone", () => {
       "vite.config.ts",
       "eslint.config.js",
       "tsconfig.app.json",
-      ".github/workflows/deploy-pages.yml",
       ".github/workflows/deploy-production.yml",
     ];
     const banned = /(@vly-ai|vlyPlugin|DISABLE_VLY|vly-toolbar|freebuff|from\s+["'](convex|firebase|hono)[/"'])/i;

@@ -9,11 +9,12 @@
 //    the action. The guard must live in BOTH places (UI gating alone would
 //    allow a re-introduced call site; call-site gating alone would still
 //    render a button that always errors).
-// 2. PRODUCTION DEPLOY PATH — the workflow exists, is manual-gated
-//    (workflow_dispatch, typed confirmation, protected environment), runs
-//    a fresh backup BEFORE deploying, builds with VITE_MINEGUARD_ENV=
-//    production, verifies the seed UI is absent from the compiled bundle,
-//    and verifies the deployed endpoint answers 200.
+// 2. PRODUCTION DEPLOY PATH — the single canonical workflow deploys
+//    automatically on push/merge to main AFTER the reusable CI gate (full
+//    suite + RLS/migration/audit-hardening/rate-limit security suites)
+//    passes; it has no backup, passphrase or manual-confirmation dependency;
+//    builds with VITE_MINEGUARD_ENV=production, verifies the seed UI is
+//    absent from the compiled bundle, and verifies the endpoint answers 200.
 // 3. BACKUP SCHEDULE — nightly cron at 03:30 UTC, artifact retention 90
 //    days, dump archive verification (pg_restore --list) inside the backup
 //    script, and a weekly restore drill into a throwaway Postgres.
@@ -23,7 +24,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const prodWorkflow = () =>
@@ -47,24 +48,44 @@ describe("production seed guard (doc 14 checklist item 4)", () => {
   });
 });
 
-describe("production deploy path (gated, backed-up, verified)", () => {
-  test("workflow is manual-only with a typed confirmation gate", () => {
+describe("production deploy path (automatic, validated, verified)", () => {
+  test("deploys automatically on push/merge to main; no manual gate", () => {
     const wf = prodWorkflow();
-    expect(wf).toContain("workflow_dispatch:");
-    expect(wf).not.toMatch(/on:\s*\n\s*push:/); // never a push side effect
-    expect(wf).toContain('Type "deploy-production" to confirm');
-    expect(wf).toContain("deploy-production"); // the phrase being checked
-    expect(wf).toContain("environment: production");
+    expect(wf).toMatch(/on:\s*\n\s*push:\s*\n\s*branches:\s*\[main\]/);
+    expect(wf).toContain("workflow_dispatch:"); // authorised re-run only
+    expect(wf).not.toContain("confirm_prod");
+    expect(wf).not.toContain("deploy-production\"");
+    expect(wf).not.toContain("environment: production");
+    expect(wf).not.toMatch(/workflow_dispatch:\s*\n\s*inputs:/);
   });
 
-  test("production deploy is preceded by a forced fresh backup", () => {
+  test("publishing jobs only ever run for main", () => {
     const wf = prodWorkflow();
-    expect(wf).toContain("backup-supabase.sh");
-    // Job ordering: guard (backup) -> build -> deploy (github-pages env).
-    expect(wf).toMatch(/guard:[\s\S]*\n {2}build:\s*\n\s*needs: guard/);
-    expect(wf).toMatch(/\n {2}deploy:\s*\n\s*needs: build/);
+    const guards = wf.match(/if: github\.ref == 'refs\/heads\/main'/g) ?? [];
+    expect(guards.length).toBeGreaterThanOrEqual(2); // build + deploy
+  });
+
+  test("production deploy has NO backup dependency of any kind", () => {
+    const wf = prodWorkflow();
+    for (const banned of [
+      "BACKUP_PASSPHRASE",
+      "backup-supabase",
+      "pg_dump",
+      "postgresql-client",
+      "gpg",
+      "upload-artifact",
+      "SUPABASE_DB_PASSWORD",
+    ]) {
+      expect(wf).not.toContain(banned);
+    }
+  });
+
+  test("job chain: CI gate -> build -> deploy (github-pages env)", () => {
+    const wf = prodWorkflow();
+    expect(wf).toMatch(/\n {2}ci:\s*\n(?: {4}.*\n)*? {4}uses: \.\/\.github\/workflows\/ci\.yml/);
+    expect(wf).toMatch(/\n {2}build:\s*\n(?: {4}.*\n)*? {4}needs: ci/);
+    expect(wf).toMatch(/\n {2}deploy:\s*\n(?: {4}.*\n)*? {4}needs: build/);
     expect(wf).toContain("name: github-pages");
-    expect(wf).toContain("if-no-files-found: error");
   });
 
   test("build uses the production flag and verifies the seed UI is absent", () => {
@@ -72,6 +93,7 @@ describe("production deploy path (gated, backed-up, verified)", () => {
     expect(wf).toContain("VITE_MINEGUARD_ENV: production");
     expect(wf).toContain('grep -r "Load demo data" dist/assets/');
     expect(wf).toContain("FAIL: demo seed UI present in production bundle");
+    expect(wf).toContain("Content-Security-Policy");
   });
 
   test("deploy verification: endpoint must answer 200 or the deploy fails", () => {
@@ -80,12 +102,37 @@ describe("production deploy path (gated, backed-up, verified)", () => {
     expect(wf).toContain("exit 1");
   });
 
-  test("typecheck + tests run before any prod deploy step", () => {
+  test("the CI gate runs the full suite and the four security suites", () => {
+    const ci = readFileSync(join(".github", "workflows", "ci.yml"), "utf8");
+    expect(ci).toContain("workflow_call:");
+    expect(ci).toContain("bunx tsc -b --noEmit");
+    expect(ci).toContain("bunx eslint .");
+    expect(ci).toContain("bun test --timeout 60000");
+    for (const t of ["rls", "migration-apply", "audit-hardening", "rate-limit"]) {
+      expect(ci).toContain(`tests/${t}.test.ts`);
+    }
+    // never lets a failure through
+    expect(ci).not.toContain("continue-on-error");
+    // no duplicate push run (the deploy workflow calls it instead)
+    expect(ci).not.toMatch(/on:[\s\S]*\n {2}push:/);
+  });
+
+  test("exactly one workflow can publish to Pages; no unvalidated route", () => {
+    const dir = join(".github", "workflows");
+    const publishers = readdirSync(dir).filter((f) =>
+      /actions\/deploy-pages/.test(readFileSync(join(dir, f), "utf8")),
+    );
+    expect(publishers).toEqual(["deploy-production.yml"]);
+    expect(readdirSync(dir)).not.toContain("deploy-pages.yml");
+  });
+
+  test("optional backups are independent of deployment", () => {
     const wf = prodWorkflow();
-    const guardIdx = wf.indexOf("Typecheck + tests must be green");
-    const deployIdx = wf.indexOf("Deploy to GitHub Pages (production)");
-    expect(guardIdx).toBeGreaterThan(-1);
-    expect(deployIdx).toBeGreaterThan(guardIdx);
+    expect(wf).not.toMatch(/uses: \.\/\.github\/workflows\/backup\.yml/);
+    expect(wf).not.toContain("needs: backup");
+    const bk = backupWorkflow();
+    expect(bk).not.toMatch(/\n\s*push:/);
+    expect(bk).toContain("needs.config.outputs.enabled == 'true'");
   });
 });
 
