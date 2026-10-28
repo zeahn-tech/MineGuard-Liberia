@@ -414,7 +414,15 @@ describe("sites", () => {
     asAdmin();
     const list = await first(api.sites.list());
     const siteA = list!.find((s) => f.siteA === s._id)!;
-    expect(siteA.openActions).toBe(1); // the seeded open CA on findingA
+    // Ground truth from the database rather than a hard-coded 1: other suites share this
+    // database and may legitimately hold their own open CAs on siteA (CI file order
+    // differs from local order). The seeded open CA on findingA guarantees >= 1.
+    const truth = await adminSql(
+      `select count(*)::int as n from public.corrective_actions
+        where site_id = '${f.siteA}' and status not in ('closed', 'verified')`,
+    );
+    expect(siteA.openActions).toBe(Number(truth[0].n));
+    expect(siteA.openActions).toBeGreaterThanOrEqual(1);
   });
 
   test("riskScores: explainable factors include the seeded overdue-corrective-action factor for staff", async () => {

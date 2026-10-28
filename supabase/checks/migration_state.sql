@@ -63,6 +63,9 @@ select migration, applied
        exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
                 where n.nspname = 'public' and p.proname = 'handle_new_user'
                   and p.prosrc like '%full_name%')),
+    ('0029 onboarding officer + bulk import',
+       to_regclass('public.organization_imports') is not null
+       and exists (select 1 from fns where proname = 'mg_import_apply')),
     ('0018 boundaries published to Realtime',
        exists (
          select 1 from pg_publication_tables

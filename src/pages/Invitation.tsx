@@ -22,6 +22,7 @@ const ROLE_LABEL: Record<string, string> = {
   site_manager: "Site manager",
   safety_officer: "Safety officer",
   worker: "Worker",
+  onboarding_officer: "Onboarding officer",
 };
 
 export default function Invitation() {

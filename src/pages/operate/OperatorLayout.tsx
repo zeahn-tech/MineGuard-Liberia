@@ -45,6 +45,7 @@ import {
   RefreshCw,
   ShieldCheck,
   ShieldEllipsis,
+  Upload,
   Users,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -58,6 +59,7 @@ const OPERATOR_NAV = [
   { to: "/operate/corrective-actions", label: "Corrective Actions", icon: ShieldCheck },
   { to: "/operate/incidents", label: "Incidents", icon: HeartPulse },
   { to: "/operate/team", label: "Team", icon: Users, adminOnly: true },
+  { to: "/operate/import", label: "Import workers", icon: Upload, onboardOnly: true },
   { to: "/operate/security", label: "Account Security", icon: ShieldEllipsis },
 ];
 
@@ -96,9 +98,15 @@ export default function OperatorLayout() {
   const { user, signOut } = useAuth();
   const membership = useQuery(api.workforce.myMembership);
   const isCompanyAdmin = membership?.orgRole === "company_admin" && membership.memberStatus === "active";
+  const isOfficer = membership?.orgRole === "onboarding_officer" && membership.memberStatus === "active";
   const navItems = useMemo(
-    () => OPERATOR_NAV.filter((i) => !("adminOnly" in i && i.adminOnly) || isCompanyAdmin),
-    [isCompanyAdmin],
+    () =>
+      OPERATOR_NAV.filter((i) => {
+        if ("adminOnly" in i && i.adminOnly) return isCompanyAdmin;
+        if ("onboardOnly" in i && i.onboardOnly) return isCompanyAdmin || isOfficer;
+        return true;
+      }),
+    [isCompanyAdmin, isOfficer],
   );
   const navigate = useNavigate();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);

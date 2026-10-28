@@ -37,7 +37,7 @@ export interface InviteResult {
   body: Record<string, unknown>;
 }
 
-const ROLES = new Set(["company_admin", "site_manager", "safety_officer", "worker"]);
+const ROLES = new Set(["company_admin", "site_manager", "safety_officer", "worker", "onboarding_officer"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const STATUS_BY_CODE: Record<string, number> = {
@@ -64,11 +64,67 @@ function fromDbError(message: string): InviteResult {
   return { status, body: { error: code, message: text || code } };
 }
 
+/** Sends ONE invitation email (database authorizes first). Shared by single and import modes. */
+async function sendOne(
+  deps: InviteDeps,
+  invitationId: string,
+): Promise<{ ok: true; delivery: string } | { ok: false; result: InviteResult }> {
+  const prepared = await deps.db.rpc("mg_prepare_invitation_send", { p_id: invitationId });
+  if (prepared.error) {
+    const r = fromDbError(prepared.error.message);
+    return { ok: false, result: { status: r.status, body: { ...r.body, invitationId } } };
+  }
+  const email = String((prepared.data as { email?: unknown } | null)?.email ?? "");
+  if (!email) {
+    return { ok: false, result: { status: 500, body: { error: "INTERNAL", message: "The invitation could not be processed", invitationId } } };
+  }
+  const invited = await deps.mail.invite(email, deps.redirectTo!);
+  if (!invited.error) return { ok: true, delivery: "invited" };
+  if (/already (been )?registered|already exists|email_exists/i.test(invited.error.message) || invited.error.status === 422) {
+    const link = await deps.mail.magicLink(email, deps.redirectTo!);
+    if (!link.error) return { ok: true, delivery: "signin_link" };
+  }
+  // The email did not go out: give the reserved send back so a retry is not throttled
+  // and the invitation returns to the import's unsent queue.
+  await deps.db.rpc("mg_release_invitation_send", { p_id: invitationId });
+  return {
+    ok: false,
+    result: {
+      status: 502,
+      body: { error: "EMAIL_FAILED", message: "The invitation was created but the email could not be sent. Try resending.", invitationId },
+    },
+  };
+}
+
+/** Import mode: send the next small batch of an import's unsent invitations. */
+async function handleImportSend(deps: InviteDeps, importId: string): Promise<InviteResult> {
+  const queue = await deps.db.rpc("mg_import_unsent", { p_import: importId, p_limit: 20 });
+  if (queue.error) return fromDbError(queue.error.message);
+  const ids = ((queue.data ?? []) as { invitation_id?: string }[])
+    .map((r) => r.invitation_id)
+    .filter((x): x is string => typeof x === "string" && UUID.test(x));
+  let sent = 0;
+  let failed = 0;
+  for (const id of ids) {
+    const r = await sendOne(deps, id);
+    if (r.ok) sent += 1;
+    else failed += 1;
+  }
+  const status = await deps.db.rpc("mg_import_status", { p_import: importId });
+  const unsent = Number((status.data as { unsent?: unknown } | null)?.unsent ?? 0);
+  return { status: 200, body: { sent, failed, remaining: unsent } };
+}
+
 export async function handleInviteRequest(deps: InviteDeps, body: unknown): Promise<InviteResult> {
   if (!deps.redirectTo) {
     return { status: 500, body: { error: "NOT_CONFIGURED", message: "Invitation email is not configured" } };
   }
   const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+
+  if (typeof b.importId === "string") {
+    if (!UUID.test(b.importId)) return { status: 400, body: { error: "BAD_REQUEST", message: "importId must be a UUID" } };
+    return handleImportSend(deps, b.importId);
+  }
 
   let invitationId: string;
   if (typeof b.invitationId === "string") {
@@ -93,24 +149,7 @@ export async function handleInviteRequest(deps: InviteDeps, body: unknown): Prom
     return { status: 400, body: { error: "BAD_REQUEST", message: "Provide organizationId and email, or invitationId" } };
   }
 
-  const prepared = await deps.db.rpc("mg_prepare_invitation_send", { p_id: invitationId });
-  if (prepared.error) {
-    const r = fromDbError(prepared.error.message);
-    // The invitation exists even when the send is throttled: tell the UI which one.
-    return { status: r.status, body: { ...r.body, invitationId } };
-  }
-  const email = String((prepared.data as { email?: unknown } | null)?.email ?? "");
-  if (!email) return { status: 500, body: { error: "INTERNAL", message: "The invitation could not be processed", invitationId } };
-
-  const invited = await deps.mail.invite(email, deps.redirectTo);
-  if (!invited.error) return { status: 200, body: { invitationId, delivery: "invited" } };
-
-  if (/already (been )?registered|already exists|email_exists/i.test(invited.error.message) || invited.error.status === 422) {
-    const link = await deps.mail.magicLink(email, deps.redirectTo);
-    if (!link.error) return { status: 200, body: { invitationId, delivery: "signin_link" } };
-  }
-  return {
-    status: 502,
-    body: { error: "EMAIL_FAILED", message: "The invitation was created but the email could not be sent. Try resending.", invitationId },
-  };
+  const r = await sendOne(deps, invitationId);
+  if (r.ok) return { status: 200, body: { invitationId, delivery: r.delivery } };
+  return r.result;
 }

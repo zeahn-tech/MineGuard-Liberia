@@ -36,7 +36,7 @@ afterEach(async () => {
     "0025_company_status_membership_invitations.sql",
     "0026_company_workforce.sql",
     "0027_site_scoped_access.sql",
-    "0028_account_names_invitation_cleanup.sql",
+    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql",
   ]) {
     await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
   }
@@ -80,7 +80,7 @@ describe("migrations apply to a clean database", () => {
       // two GIS boundary tables (admin_boundaries, site_boundaries) + 0019's
       // risk_config_versions + 0020's ai_request_log + 0021's notifications.
       // …+ 0025's organization_members and organization_invitations.
-      expect(Number(scalar(tables))).toBe(26);
+      expect(Number(scalar(tables))).toBe(28); // 0029 adds organization_imports + organization_import_rows
 
       const rls = await one(
         run,
@@ -90,7 +90,7 @@ describe("migrations apply to a clean database", () => {
       // every table above has RLS, including 0015's two boundary tables and
       // 0019's risk_config_versions + 0020's ai_request_log + 0021's notifications
       // …and 0025's two RPC-only tables.
-      expect(Number(scalar(rls))).toBe(26);
+      expect(Number(scalar(rls))).toBe(28);
 
       const guards = await one(
         run,
@@ -476,12 +476,12 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
     );
     // 10 domain tables + organizations (0010's integrity stamps).
     // 0025 adds organization_members + organization_invitations.
-    expect(Number(trig.rows[0]?.touch)).toBe(13);
+    expect(Number(trig.rows[0]?.touch)).toBe(14); // 0029: organization_imports
     // …and organizations + site_assignments join the audit trail: exactly one
     // row per mutation, one trigger per table. 0015 adds the two boundary
     // tables (admin_boundaries, site_boundaries) to the trail; 0019 adds
     // risk_config_versions (one audit row per published version).
-    expect(Number(trig.rows[0]?.audit)).toBe(17);
+    expect(Number(trig.rows[0]?.audit)).toBe(18);
     // "audit append" (0001) stays gone; only the staff-read policy remains.
     const pol = await db.query<{ n: string }>(
       `select count(*)::text as n from pg_policies
@@ -546,7 +546,10 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
       expect(r.a_del, `authenticated must not hold DELETE on ${r.t}`).toBe(false);
       // audit_log (0009) and 0025's RPC-only membership/invitation tables are
       // read-only for clients: every write goes through a definer RPC.
-      const READ_ONLY = new Set(["audit_log", "organization_members", "organization_invitations"]);
+      const READ_ONLY = new Set([
+        "audit_log", "organization_members", "organization_invitations",
+        "organization_imports", "organization_import_rows",
+      ]);
       expect(r.a_ins, `authenticated INSERT on ${r.t}`).toBe(!READ_ONLY.has(r.t));
       expect(r.n_ins, `anon must not hold INSERT on ${r.t}`).toBe(false);
       // 0023 (audit F4): report_tracking is no longer anon-readable.
@@ -759,6 +762,8 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_can_access_site_row(uuid, text, text, text, uuid)",
     // 0026 (Phase C): company workforce administration (each self-authorizes)
     "mg_can_manage_company(uuid)",
+    // 0029 (Phase E): onboarding officer + bulk import (each self-authorizes)
+    "mg_can_onboard_company(uuid)",
     "mg_cancel_membership_request()",
     "mg_command_center_stats()",
     "mg_company_workforce(uuid)",
@@ -770,6 +775,11 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_create_org_invitation(uuid, text, text)",
     "mg_decide_membership_request(uuid, boolean, text)",
     "mg_has_permission(text)",
+    "mg_import_apply(uuid, jsonb)",
+    "mg_import_check(uuid, jsonb)",
+    "mg_import_start(uuid, uuid, text, integer)",
+    "mg_import_status(uuid)",
+    "mg_import_unsent(uuid, integer)",
     "mg_incidents_page(timestamp with time zone, uuid, integer)",
     "mg_inspections_page(timestamp with time zone, uuid, integer)",
     "mg_is_admin()",
@@ -783,6 +793,7 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_prepare_invitation_send(uuid)",
     "mg_profile()",
     "mg_register_company(text)",
+    "mg_release_invitation_send(uuid)",
     "mg_request_membership(uuid)",
     "mg_revoke_invitation(uuid)",
     "mg_revoke_member(uuid)",

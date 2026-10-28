@@ -26,6 +26,7 @@ const Companies = lazy(() => import("./pages/Companies.tsx"));
 const Invitation = lazy(() => import("./pages/Invitation.tsx"));
 const Join = lazy(() => import("./pages/Join.tsx"));
 const OperatorTeam = lazy(() => import("./pages/operate/OperatorTeam.tsx"));
+const OperatorImport = lazy(() => import("./pages/operate/OperatorImport.tsx"));
 const Sites = lazy(() => import("./pages/Sites.tsx"));
 const SiteDetail = lazy(() => import("./pages/SiteDetail.tsx"));
 const NationalMap = lazy(() => import("./pages/NationalMap.tsx"));
@@ -136,6 +137,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="corrective-actions" element={<OperatorCorrectiveActions />} />
               <Route path="incidents" element={<OperatorIncidents />} />
               <Route path="team" element={<OperatorTeam />} />
+              <Route path="import" element={<OperatorImport />} />
               <Route path="security" element={<OperatorSecurity />} />
             </Route>
 
