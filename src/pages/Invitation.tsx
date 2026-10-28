@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
-import { api, updatePassword } from "@/lib/backend";
+import { api, completeInviteAccount, updatePassword } from "@/lib/backend";
 import { useQuery } from "@/lib/backend-react";
 import { Building2, Loader2 } from "lucide-react";
 import { useState } from "react";
@@ -22,6 +22,7 @@ const ROLE_LABEL: Record<string, string> = {
   site_manager: "Site manager",
   safety_officer: "Safety officer",
   worker: "Worker",
+  onboarding_officer: "Onboarding officer",
 };
 
 export default function Invitation() {
@@ -30,6 +31,7 @@ export default function Invitation() {
   const invitations = useQuery(api.companies.myInvitations);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fullName, setFullName] = useState("");
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
   const [pwBusy, setPwBusy] = useState(false);
@@ -48,6 +50,28 @@ export default function Invitation() {
       setError(e instanceof Error ? e.message : "Could not accept the invitation.");
     } finally {
       setBusyId(null);
+    }
+  }
+
+  // An invited account arrives signed in but nameless and without a password: it
+  // must be created (name + password) before the invitation can be accepted.
+  const needsAccount = !user?.name;
+
+  async function createAccount() {
+    if (fullName.trim().length < 2) return setError("Enter your full name.");
+    if (pw.length < 10) return setError("Use a password of at least 10 characters.");
+    if (pw !== pw2) return setError("The two passwords do not match.");
+    setPwBusy(true);
+    setError(null);
+    try {
+      await completeInviteAccount({ name: fullName, password: pw });
+      toast.success("Account created. You can now accept the invitation.");
+      setPw("");
+      setPw2("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create the account.");
+    } finally {
+      setPwBusy(false);
     }
   }
 
@@ -114,7 +138,10 @@ export default function Invitation() {
                 By accepting you become responsible for this company's workforce in MineGuard.
                 This is limited to {inv.organizationName}. Expires {new Date(inv.expiresAt).toLocaleDateString()}.
               </p>
-              <Button className="w-full" disabled={busyId !== null} onClick={() => void accept(inv.id)}>
+              {needsAccount && (
+                <p className="text-xs text-destructive">Create your account below first.</p>
+              )}
+              <Button className="w-full" disabled={busyId !== null || needsAccount} onClick={() => void accept(inv.id)}>
                 {busyId === inv.id && <Loader2 className="size-4 animate-spin" />} Accept invitation
               </Button>
             </CardContent>
@@ -123,11 +150,21 @@ export default function Invitation() {
       )}
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Set a password</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base">{needsAccount ? "Create your account" : "Set a password"}</CardTitle>
+        </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-xs text-muted-foreground">
-            Your email link signs you in once. Set a password so you can sign in again later.
+            {needsAccount
+              ? "Your email link signed you in once. Add your name and a password so you can sign in again."
+              : "Your email link signs you in once. Set a password so you can sign in again later."}
           </p>
+          {needsAccount && (
+            <div className="space-y-1">
+              <Label htmlFor="inv-name">Full name</Label>
+              <Input id="inv-name" autoComplete="name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
+            </div>
+          )}
           <div className="space-y-1">
             <Label htmlFor="inv-pw">New password</Label>
             <Input id="inv-pw" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} />
@@ -136,8 +173,9 @@ export default function Invitation() {
             <Label htmlFor="inv-pw2">Repeat password</Label>
             <Input id="inv-pw2" type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} />
           </div>
-          <Button variant="outline" disabled={pwBusy || !pw} onClick={() => void savePassword()}>
-            {pwBusy && <Loader2 className="size-4 animate-spin" />} Save password
+          <Button variant={needsAccount ? "default" : "outline"} disabled={pwBusy || !pw}
+            onClick={() => void (needsAccount ? createAccount() : savePassword())}>
+            {pwBusy && <Loader2 className="size-4 animate-spin" />} {needsAccount ? "Create account" : "Save password"}
           </Button>
         </CardContent>
       </Card>

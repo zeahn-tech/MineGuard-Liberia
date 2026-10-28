@@ -28,12 +28,15 @@ import { Loader2, MailPlus, RotateCw, ShieldAlert, UserCheck, UserX, XCircle } f
 import { useState } from "react";
 import { toast } from "sonner";
 
-const ASSIGNABLE = ["worker", "safety_officer", "site_manager"] as const;
+const ASSIGNABLE = ["worker", "safety_officer", "site_manager", "onboarding_officer"] as const;
+/** Join requests are approved into an operational role only (the server enforces this too). */
+const REQUEST_ROLES = ["worker", "safety_officer", "site_manager"] as const;
 const ROLE_LABEL: Record<string, string> = {
   company_admin: "Company administrator",
   site_manager: "Site manager",
   safety_officer: "Safety officer",
   worker: "Worker",
+  onboarding_officer: "Onboarding officer",
 };
 
 function errMsg(e: unknown): string {
@@ -41,14 +44,14 @@ function errMsg(e: unknown): string {
   return e instanceof Error && e.message ? e.message : "Something went wrong. Try again.";
 }
 
-function RoleSelect({ value, onChange, disabled, label }: {
-  value: string; onChange: (v: string) => void; disabled?: boolean; label: string;
+function RoleSelect({ value, onChange, disabled, label, roles = ASSIGNABLE }: {
+  value: string; onChange: (v: string) => void; disabled?: boolean; label: string; roles?: readonly string[];
 }) {
   return (
     <Select value={value} onValueChange={onChange} disabled={disabled}>
       <SelectTrigger className="w-full sm:w-44" aria-label={label}><SelectValue /></SelectTrigger>
       <SelectContent>
-        {ASSIGNABLE.map((r) => <SelectItem key={r} value={r}>{ROLE_LABEL[r]}</SelectItem>)}
+        {roles.map((r) => <SelectItem key={r} value={r}>{ROLE_LABEL[r]}</SelectItem>)}
       </SelectContent>
     </Select>
   );
@@ -65,7 +68,7 @@ function RequestRow({ m, busy, onDecide }: {
         <p className="break-all text-xs text-muted-foreground">{m.email}</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <RoleSelect value={role} onChange={setRole} disabled={busy} label={`Role for ${m.email ?? "applicant"}`} />
+        <RoleSelect roles={REQUEST_ROLES} value={role} onChange={setRole} disabled={busy} label={`Role for ${m.email ?? "applicant"}`} />
         <Button size="sm" disabled={busy} onClick={() => onDecide(true, role)}><UserCheck className="size-3.5" /> Approve</Button>
         <Button size="sm" variant="outline" disabled={busy} onClick={() => onDecide(false, role)}><UserX className="size-3.5" /> Decline</Button>
       </div>

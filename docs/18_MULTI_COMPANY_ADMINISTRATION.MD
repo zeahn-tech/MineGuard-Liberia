@@ -1,8 +1,8 @@
 # 18 — Multi-company, site and workforce administration
 
-Status: implemented on branch `feature/multi-company-admin` (migrations 0024–0027).
-**Not applied to any live database.** Phase E (bulk CSV onboarding) is deliberately
-not built; see "Remaining".
+Status: implemented on branch `feature/multi-company-admin` (migrations 0024–0029).
+**Not applied to any live database.** Phase E (bulk CSV onboarding + the dedicated
+Onboarding officer role) is built; see §10.
 
 ## 1. Architecture assessment (what existed, what was reused)
 
@@ -70,7 +70,7 @@ used invitations, redirect URL fixed by server configuration.
 GitHub Pages deploys the **frontend** on merge to `main` and never applies
 migrations. Therefore:
 
-1. Staging first: apply `0024 → 0025 → 0026 → 0027` (idempotent), run
+1. Staging first: apply `0024 → 0025 → 0026 → 0027 → 0028 → 0029` (idempotent), run
    `supabase/checks/migration_state.sql`.
 2. Deploy the `company-admin-invite` function; secrets `INVITE_REDIRECT_URL`
    (the site ROOT — the app uses a hash router, so the email link cannot carry a
@@ -79,6 +79,17 @@ migrations. Therefore:
 3. Only then merge to `main`. (The frontend tolerates a database that is behind:
    the layout treats a missing membership RPC as "no membership".)
 4. Review `supabase/maintenance/review_unreviewed_org_claims.sql` (read-only).
+
+### 6a. Email and test accounts
+
+Supabase's built-in mailer allows only a few emails per hour per project and is
+shared by sign-up confirmations, password resets and invitations — once it is used
+up, confirmation emails silently stop. Production needs **custom SMTP**.
+To test without waiting: Dashboard → Authentication → Users → Add user → Create
+new user → tick **Auto Confirm User**; or run
+`update auth.users set email_confirmed_at = now() where email = '<address>';`.
+Invitations deliberately require a VERIFIED email, so an unconfirmed self-signed
+account cannot accept one.
 
 ## 7. Rollback
 
@@ -101,8 +112,6 @@ bypass directly against the database as the attacker's role.
 
 ## 9. Remaining / unverified
 
-* Phase E (bulk CSV onboarding) not built; it should create *pending invitations*
-  via `mg_create_org_invitation`, never accounts or roles.
 * In-app notifications for invitations / requests / role changes are not built
   (email only; the `notifications.kind` CHECK would need extending).
 * UI pages were typechecked and built but not exercised in a browser; the edge
@@ -113,3 +122,31 @@ bypass directly against the database as the attacker's role.
   in `mg_operator_site_ok` once every worker has been scoped.
 * Government-side per-company drill-down (company → sites → records) reuses the
   existing staff portal; no new regulator dashboard was added.
+
+## 10. Phase E — Onboarding officer and bulk import (migration 0029)
+
+**Dedicated role `onboarding_officer`** (company level, appointed only by a company
+administrator or the Ministry, by invitation):
+
+| Can | Cannot |
+|---|---|
+| run bulk imports; invite workers / safety officers; resend or revoke those invitations; read the workforce list | approve join requests; change roles; remove people; assign sites; invite site managers, officers or administrators; read ANY site or safety record (the per-site rule gives the role no site) |
+
+**Bulk import** (`/operate/import`, company administrators and officers): CSV
+columns `email` (required), `role` (`worker`|`safety_officer`, blank = worker),
+`full_name`, `site_code` (optional; the invitee is assigned that site on accepting).
+
+1. Browser: parse, size (<= 1 MB), row cap (<= 2000), header and per-row checks (fast feedback only).
+2. Server dry run per 100 rows (`mg_import_check`): existing members, pending invitations, unknown sites, administrative roles — nothing is written.
+3. Import (`mg_import_start` keyed by a client idempotency key, then `mg_import_apply` in batches of <= 100): each row number is processed at most once; the unique pending-invitation index prevents duplicates; a re-sent batch returns the recorded outcomes.
+4. Emails are a separate queue (`company-admin-invite` import mode, <= 20 per call); a failed send is released back to the queue (`mg_release_invitation_send`) so retries are not throttled.
+
+An import creates **pending invitations only** — no account, no membership, no
+administrative role (`company_admin`, `site_manager`, `onboarding_officer` rows are
+row errors). Addresses that are government accounts or members of another company
+all read "This address cannot be invited" (no cross-company disclosure). Spreadsheet
+formula injection is neutralised in the downloadable problem report.
+
+Rollback: drop the new functions/tables/policies and the `site_id` column; restore
+the 0026/0027/0028 definitions of the replaced functions; re-add the role CHECKs
+without `onboarding_officer` (only after removing officers).

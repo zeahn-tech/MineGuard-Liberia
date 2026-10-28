@@ -99,6 +99,8 @@ import {
   type UserProfile,
   type Company,
   type CompanySearchResult,
+  type ImportOutcome,
+  type ImportStatus,
   type MyMembership,
   type SiteRosterMember,
   type WorkforceMember,
@@ -107,6 +109,7 @@ import {
   type PendingInvitation,
   ROLES,
 } from "./types";
+import type { ImportRow } from "./csv-import";
 
 // ---------------------------------------------------------------------------
 // QUERY HANDLES — a Convex useQuery-compatible subscription surface
@@ -1680,6 +1683,8 @@ function authErrorMessage(
     return "EMAIL_IN_USE";
   if (m.includes("password should be at least") || m.includes("weak_password"))
     return "WEAK_PASSWORD";
+  if (m.includes("over_email_send_rate_limit") || m.includes("email rate limit"))
+    return "EMAIL_RATE_LIMIT";
   if (m.includes("over_request_rate_limit") || m.includes("too many"))
     return "TOO_MANY_ATTEMPTS";
   if (m.includes("anonymous sign-ins are disabled") || m.includes("anonymous"))
@@ -1787,7 +1792,7 @@ export async function signUpEmail(
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { name: name ?? null } },
+    options: { data: { name: name ?? null, full_name: name ?? null, display_name: name ?? null } },
   });
   if (error) throw new Error(authErrorMessage(error));
   if (!data.session) {
@@ -1796,6 +1801,24 @@ export async function signUpEmail(
     );
   }
   await ensureProfileDoc();
+}
+
+/** Invitee "create your account" step: sets the password and the full name on the
+ *  auth account (all metadata keys Supabase clients read) and on the profile row. */
+export async function completeInviteAccount(args: { name: string; password: string }) {
+  const name = args.name.trim();
+  if (name.length < 2) throw new Error("Enter your full name.");
+  const { error } = await supabase.auth.updateUser({
+    password: args.password,
+    data: { name, full_name: name, display_name: name },
+  });
+  if (error) throw new Error(authErrorMessage(error));
+  const uid = authUserId();
+  if (uid) {
+    const { error: pErr } = await supabase.from("profiles").update({ name }).eq("id", uid);
+    if (pErr) throw backendError(pErr);
+  }
+  bumpProfileVersion();
 }
 
 export async function signInGuest() {
@@ -2035,7 +2058,9 @@ const INVITE_ERRORS: Record<string, string> = {
   REASON_REQUIRED: "Record a reason (at least 5 characters).",
   EMAIL_FAILED: "The invitation was saved but the email could not be sent. Try resending.",
   NOT_CONFIGURED: "Invitation email is not configured yet. Contact the platform operator.",
-  INVALID_TARGET: "That person already reaches every site.",
+  INVALID_TARGET: "That person does not work on sites.",
+  INVALID_IMPORT: "The import could not be processed. Check the file and try again.",
+  INVALID_SITE: "That site does not belong to this company.",
   INVALID_ROLE: "That role cannot be assigned here. Company administrators are appointed by the Ministry.",
   MEMBERSHIP_NOT_PENDING: "This request has already been decided.",
   MEMBERSHIP_NOT_ACTIVE: "This person is no longer an active member.",
@@ -2054,6 +2079,10 @@ function friendlyInviteError(raw: string): Error {
 }
 
 async function inviteFunction(body: Record<string, unknown>): Promise<{ invitationId: string; delivery: string }> {
+  return (await invokeInviteFunction(body)) as { invitationId: string; delivery: string };
+}
+
+async function invokeInviteFunction(body: Record<string, unknown>): Promise<unknown> {
   const { data, error } = await supabase.functions.invoke("company-admin-invite", { body });
   if (error) {
     let code = "";
@@ -2066,7 +2095,7 @@ async function inviteFunction(body: Record<string, unknown>): Promise<{ invitati
     }
     throw friendlyInviteError(code || error.message || "");
   }
-  return data as { invitationId: string; delivery: string };
+  return data;
 }
 
 export const api = {
@@ -2316,6 +2345,61 @@ export const api = {
       await requireAuthed();
       const { error } = await supabase.rpc("mg_unassign_member_site", { p_member_id: args.memberId, p_site_id: args.siteId });
       if (error) throw friendlyInviteError(error.message);
+    },
+
+    // ---- Bulk workforce import (migration 0029). The server validates every row; the
+    // browser's parsing is only for fast feedback. Imports create PENDING INVITATIONS only.
+    importCheck: async (args: { organizationId: string; rows: ImportRow[] }): Promise<ImportOutcome[]> => {
+      await requireAuthed();
+      const { data, error } = await supabase.rpc("mg_import_check", { p_org: args.organizationId, p_rows: args.rows });
+      if (error) throw friendlyInviteError(error.message);
+      return (data ?? []) as ImportOutcome[];
+    },
+    importStart: async (args: { organizationId: string; key: string; filename: string; totalRows: number }): Promise<string> => {
+      await requireAuthed();
+      const { data, error } = await supabase.rpc("mg_import_start", {
+        p_org: args.organizationId,
+        p_key: args.key,
+        p_filename: args.filename,
+        p_total_rows: args.totalRows,
+      });
+      if (error) throw friendlyInviteError(error.message);
+      return data as string;
+    },
+    importApply: async (args: { importId: string; rows: ImportRow[] }): Promise<ImportOutcome[]> => {
+      await requireAuthed();
+      const { data, error } = await supabase.rpc("mg_import_apply", { p_import: args.importId, p_rows: args.rows });
+      if (error) throw friendlyInviteError(error.message);
+      return (data ?? []) as ImportOutcome[];
+    },
+    importStatus: async (args: { importId: string }): Promise<ImportStatus> => {
+      await requireAuthed();
+      const { data, error } = await supabase.rpc("mg_import_status", { p_import: args.importId });
+      if (error) throw friendlyInviteError(error.message);
+      return data as ImportStatus;
+    },
+    /** The rows that did not become invitations, for the downloadable report. */
+    importProblemRows: async (args: { importId: string }) => {
+      await requireAuthed();
+      const { data, error } = await supabase
+        .from("organization_import_rows")
+        .select("row_number,email,outcome,message")
+        .eq("import_id", args.importId)
+        .in("outcome", ["error", "duplicate_in_file"])
+        .order("row_number", { ascending: true })
+        .limit(2000);
+      if (error) throw backendError(error);
+      return ((data ?? []) as AnyRow[]).map((r) => ({
+        row: Number(r.row_number),
+        email: (r.email as string) ?? "",
+        outcome: r.outcome as string,
+        message: (r.message as string) ?? "",
+      }));
+    },
+    /** Sends the next small batch of an import's unsent invitation emails (retry-safe). */
+    sendImportEmails: async (args: { importId: string }): Promise<{ sent: number; failed: number; remaining: number }> => {
+      await requireAuthed();
+      return (await invokeInviteFunction({ importId: args.importId })) as { sent: number; failed: number; remaining: number };
     },
 
     /** Requester side: find an approved company (3+ characters) and ask to join. */

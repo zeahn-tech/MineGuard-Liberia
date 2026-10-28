@@ -110,6 +110,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       return "An account already exists with that email — sign in instead.";
     if (msg.includes("EMAIL_NOT_CONFIRMED"))
       return "Email not confirmed yet. Check your inbox.";
+    if (msg.includes("EMAIL_RATE_LIMIT"))
+      return "The email service has reached its sending limit. Wait an hour and try again, or ask the administrator to confirm your account.";
     if (msg.includes("TOO_MANY_ATTEMPTS"))
       return "Too many attempts — please wait a moment and try again.";
     if (

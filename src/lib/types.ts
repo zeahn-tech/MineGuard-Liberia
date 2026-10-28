@@ -106,6 +106,25 @@ export interface SiteRosterMember {
   assigned: boolean;
 }
 
+/** Server verdict for one imported row (migrations 0029). */
+export interface ImportOutcome {
+  row: number;
+  outcome: "ok" | "invited" | "already_invited" | "already_member" | "duplicate_in_file" | "error";
+  message: string;
+}
+
+export interface ImportStatus {
+  status: "processing" | "completed" | "completed_with_errors";
+  total: number;
+  processed: number;
+  invited: number;
+  alreadyInvited: number;
+  alreadyMember: number;
+  duplicates: number;
+  errors: number;
+  unsent: number;
+}
+
 export interface CompanySearchResult {
   id: string;
   name: string;

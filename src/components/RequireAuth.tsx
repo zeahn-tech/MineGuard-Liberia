@@ -165,6 +165,64 @@ function NoRoleScreen() {
   );
 }
 
+const STAFF_ONBOARDING_KEY = "mg.onboarding.staff.v1";
+
+/** A role-less account reaching a staff route. (1) A waiting company invitation
+ *  wins: go accept it. (2) Otherwise ask which kind of account this is — staff
+ *  continue into the existing staff onboarding (which also bootstraps the very
+ *  first administrator), company people are sent to join / accept an invitation.
+ *  Convenience only: the server decides what any account can actually do. */
+function RolelessGate({ children }: { children: ReactNode }) {
+  const invitations = useQuery(api.companies.myInvitations);
+  const [staff, setStaff] = useState(() => {
+    try {
+      return sessionStorage.getItem(STAFF_ONBOARDING_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  if (invitations === undefined) return <AuthLoading />;
+  if (invitations.length > 0) return <Navigate to="/invitation" replace />;
+  if (staff) return <>{children}</>;
+  return (
+    <main className="flex min-h-dvh items-center justify-center bg-background p-6">
+      <div className="w-full max-w-md space-y-3 text-center">
+        <p className="display text-lg">Welcome to MineGuard Liberia</p>
+        <p className="text-sm text-muted-foreground">
+          Your account has no role yet. Which describes you?
+        </p>
+        <Link
+          to="/join"
+          className="block rounded-md border p-4 text-left text-sm hover:bg-muted/40"
+        >
+          <span className="font-medium">I work for a mining company</span>
+          <span className="mt-1 block text-xs text-muted-foreground">
+            Accept an invitation or ask your company to add you.
+          </span>
+        </Link>
+        <button
+          type="button"
+          className="block w-full rounded-md border p-4 text-left text-sm hover:bg-muted/40"
+          onClick={() => {
+            try {
+              sessionStorage.setItem(STAFF_ONBOARDING_KEY, "1");
+            } catch {
+              /* private mode: the choice just isn't remembered */
+            }
+            setStaff(true);
+          }}
+        >
+          <span className="font-medium">I am Ministry or inspection staff</span>
+          <span className="mt-1 block text-xs text-muted-foreground">
+            Continue to staff onboarding; the program office assigns your role.
+          </span>
+        </button>
+      </div>
+    </main>
+  );
+}
+
+
 /** STAFF SECTION GATE — admin / supervisor / inspector only. An operator or
  *  unassigned account hitting any /portal/* staff route is bounced to their
  *  own section (operators) or a no-role notice. This is the structural
@@ -184,6 +242,12 @@ export function RequireStaff({ children }: { children: ReactNode }) {
     return (
       <Navigate to={`/auth?returnTo=${encodeURIComponent(returnTo)}`} replace />
     );
+  }
+
+  if (!user?.role) {
+    // No role yet: a company invitee must never be dropped into the staff portal
+    // (that onboarding is for Ministry / inspection staff). See RolelessGate.
+    return <RolelessGate>{children}</RolelessGate>;
   }
 
   if (user?.role && !isStaffRole(user.role)) {
