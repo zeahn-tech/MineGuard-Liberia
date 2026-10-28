@@ -279,7 +279,7 @@ export default function OperatorLayout() {
             {mobileNavOpen && (
               <nav className="space-y-1 border-b border-border px-3 py-3 md:hidden">
                 <OperatorNavLinks
-                  items={OPERATOR_NAV}
+                  items={navItems}
                   onNavigate={() => setMobileNavOpen(false)}
                 />
                 <Button

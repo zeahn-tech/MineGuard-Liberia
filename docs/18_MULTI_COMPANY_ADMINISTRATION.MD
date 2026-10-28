@@ -70,7 +70,7 @@ used invitations, redirect URL fixed by server configuration.
 GitHub Pages deploys the **frontend** on merge to `main` and never applies
 migrations. Therefore:
 
-1. Staging first: apply `0024 → 0025 → 0026 → 0027` (idempotent), run
+1. Staging first: apply `0024 → 0025 → 0026 → 0027 → 0028` (idempotent), run
    `supabase/checks/migration_state.sql`.
 2. Deploy the `company-admin-invite` function; secrets `INVITE_REDIRECT_URL`
    (the site ROOT — the app uses a hash router, so the email link cannot carry a
@@ -79,6 +79,17 @@ migrations. Therefore:
 3. Only then merge to `main`. (The frontend tolerates a database that is behind:
    the layout treats a missing membership RPC as "no membership".)
 4. Review `supabase/maintenance/review_unreviewed_org_claims.sql` (read-only).
+
+### 6a. Email and test accounts
+
+Supabase's built-in mailer allows only a few emails per hour per project and is
+shared by sign-up confirmations, password resets and invitations — once it is used
+up, confirmation emails silently stop. Production needs **custom SMTP**.
+To test without waiting: Dashboard → Authentication → Users → Add user → Create
+new user → tick **Auto Confirm User**; or run
+`update auth.users set email_confirmed_at = now() where email = '<address>';`.
+Invitations deliberately require a VERIFIED email, so an unconfirmed self-signed
+account cannot accept one.
 
 ## 7. Rollback
 

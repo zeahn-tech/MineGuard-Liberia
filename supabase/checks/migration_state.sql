@@ -59,6 +59,10 @@ select migration, applied
        and exists (
          select 1 from information_schema.columns
           where table_schema = 'public' and table_name = 'site_assignments' and column_name = 'revoked_at')),
+    ('0028 account names + invitation cleanup',
+       exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                where n.nspname = 'public' and p.proname = 'handle_new_user'
+                  and p.prosrc like '%full_name%')),
     ('0018 boundaries published to Realtime',
        exists (
          select 1 from pg_publication_tables

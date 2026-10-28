@@ -1680,6 +1680,8 @@ function authErrorMessage(
     return "EMAIL_IN_USE";
   if (m.includes("password should be at least") || m.includes("weak_password"))
     return "WEAK_PASSWORD";
+  if (m.includes("over_email_send_rate_limit") || m.includes("email rate limit"))
+    return "EMAIL_RATE_LIMIT";
   if (m.includes("over_request_rate_limit") || m.includes("too many"))
     return "TOO_MANY_ATTEMPTS";
   if (m.includes("anonymous sign-ins are disabled") || m.includes("anonymous"))
@@ -1787,7 +1789,7 @@ export async function signUpEmail(
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { name: name ?? null } },
+    options: { data: { name: name ?? null, full_name: name ?? null, display_name: name ?? null } },
   });
   if (error) throw new Error(authErrorMessage(error));
   if (!data.session) {
@@ -1796,6 +1798,24 @@ export async function signUpEmail(
     );
   }
   await ensureProfileDoc();
+}
+
+/** Invitee "create your account" step: sets the password and the full name on the
+ *  auth account (all metadata keys Supabase clients read) and on the profile row. */
+export async function completeInviteAccount(args: { name: string; password: string }) {
+  const name = args.name.trim();
+  if (name.length < 2) throw new Error("Enter your full name.");
+  const { error } = await supabase.auth.updateUser({
+    password: args.password,
+    data: { name, full_name: name, display_name: name },
+  });
+  if (error) throw new Error(authErrorMessage(error));
+  const uid = authUserId();
+  if (uid) {
+    const { error: pErr } = await supabase.from("profiles").update({ name }).eq("id", uid);
+    if (pErr) throw backendError(pErr);
+  }
+  bumpProfileVersion();
 }
 
 export async function signInGuest() {

@@ -11,7 +11,7 @@ beforeAll(async () => {
   f = await getFixture();
   const { getDb } = await import("./helpers/pglite-db");
   const db = await getDb();
-  for (const m of ["0024_self_service_tenant_lockdown.sql", "0025_company_status_membership_invitations.sql", "0026_company_workforce.sql", "0027_site_scoped_access.sql"]) {
+  for (const m of ["0024_self_service_tenant_lockdown.sql", "0025_company_status_membership_invitations.sql", "0026_company_workforce.sql", "0027_site_scoped_access.sql", "0028_account_names_invitation_cleanup.sql"]) {
     await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", m), "utf8"));
   }
 });

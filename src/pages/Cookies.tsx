@@ -29,6 +29,13 @@ const ROWS: Row[] = [
     kind: "Essential",
   },
   {
+    name: "mg.onboarding.staff.v1",
+    where: "sessionStorage",
+    purpose: "Remembers that you chose \"Ministry or inspection staff\" on the welcome screen so it is not asked again while you finish onboarding.",
+    keeps: "Deleted when the browser tab closes.",
+    kind: "Essential",
+  },
+  {
     name: "mg.chunk-reload",
     where: "sessionStorage",
     purpose: "Stops the app reloading in a loop after an update.",
