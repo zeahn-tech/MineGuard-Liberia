@@ -13,7 +13,7 @@
 -- The person must SIGN OUT AND SIGN BACK IN afterwards.
 -- ===========================================================================
 with who as (
-  select lower('replace-with-email@example.org') as email   -- <-- EDIT THIS LINE ONLY
+  select lower('chrisdestinymoorezeahn@gmail.com') as email   -- <-- EDIT THIS LINE ONLY
 ),
 assigned as (
   update public.profiles p
