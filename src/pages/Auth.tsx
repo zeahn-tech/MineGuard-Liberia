@@ -44,6 +44,7 @@ function resolveRedirectAfterAuth(
   }
   // No explicit returnTo: land each identity in its OWN section (§20).
   if (role === "operator") return "/operate";
+  if (role === "registrar") return "/registry";
   return fallback;
 }
 

@@ -11,7 +11,7 @@ beforeAll(async () => {
   f = await getFixture();
   const { getDb } = await import("./helpers/pglite-db");
   const db = await getDb();
-  for (const m of ["0024_self_service_tenant_lockdown.sql", "0025_company_status_membership_invitations.sql", "0026_company_workforce.sql", "0027_site_scoped_access.sql", "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql"]) {
+  for (const m of ["0024_self_service_tenant_lockdown.sql", "0025_company_status_membership_invitations.sql", "0026_company_workforce.sql", "0027_site_scoped_access.sql", "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql"]) {
     await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", m), "utf8"));
   }
 });
@@ -210,6 +210,30 @@ describe("company-admin-invite handler: import send mode (Phase E)", () => {
         expect(sent).toEqual([]);
       }
       expect((await handleInviteRequest(deps(run).d, { importId: "nope" })).status).toBe(400);
+    });
+  });
+});
+
+describe("company-admin-invite handler: the registrar (migration 0031)", () => {
+  const REG = "aaaaaaaa-0000-4000-8000-000000000091";
+  test("a registrar's administrator nominations are emailed; any other role, or a company, is refused", async () => {
+    const { withRole } = await import("./helpers/pglite-db");
+    await withRole("postgres", null, async (run) => {
+      await run(`insert into auth.users (id, email) values ('${REG}','registrar@ministry.test')`);
+      await run(`update public.profiles set role = 'registrar', scope = 'national', profile_complete = true where id = '${REG}'`);
+      const orgA = (await run("select id from public.organizations where name = 'AgriLib Mining'"))[0].id as string;
+      await run("set local role authenticated");
+      await run(`select set_config('request.jwt.claims', '{"sub":"${REG}","role":"authenticated"}', true)`);
+      const { d, sent } = deps(run);
+      const ok = await handleInviteRequest(d, { organizationId: orgA, email: "First.Admin@agrilib.test", role: "company_admin" });
+      expect(ok.status).toBe(200);
+      expect(sent.map((s) => s.email)).toEqual(["first.admin@agrilib.test"]);
+      const again = await handleInviteRequest(d, { invitationId: ok.body.invitationId }); // resend is throttled, not forbidden
+      expect(again.status).toBe(429);
+      for (const role of ["worker", "safety_officer", "site_manager", "onboarding_officer"]) {
+        expect((await handleInviteRequest(d, { organizationId: orgA, email: `${role}@x.test`, role })).status, role).toBe(403);
+      }
+      expect(sent.length).toBe(1);
     });
   });
 });

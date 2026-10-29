@@ -31,7 +31,7 @@ export default function Join() {
   if (!isAuthenticated) return <Navigate to="/auth?returnTo=%2Fjoin" replace />;
   if (user?.role && !mine) {
     // Staff accounts and accounts that already have a workspace have nothing to join.
-    return <Navigate to={user.role === "operator" ? "/operate" : "/portal"} replace />;
+    return <Navigate to={user.role === "operator" ? "/operate" : user.role === "registrar" ? "/registry" : "/portal"} replace />;
   }
 
   async function search() {
