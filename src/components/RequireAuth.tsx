@@ -256,6 +256,9 @@ export function RequireStaff({ children }: { children: ReactNode }) {
     if (user.role === ROLES.OPERATOR) {
       return <Navigate to="/operate" replace />;
     }
+    if (user.role === ROLES.REGISTRAR) {
+      return <Navigate to="/registry" replace />;
+    }
     return (
       <main className="flex min-h-dvh items-center justify-center bg-background p-6">
         <div className="max-w-md text-center">
@@ -290,8 +293,35 @@ export function RequireOperator({ children }: { children: ReactNode }) {
     );
   }
 
+  if (user?.role === ROLES.REGISTRAR) {
+    return <Navigate to="/registry" replace />;
+  }
   if (user?.role !== ROLES.OPERATOR) {
     return <Navigate to="/portal" replace />;
+  }
+
+  return children;
+}
+
+/** REGISTRY SECTION GATE — the Company registrar only. Everyone else is sent to
+ *  their own section (the database is the real boundary; this is routing). */
+export function RequireRegistrar({ children }: { children: ReactNode }) {
+  const { isLoading, isAuthenticated, user } = useAuth();
+  const location = useLocation();
+
+  if (isLoading) {
+    return <AuthLoading />;
+  }
+
+  if (!isAuthenticated) {
+    const returnTo = `${location.pathname}${location.search}`;
+    return (
+      <Navigate to={`/auth?returnTo=${encodeURIComponent(returnTo)}`} replace />
+    );
+  }
+
+  if (user?.role !== ROLES.REGISTRAR) {
+    return <Navigate to={user?.role === ROLES.OPERATOR ? "/operate" : "/portal"} replace />;
   }
 
   return children;

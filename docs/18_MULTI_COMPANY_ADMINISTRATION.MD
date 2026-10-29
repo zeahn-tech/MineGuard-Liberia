@@ -1,6 +1,6 @@
 # 18 — Multi-company, site and workforce administration
 
-Status: implemented on branch `feature/multi-company-admin` (migrations 0024–0029).
+Status: implemented on branch `feature/multi-company-admin` (migrations 0024–0031).
 **Not applied to any live database.** Phase E (bulk CSV onboarding + the dedicated
 Onboarding officer role) is built; see §10.
 
@@ -24,7 +24,7 @@ New tables (necessary because no equivalent existed): `organization_members`
 
 | Actor | Can | Cannot |
 |---|---|---|
-| Ministry `admin` (`organizations.write`) | register/approve a company; nominate company administrators; suspend/deactivate/reactivate with reason; manage any company's workforce; see all sites | — |
+| Ministry `admin` (`organizations.write` + `workforce.oversee`) | register/approve a company; nominate company administrators; suspend/deactivate/reactivate with reason; manage any company's workforce; see all sites | — |
 | Company administrator (active, company **approved**) | invite worker / safety officer / site manager; decide join requests; change roles; remove members; assign people to sites; see all company sites | appoint administrators; touch another company; change own role / remove self; act while company is suspended |
 | Site manager | see only assigned sites; assign **workers/safety officers** to **their** sites; read that site's roster | see unassigned sites; assign site managers or themselves; invite; change roles |
 | Worker / safety officer | company-wide access until assigned; once assigned, only assigned sites | any administration |
@@ -70,7 +70,7 @@ used invitations, redirect URL fixed by server configuration.
 GitHub Pages deploys the **frontend** on merge to `main` and never applies
 migrations. Therefore:
 
-1. Staging first: apply `0024 → 0025 → 0026 → 0027 → 0028 → 0029` (idempotent), run
+1. Staging first: apply `0024 → 0025 → 0026 → 0027 → 0028 → 0029 → 0030 → 0031` (0030 must be its own run: it adds the `registrar` enum value, which PostgreSQL cannot use in the same transaction) (idempotent), run
    `supabase/checks/migration_state.sql`.
 2. Deploy the `company-admin-invite` function; secrets `INVITE_REDIRECT_URL`
    (the site ROOT — the app uses a hash router, so the email link cannot carry a
@@ -150,3 +150,34 @@ formula injection is neutralised in the downloadable problem report.
 Rollback: drop the new functions/tables/policies and the `site_id` column; restore
 the 0026/0027/0028 definitions of the replaced functions; re-add the role CHECKs
 without `onboarding_officer` (only after removing officers).
+
+## 11. The dedicated Ministry role: Company registrar (migrations 0030 + 0031)
+
+For a licensing / authorization office that should approve companies **without**
+being a full platform administrator.
+
+| A registrar CAN | A registrar CANNOT |
+|---|---|
+| register + approve a company | read any site, incident, inspection, finding, corrective action or audit record |
+| nominate a company's FIRST administrator; resend / revoke those invitations | read other people's profiles, or manage accounts, roles, boundaries, templates |
+| suspend / deactivate / reactivate a company (reason required) | see or change any company's workforce: members, join requests, roles, imports, site people |
+| see the company directory: status, site COUNT, administrators, invitation state, member and request COUNTS | invite workers, officers or site managers; become a company user by any route (invite, request, accept, import) |
+
+How it is enforced: the role holds exactly one permission, `organizations.write`.
+Workforce oversight, which `admin` previously had implicitly through that same
+permission, is now its own permission `workforce.oversee` (admin only), and
+`mg_can_manage_company` tests it — so `admin` behaves exactly as before and the
+registrar does not inherit company internals. The directory
+(`mg_company_directory`) lists administrators individually and counts everyone
+else, so no worker identity reaches the registry screen.
+
+Assigning: a full admin provisions the role (`provision_user_by_email(email,
+'registrar', 'national')`), or run `supabase/maintenance/assign_company_registrar.sql`
+in the SQL Editor (the person must have signed up, and must not belong to a company).
+The registrar signs in to `/registry`, which shows the Companies screen only.
+
+Rollback: restore the 0026 `mg_can_manage_company` and the 0029/0026/0028 versions of
+the invitation, accept, request, decide and import-eval functions; drop
+`mg_company_directory`; delete the registrar and `workforce.oversee` permission rows;
+set `profiles.role = null` for registrars. (The enum value stays; PostgreSQL cannot
+drop one and it is harmless.)

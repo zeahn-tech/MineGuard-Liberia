@@ -93,8 +93,8 @@ function CompanyCard({ company }: { company: Company }) {
 
   const admins = company.members.filter((m) => m.orgRole === "company_admin" && m.status === "active");
   const approved = company.status === "approved";
-  const activeCount = company.members.filter((m) => m.status === "active").length;
-  const pendingCount = company.members.filter((m) => m.status === "pending").length;
+  const activeCount = company.activeMembers;
+  const pendingCount = company.pendingRequests;
 
   async function run<T>(fn: () => Promise<T>, ok: string) {
     setBusy(true);
@@ -247,14 +247,14 @@ export default function Companies() {
   const [busy, setBusy] = useState(false);
 
   if (!user) return null;
-  if (user.role !== "admin") {
+  if (user.role !== "admin" && user.role !== "registrar") {
     return (
       <div className="paper flex min-w-0 items-start gap-3 p-6">
         <ShieldAlert className="mt-0.5 size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
         <div className="min-w-0">
-          <p className="text-sm font-medium">Administrator access required</p>
+          <p className="text-sm font-medium">Ministry authorization access required</p>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Registering companies and nominating their administrators is limited to authorized Ministry administrators.
+            Registering companies and nominating their administrators is limited to Ministry administrators and company registrars.
           </p>
         </div>
       </div>

@@ -66,6 +66,14 @@ select migration, applied
     ('0029 onboarding officer + bulk import',
        to_regclass('public.organization_imports') is not null
        and exists (select 1 from fns where proname = 'mg_import_apply')),
+    ('0030 registrar role value',
+       exists (select 1 from pg_enum e join pg_type t on t.oid = e.enumtypid
+                where t.typname = 'user_role' and e.enumlabel = 'registrar')),
+    ('0031 company registrar role',
+       exists (select 1 from fns where proname = 'mg_company_directory')
+       and exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                    where n.nspname = 'public' and p.proname = 'mg_can_manage_company'
+                      and p.prosrc like '%workforce.oversee%')),
     ('0018 boundaries published to Realtime',
        exists (
          select 1 from pg_publication_tables

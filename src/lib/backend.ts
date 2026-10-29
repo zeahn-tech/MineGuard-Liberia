@@ -425,6 +425,14 @@ async function requireAdminUser(cached = false): Promise<UserProfile> {
   return user;
 }
 
+/** Company authority: the full administrator OR the dedicated Company registrar.
+ *  (Convenience only — every company RPC re-checks organizations.write in the database.) */
+async function requireCompanyAuthority(cached = false): Promise<UserProfile> {
+  const user = await requireAuthed(cached);
+  if (user.role !== ROLES.ADMIN && user.role !== ROLES.REGISTRAR) throw new Error("FORBIDDEN");
+  return user;
+}
+
 async function requireReviewerUser(cached = false): Promise<UserProfile> {
   const user = await requireAuthed(cached);
   if (user.role !== ROLES.ADMIN && user.role !== ROLES.SUPERVISOR)
@@ -2098,6 +2106,87 @@ async function invokeInviteFunction(body: Record<string, unknown>): Promise<unkn
   return data;
 }
 
+// Company registry mapping (migration 0031). The directory returns administrators and
+// invitations individually and everyone else only as counts.
+function mapDirectory(rows: AnyRow[]): Company[] {
+  return rows.map((o) => ({
+    id: o.id as string,
+    name: o.name as string,
+    status: ((o.status as CompanyStatus) ?? "approved") as CompanyStatus,
+    statusReason: (o.statusReason as string) ?? undefined,
+    siteCount: Number(o.siteCount ?? 0),
+    activeMembers: Number(o.activeMembers ?? 0),
+    pendingRequests: Number(o.pendingRequests ?? 0),
+    invitations: ((o.invitations ?? []) as AnyRow[]).map((i) => ({
+      id: i.id as string,
+      organizationId: o.id as string,
+      email: i.email as string,
+      orgRole: i.orgRole as string,
+      status: i.status as CompanyInvitation["status"],
+      expiresAt: Date.parse(i.expiresAt as string),
+      lastSentAt: i.lastSentAt ? Date.parse(i.lastSentAt as string) : undefined,
+      sendCount: Number(i.sendCount ?? 0),
+      createdAt: Date.parse(i.createdAt as string),
+    })),
+    members: ((o.admins ?? []) as AnyRow[]).map((m) => ({
+      userId: m.userId as string,
+      email: (m.email as string) ?? null,
+      name: (m.name as string) ?? null,
+      orgRole: "company_admin",
+      status: "active",
+    })),
+  }));
+}
+
+/** Pre-0031 path (admin only): the same shape built from direct table reads. */
+async function legacyCompanyList(): Promise<Company[]> {
+  const [orgs, invs, members, profiles, sites] = await Promise.all([
+    allRows<AnyRow>("organizations"),
+    allRows<AnyRow>("organization_invitations"),
+    allRows<AnyRow>("organization_members"),
+    allRows<AnyRow>("profiles"),
+    allRows<AnyRow>("sites"),
+  ]);
+  const byId = new Map(profiles.map((p) => [p.id as string, p]));
+  return orgs
+    .map((o) => {
+      const live = members.filter((m) => m.organization_id === o.id && (m.status === "active" || m.status === "pending"));
+      return {
+        id: o.id as string,
+        name: o.name as string,
+        status: ((o.status as CompanyStatus) ?? "approved") as CompanyStatus,
+        statusReason: (o.status_reason as string) ?? undefined,
+        siteCount: sites.filter((s) => s.organization_id === o.id).length,
+        activeMembers: live.filter((m) => m.status === "active").length,
+        pendingRequests: live.filter((m) => m.status === "pending").length,
+        invitations: invs
+          .filter((i) => i.organization_id === o.id && i.org_role === "company_admin")
+          .map((i) => ({
+            id: i.id as string,
+            organizationId: o.id as string,
+            email: i.email as string,
+            orgRole: i.org_role as string,
+            status: i.status as CompanyInvitation["status"],
+            expiresAt: Date.parse(i.expires_at as string),
+            lastSentAt: i.last_sent_at ? Date.parse(i.last_sent_at as string) : undefined,
+            sendCount: Number(i.send_count ?? 0),
+            createdAt: Date.parse(i.created_at as string),
+          }))
+          .sort((a, b) => b.createdAt - a.createdAt),
+        members: live
+          .filter((m) => m.org_role === "company_admin" && m.status === "active")
+          .map((m) => ({
+            userId: m.user_id as string,
+            email: (byId.get(m.user_id as string)?.email as string) ?? null,
+            name: (byId.get(m.user_id as string)?.name as string) ?? null,
+            orgRole: m.org_role as string,
+            status: m.status as string,
+          })),
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export const api = {
   // ----------------------------------------------------------------- users
   companies: {
@@ -2105,53 +2194,20 @@ export const api = {
     list: () =>
       live<Company[]>(
         async () => {
-          await requireAdminUser(true);
-          const [orgs, invs, members, profiles, sites] = await Promise.all([
-            allRows<AnyRow>("organizations"),
-            allRows<AnyRow>("organization_invitations"),
-            allRows<AnyRow>("organization_members"),
-            allRows<AnyRow>("profiles"),
-            allRows<AnyRow>("sites"),
-          ]);
-          const byId = new Map(profiles.map((p) => [p.id as string, p]));
-          return orgs
-            .map((o) => ({
-              id: o.id as string,
-              name: o.name as string,
-              status: ((o.status as CompanyStatus) ?? "approved") as CompanyStatus,
-              statusReason: (o.status_reason as string) ?? undefined,
-              siteCount: sites.filter((s) => s.organization_id === o.id).length,
-              invitations: invs
-                .filter((i) => i.organization_id === o.id)
-                .map((i) => ({
-                  id: i.id as string,
-                  organizationId: o.id as string,
-                  email: i.email as string,
-                  orgRole: i.org_role as string,
-                  status: i.status as CompanyInvitation["status"],
-                  expiresAt: Date.parse(i.expires_at as string),
-                  lastSentAt: i.last_sent_at ? Date.parse(i.last_sent_at as string) : undefined,
-                  sendCount: Number(i.send_count ?? 0),
-                  createdAt: Date.parse(i.created_at as string),
-                }))
-                .sort((a, b) => b.createdAt - a.createdAt),
-              members: members
-                .filter((m) => m.organization_id === o.id && (m.status === "active" || m.status === "pending"))
-                .map((m) => ({
-                  userId: m.user_id as string,
-                  email: (byId.get(m.user_id as string)?.email as string) ?? null,
-                  name: (byId.get(m.user_id as string)?.name as string) ?? null,
-                  orgRole: m.org_role as string,
-                  status: m.status as string,
-                })),
-            }))
-            .sort((a, b) => a.name.localeCompare(b.name));
+          await requireCompanyAuthority(true);
+          const dir = await supabase.rpc("mg_company_directory");
+          if (!dir.error) return mapDirectory((dir.data ?? []) as AnyRow[]);
+          // Release order: tolerate a database that has not received migration 0031 yet.
+          if (!(dir.error.code === "PGRST202" || /could not find the function/i.test(dir.error.message ?? ""))) {
+            throw backendError(dir.error);
+          }
+          return legacyCompanyList();
         },
         ["organizations", "organization_invitations", "organization_members", "sites"],
       ),
 
     register: async (args: { name: string }): Promise<string> => {
-      await requireAdminUser();
+      await requireCompanyAuthority();
       const { data, error } = await supabase.rpc("mg_register_company", { p_name: args.name });
       if (error) throw friendlyInviteError(error.message);
       return data as string;
@@ -2159,23 +2215,23 @@ export const api = {
 
     /** Create (or reuse) the company-administrator invitation and send the email. */
     inviteAdmin: async (args: { organizationId: string; email: string }) => {
-      await requireAdminUser();
+      await requireCompanyAuthority();
       return inviteFunction({ organizationId: args.organizationId, email: args.email });
     },
 
     resendInvitation: async (args: { invitationId: string }) => {
-      await requireAdminUser();
+      await requireCompanyAuthority();
       return inviteFunction({ invitationId: args.invitationId });
     },
 
     revokeInvitation: async (args: { invitationId: string }) => {
-      await requireAdminUser();
+      await requireCompanyAuthority();
       const { error } = await supabase.rpc("mg_revoke_invitation", { p_id: args.invitationId });
       if (error) throw friendlyInviteError(error.message);
     },
 
     setStatus: async (args: { organizationId: string; status: CompanyStatus; reason?: string }) => {
-      await requireAdminUser();
+      await requireCompanyAuthority();
       const { error } = await supabase.rpc("mg_set_company_status", {
         p_org: args.organizationId,
         p_status: args.status,

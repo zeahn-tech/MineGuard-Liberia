@@ -36,7 +36,7 @@ afterEach(async () => {
     "0025_company_status_membership_invitations.sql",
     "0026_company_workforce.sql",
     "0027_site_scoped_access.sql",
-    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql",
+    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql",
   ]) {
     await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
   }
@@ -680,9 +680,10 @@ describe("0010 organizations, scopes & permissions (SEC-5/SITE-1)", () => {
     await db.exec(sql);
     expect(await snapshot()).toEqual(first);
     // The matrix seeds exactly once (11 admin — 0019 adds risk.config.write —
-    // + 4 supervisor + 3 inspector + 1 operator) — the unique constraint is
-    // the backstop, the count is the drift alarm.
-    expect(Number(first.perms)).toBe(19);
+    // + 4 supervisor + 3 inspector + 1 operator, then 0031 adds admin's
+    // workforce.oversee and the registrar's single organizations.write) — the
+    // unique constraint is the backstop, the count is the drift alarm.
+    expect(Number(first.perms)).toBe(21);
     // The scope enum stands at its six values: the rename-and-repoint
     // sequence skips straight through on re-run (no seven-value creep, no
     // resurrection of the three-value predecessor).
@@ -766,6 +767,8 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_can_onboard_company(uuid)",
     "mg_cancel_membership_request()",
     "mg_command_center_stats()",
+    // 0031 (registrar): the company directory (self-authorizes on organizations.write)
+    "mg_company_directory()",
     "mg_company_workforce(uuid)",
     // 0014's five scale surfaces — SECURITY INVOKER row sources 0011 must
     // keep granted when it re-runs (see 0011 header, bullet E).

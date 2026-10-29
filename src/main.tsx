@@ -6,7 +6,7 @@ import { RouteLoading } from "@/components/RouteLoading";
 import React, { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter, Route, Routes } from "react-router";
-import { RequireStaff } from "@/components/RequireAuth";
+import { RequireRegistrar, RequireStaff } from "@/components/RequireAuth";
 import "./index.css";
 import { installChunkRecovery } from "@/lib/chunk-recovery";
 import { startInstallPrompt } from "@/lib/install-prompt";
@@ -23,6 +23,7 @@ const PortalLayout = lazy(() => import("./pages/PortalLayout.tsx"));
 const CommandCenter = lazy(() => import("./pages/CommandCenter.tsx"));
 const OperatorPortal = lazy(() => import("./pages/OperatorPortal.tsx"));
 const Companies = lazy(() => import("./pages/Companies.tsx"));
+const RegistryLayout = lazy(() => import("./pages/RegistryLayout.tsx"));
 const Invitation = lazy(() => import("./pages/Invitation.tsx"));
 const Join = lazy(() => import("./pages/Join.tsx"));
 const OperatorTeam = lazy(() => import("./pages/operate/OperatorTeam.tsx"));
@@ -121,6 +122,20 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/cookies" element={<Cookies />} />
             <Route path="/report" element={<CommunitySubmit />} />
             <Route path="/report/track" element={<CommunityTrack />} />
+
+            {/* COMPANY REGISTRY — the dedicated Ministry registrar's workspace: the
+                companies screen only. Gated by RequireRegistrar (routing); the database
+                grants the role nothing but company authorization. */}
+            <Route
+              path="/registry"
+              element={
+                <RequireRegistrar>
+                  <RegistryLayout />
+                </RequireRegistrar>
+              }
+            >
+              <Route index element={<Companies />} />
+            </Route>
 
             {/* OPERATOR SECTION — a routed section of its own (Priority B
                 §20), gated by RequireOperator. Staff identities are

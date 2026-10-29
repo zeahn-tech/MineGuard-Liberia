@@ -12,6 +12,8 @@ export const ROLES = {
   SUPERVISOR: "supervisor",
   INSPECTOR: "inspector",
   OPERATOR: "operator",
+  /** Ministry licensing office: authorizes companies; no safety records, accounts or workforce data. */
+  REGISTRAR: "registrar",
 } as const;
 
 export type Role = (typeof ROLES)[keyof typeof ROLES];
@@ -71,7 +73,11 @@ export interface Company {
   status: CompanyStatus;
   statusReason?: string;
   siteCount: number;
+  /** Counted, never listed: the registry does not expose worker identities. */
+  activeMembers: number;
+  pendingRequests: number;
   invitations: CompanyInvitation[];
+  /** Company administrators only. */
   members: CompanyAdminMember[];
 }
 
