@@ -93,6 +93,9 @@ update public.profiles
    set role = 'admin', scope = 'national', profile_complete = true,
        job_title = 'Director', organization = 'MineGuard Liberia'
  where id = '${EDGE_IDS.admin}';
+-- Companies are registered, not typed (migration 0033).
+select public.mg_register_company('AgriLib Mining');
+select public.mg_register_company('OreCo Liberia');
 update public.profiles set role = 'operator', scope = 'operator',
        operator_name = 'AgriLib Mining', county = 'Bomi', profile_complete = true
  where id = '${EDGE_IDS.opA}';

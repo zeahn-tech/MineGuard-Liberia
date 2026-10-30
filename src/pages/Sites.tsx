@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { SiteLocationPicker } from "@/components/SiteLocationPicker";
 import {
   EMPTY_POSITION_DRAFT,
@@ -20,6 +20,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
 import { Plus, MapPin, MapPinOff, ChevronLeft, ChevronRight } from "lucide-react";
@@ -43,6 +44,18 @@ export default function Sites() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+
+  // Company filter (kept in the address, so a company page can link straight to its sites).
+  const [params, setParams] = useSearchParams();
+  const companyId = params.get("company") ?? "";
+  const companyOptions = Array.from(
+    new Map(
+      (sites ?? [])
+        .filter((s) => s.organizationId)
+        .map((s) => [s.organizationId as string, s.operatorName] as const),
+    ),
+  ).sort((a, b) => a[1].localeCompare(b[1]));
+  const visible = (sites ?? []).filter((s) => !companyId || s.organizationId === companyId);
 
   // Horizontal panning for the wide sites table on small screens. The scroll
   // container is native-touch-scrollable; the edge buttons pan it for mouse
@@ -82,6 +95,29 @@ export default function Sites() {
         </div>
         {isAdmin && <RegisterSiteDialog />}
       </header>
+
+      {sites && sites.length > 0 && companyOptions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Label htmlFor="company-filter" className="text-xs text-muted-foreground">Company</Label>
+          <Select
+            value={companyId || "all"}
+            onValueChange={(v) => setParams(v === "all" ? {} : { company: v }, { replace: true })}
+          >
+            <SelectTrigger id="company-filter" className="w-full sm:w-72" aria-label="Filter by company">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All companies</SelectItem>
+              {companyOptions.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {companyId && (
+            <span className="text-xs text-muted-foreground">
+              {visible.length} site{visible.length === 1 ? "" : "s"}
+            </span>
+          )}
+        </div>
+      )}
 
       {!sites ? (
         <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>
@@ -129,14 +165,14 @@ export default function Sites() {
                     <th className="px-4 py-2.5 font-medium">Code</th>
                     <th className="px-4 py-2.5 font-medium">Site</th>
                     <th className="hidden px-4 py-2.5 font-medium md:table-cell">County</th>
-                    <th className="hidden px-4 py-2.5 font-medium md:table-cell">Operator</th>
+                    <th className="hidden px-4 py-2.5 font-medium md:table-cell">Company</th>
                     <th className="px-4 py-2.5 font-medium">Status</th>
                     <th className="px-4 py-3 text-right">Open actions</th>
                     <th className="px-4 py-3 text-right">Risk</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {sites.map((s) => {
+                  {visible.map((s) => {
                     const r = risk?.[s._id];
                     return (
                       <tr
@@ -165,7 +201,20 @@ export default function Sites() {
                           </div>
                         </td>
                         <td className="hidden px-4 py-3 md:table-cell">{s.county}</td>
-                        <td className="hidden px-4 py-3 md:table-cell">{s.operatorName}</td>
+                        <td className="hidden px-4 py-3 md:table-cell">
+                          {isAdmin && s.organizationId ? (
+                            <Link
+                              className="underline-offset-2 hover:underline"
+                              to={`/portal/companies/${s.organizationId}`}
+                              onClick={(e) => e.stopPropagation()}
+                              onKeyDown={(e) => e.stopPropagation()}
+                            >
+                              {s.operatorName}
+                            </Link>
+                          ) : (
+                            s.operatorName
+                          )}
+                        </td>
                         <td className="px-4 py-3">
                           <span className={`stamp ${STATUS_STYLES[s.status] ?? ""}`}>
                             {s.status.replace(/_/g, " ")}
@@ -212,6 +261,7 @@ export default function Sites() {
 
 function RegisterSiteDialog() {
   const create = useMutation(api.sites.create);
+  const companies = useQuery(api.companies.approvedOptions);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -226,7 +276,7 @@ function RegisterSiteDialog() {
   const submit = async () => {
     if (saving) return;
     if (!form.name || !form.operatorName || !form.county) {
-      toast.error("Name, operator and county are required.");
+      toast.error("Name, company and county are required.");
       return;
     }
     // Validate the position BEFORE saving: a site that can never be mapped is
@@ -289,8 +339,24 @@ function RegisterSiteDialog() {
             <Input value={form.name} onChange={set("name")} placeholder="e.g. Zorzor Corridor Operation" />
           </div>
           <div className="space-y-1.5">
-            <Label>Operator organization *</Label>
-            <Input value={form.operatorName} onChange={set("operatorName")} placeholder="Exact operator name" />
+            <Label>Operator company *</Label>
+            {companies !== undefined && companies.length === 0 ? (
+              <p className="rounded-md border p-2 text-xs text-muted-foreground">
+                No approved company yet. <Link className="underline" to="/portal/companies">Register one in Companies</Link> first.
+              </p>
+            ) : (
+              <>
+                <Select value={form.operatorName} onValueChange={(v) => setForm((f) => ({ ...f, operatorName: v }))}>
+                  <SelectTrigger aria-label="Operator company"><SelectValue placeholder="Choose a registered company" /></SelectTrigger>
+                  <SelectContent>
+                    {(companies ?? []).map((c) => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Only registered, approved companies are listed. New company? <Link className="underline" to="/portal/companies">Register it first</Link>.
+                </p>
+              </>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label>County *</Label>

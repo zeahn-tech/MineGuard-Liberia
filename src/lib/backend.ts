@@ -2206,6 +2206,23 @@ export const api = {
         ["organizations", "organization_invitations", "organization_members", "sites"],
       ),
 
+    /** Approved, registered companies — what a site can be registered for (migration 0033). */
+    approvedOptions: () =>
+      live<{ id: string; name: string }[]>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase
+            .from("organizations")
+            .select("id,name")
+            .eq("status", "approved")
+            .order("name", { ascending: true })
+            .limit(1000);
+          if (error) throw backendError(error);
+          return ((data ?? []) as AnyRow[]).map((r) => ({ id: r.id as string, name: r.name as string }));
+        },
+        ["organizations"],
+      ),
+
     register: async (args: { name: string }): Promise<string> => {
       await requireCompanyAuthority();
       const { data, error } = await supabase.rpc("mg_register_company", { p_name: args.name });

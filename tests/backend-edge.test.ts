@@ -277,6 +277,8 @@ describe("sites", () => {
 
   test("authorized: admin edit persists, bumps row_version, and leaves the server-written audit diff", async () => {
     asAdmin();
+    // a company the edit may move the site to must be REGISTERED first (migration 0033)
+    await adminSql("select public.mg_resolve_organization('Probe NewCo')");
     const id = await api.sites.create({
       name: "Edge Edit Probe",
       operatorName: "AgriLib Mining",

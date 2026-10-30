@@ -324,6 +324,10 @@ set local request.jwt.claims = '';
 -- 3. The admin provisions everyone else (admin-writes-other-profiles path).
 set local role authenticated;
 set local request.jwt.claims = '${adminClaims}';
+-- Companies are REGISTERED (migration 0033: a signed-in session can no longer type
+-- a company into existence) — exactly what the Ministry does in Companies.
+select public.mg_register_company('AgriLib Mining');
+select public.mg_register_company('OreCo Liberia');
 -- scope='operator' (migration 0010): operator tenancy is organization-
 -- based; 'site' now means staff with explicit site_assignments.
 update public.profiles set role = 'operator', scope = 'operator',

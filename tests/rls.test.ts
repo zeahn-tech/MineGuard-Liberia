@@ -1039,9 +1039,12 @@ describe("SEC-5/SITE-1: tenancy on organization UUIDs (0010)", () => {
         expect(String(afterSame.organization_id)).toBe(orgA);
 
         // 2) The edit API's re-point (binding cleared + new name in ONE
-        //    write): the trigger resolves-or-mints by name and the tenant
+        //    write): the trigger resolves the registered company by name and the tenant
         //    follows the new UUID — isolation keys on the UUID, never on
         //    the display string.
+        // (migration 0033: a signed-in session can no longer MINT the new company by
+        // typing it — it is registered first, exactly as the Ministry does)
+        await run(`insert into public.organizations (name) values ('NewCo E&P')`);
         await run(
           `update public.sites set organization_id = null, operator_name = 'NewCo E&P'
             where id = '${f.siteA}'`,

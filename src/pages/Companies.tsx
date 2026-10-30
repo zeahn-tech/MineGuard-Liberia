@@ -27,6 +27,7 @@ import { useMutation, useQuery } from "@/lib/backend-react";
 import type { Company, CompanyInvitation, CompanyStatus } from "@/lib/types";
 import { Building2, Loader2, MailPlus, RotateCw, ShieldAlert, XCircle } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 
 const STATUS_LABEL: Record<CompanyStatus, string> = {
@@ -81,7 +82,7 @@ function InvitationRow({ inv, busy, onResend, onRevoke }: {
   );
 }
 
-function CompanyCard({ company }: { company: Company }) {
+export function CompanyCard({ company, detailTo }: { company: Company; detailTo?: string }) {
   const invite = useMutation(api.companies.inviteAdmin);
   const resend = useMutation(api.companies.resendInvitation);
   const revoke = useMutation(api.companies.revokeInvitation);
@@ -128,6 +129,11 @@ function CompanyCard({ company }: { company: Company }) {
           </CardTitle>
           <Badge variant={approved ? "secondary" : "destructive"}>{STATUS_LABEL[company.status]}</Badge>
         </div>
+        {detailTo && (
+          <Link to={detailTo} className="w-fit text-xs underline underline-offset-2">
+            View sites and details
+          </Link>
+        )}
         <p className="text-xs text-muted-foreground">
           {company.siteCount} registered site{company.siteCount === 1 ? "" : "s"}
           {` · ${activeCount} active member${activeCount === 1 ? "" : "s"}`}
@@ -306,7 +312,9 @@ export default function Companies() {
         <p className="text-sm text-muted-foreground">No companies registered yet.</p>
       ) : (
         <div className="grid min-w-0 gap-4 lg:grid-cols-2">
-          {companies.map((c) => <CompanyCard key={c.id} company={c} />)}
+          {companies.map((c) => (
+            <CompanyCard key={c.id} company={c} detailTo={user.role === "admin" ? `/portal/companies/${c.id}` : undefined} />
+          ))}
         </div>
       )}
     </div>

@@ -24,6 +24,7 @@ const CommandCenter = lazy(() => import("./pages/CommandCenter.tsx"));
 const OperatorPortal = lazy(() => import("./pages/OperatorPortal.tsx"));
 const Companies = lazy(() => import("./pages/Companies.tsx"));
 const RegistryLayout = lazy(() => import("./pages/RegistryLayout.tsx"));
+const CompanyDetail = lazy(() => import("./pages/CompanyDetail.tsx"));
 const Invitation = lazy(() => import("./pages/Invitation.tsx"));
 const Join = lazy(() => import("./pages/Join.tsx"));
 const OperatorTeam = lazy(() => import("./pages/operate/OperatorTeam.tsx"));
@@ -170,6 +171,7 @@ createRoot(document.getElementById("root")!).render(
               <Route index element={<CommandCenter />} />
               <Route path="operate" element={<OperatorPortal />} />
               <Route path="companies" element={<Companies />} />
+              <Route path="companies/:companyId" element={<CompanyDetail />} />
               <Route path="sites" element={<Sites />} />
               <Route path="sites/:siteId" element={<SiteDetail />} />
               <Route path="map" element={<NationalMap />} />
