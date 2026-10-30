@@ -74,6 +74,8 @@ select migration, applied
        and exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
                     where n.nspname = 'public' and p.proname = 'mg_can_manage_company'
                       and p.prosrc like '%workforce.oversee%')),
+    ('0032 government roles hold no company',
+       exists (select 1 from pg_trigger where tgname = 'profiles_gov_role_revoke_memberships' and not tgisinternal)),
     ('0018 boundaries published to Realtime',
        exists (
          select 1 from pg_publication_tables

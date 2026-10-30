@@ -1,6 +1,6 @@
 # 18 — Multi-company, site and workforce administration
 
-Status: implemented on branch `feature/multi-company-admin` (migrations 0024–0031).
+Status: implemented on branch `feature/multi-company-admin` (migrations 0024–0032).
 **Not applied to any live database.** Phase E (bulk CSV onboarding + the dedicated
 Onboarding officer role) is built; see §10.
 
@@ -70,7 +70,7 @@ used invitations, redirect URL fixed by server configuration.
 GitHub Pages deploys the **frontend** on merge to `main` and never applies
 migrations. Therefore:
 
-1. Staging first: apply `0024 → 0025 → 0026 → 0027 → 0028 → 0029 → 0030 → 0031` (0030 must be its own run: it adds the `registrar` enum value, which PostgreSQL cannot use in the same transaction) (idempotent), run
+1. Staging first: apply `0024 → 0025 → 0026 → 0027 → 0028 → 0029 → 0030 → 0031 → 0032` (0030 must be its own run: it adds the `registrar` enum value, which PostgreSQL cannot use in the same transaction) (idempotent), run
    `supabase/checks/migration_state.sql`.
 2. Deploy the `company-admin-invite` function; secrets `INVITE_REDIRECT_URL`
    (the site ROOT — the app uses a hash router, so the email link cannot carry a
@@ -171,8 +171,8 @@ registrar does not inherit company internals. The directory
 (`mg_company_directory`) lists administrators individually and counts everyone
 else, so no worker identity reaches the registry screen.
 
-Assigning: a full admin provisions the role (`provision_user_by_email(email,
-'registrar', 'national')`), or run `supabase/maintenance/assign_company_registrar.sql`
+Assigning: a full admin picks **Company registrar** in the *Assign platform role*
+dialog of the staff portal (scope is locked to national), or run `supabase/maintenance/assign_company_registrar.sql`
 in the SQL Editor (the person must have signed up, and must not belong to a company).
 The registrar signs in to `/registry`, which shows the Companies screen only.
 
@@ -181,3 +181,12 @@ the invitation, accept, request, decide and import-eval functions; drop
 `mg_company_directory`; delete the registrar and `workforce.oversee` permission rows;
 set `profiles.role = null` for registrars. (The enum value stays; PostgreSQL cannot
 drop one and it is harmless.)
+
+### 11a. Government roles never hold a company (migration 0032)
+
+Whatever the route — the dialog, `provision_user_by_email`, a direct admin update, or
+the owner-run script — a profile that becomes `admin`, `supervisor`, `inspector` or
+`registrar` has its company binding cleared, and (when the role actually changes) its
+pending/active company memberships revoked and its site assignments in those
+companies ended. A registrar is always national scope. Nothing is deleted. Re-saving
+the same government role changes nothing, so staff site assignments survive.
