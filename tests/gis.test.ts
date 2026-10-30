@@ -132,6 +132,9 @@ const fixtureBoundarySites = (d: { siteBoundaries: { siteId: string }[] }) =>
 beforeAll(async () => {
   await getEdgeDb();
   __testSetSupabaseClient(createEdgeClient());
+  // Sites are registered for REGISTERED companies (migration 0033): the probe company
+  // exists as it would after the Ministry registered it in Companies.
+  await adminExec("select public.mg_resolve_organization('Probe Op')");
 
   // siteA: VERIFIED by an authoritative source (geo.write act as admin);
   // siteB stays unverified. Both have coordinates in the base seed.

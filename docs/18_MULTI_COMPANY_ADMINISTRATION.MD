@@ -1,6 +1,6 @@
 # 18 — Multi-company, site and workforce administration
 
-Status: implemented on branch `feature/multi-company-admin` (migrations 0024–0032).
+Status: implemented on branch `feature/multi-company-admin` (migrations 0024–0033).
 **Not applied to any live database.** Phase E (bulk CSV onboarding + the dedicated
 Onboarding officer role) is built; see §10.
 
@@ -70,7 +70,7 @@ used invitations, redirect URL fixed by server configuration.
 GitHub Pages deploys the **frontend** on merge to `main` and never applies
 migrations. Therefore:
 
-1. Staging first: apply `0024 → 0025 → 0026 → 0027 → 0028 → 0029 → 0030 → 0031 → 0032` (0030 must be its own run: it adds the `registrar` enum value, which PostgreSQL cannot use in the same transaction) (idempotent), run
+1. Staging first: apply `0024 → 0025 → 0026 → 0027 → 0028 → 0029 → 0030 → 0031 → 0032 → 0033` (0030 must be its own run: it adds the `registrar` enum value, which PostgreSQL cannot use in the same transaction) (idempotent), run
    `supabase/checks/migration_state.sql`.
 2. Deploy the `company-admin-invite` function; secrets `INVITE_REDIRECT_URL`
    (the site ROOT — the app uses a hash router, so the email link cannot carry a
@@ -190,3 +190,27 @@ the owner-run script — a profile that becomes `admin`, `supervisor`, `inspecto
 pending/active company memberships revoked and its site assignments in those
 companies ended. A registrar is always national scope. Nothing is deleted. Re-saving
 the same government role changes nothing, so staff site assignments survive.
+
+## 12. Mining sites ↔ Companies (migration 0033 + screens)
+
+**Two screens, one link.** *Mining sites* lists SITES (one row per site); *Companies*
+lists COMPANIES (including ones with no site yet). A company that has accepted its
+invitation but has no registered site appears on Companies only. They are joined by
+the company id every site carries.
+
+* **A — companies are registered, never typed.** The Register site form now offers a
+  dropdown of registered, approved companies (no free-text name). In the database
+  (`mg_resolve_organization`, `mg_sync_site_org`) a signed-in session can no longer
+  create a company by typing a name — `UNKNOWN_COMPANY` — and a new site needs an
+  approved company — `COMPANY_NOT_APPROVED`. This also closes the same hole in the
+  admin "Assign platform role" dialog. Existing data is untouched; owner-run SQL
+  (no signed-in user) keeps the old behaviour for maintenance and seed scripts.
+* **B — company filter on Mining sites**, kept in the address (`?company=<id>`); the
+  Operator column is now "Company" and links (admins) to the company page.
+* **C — company detail** (`/portal/companies/:id`, admins): the company card
+  (administrators, invitations, status controls, counts) plus the company's sites,
+  each linking to the existing site page. Worker names are not shown; the registrar's
+  registry cards do not link (the registrar has no site access).
+
+Rollback: restore the 0010 `mg_resolve_organization` / `mg_sync_site_org`; the screens
+degrade gracefully.

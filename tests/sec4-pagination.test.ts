@@ -94,7 +94,8 @@ async function seedFixture() {
   // mg_has_permission under the authenticated role) — same idiom as the perf
   // fixture. Everything else is bulk SQL, also like the perf fixture.
   await adminExec(
-    `set local role authenticated;
+    `select public.mg_resolve_organization('SEC4 Probe Mining'); -- registered first (migration 0033)
+     set local role authenticated;
      set local request.jwt.claims = '{"sub":"${f.admin}","role":"authenticated"}';
      insert into public.sites
        (id, code, name, operator_name, mineral_type, county, district,
