@@ -25,7 +25,7 @@ beforeAll(async () => {
     "0028_account_names_invitation_cleanup.sql",
     "0029_onboarding_officer_bulk_import.sql",
     "0030_registrar_role_value.sql",
-    "0031_company_registrar.sql",
+    "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql",
   ]) await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
 });
 
@@ -221,5 +221,70 @@ describe("registrar UI contracts (routing only; the database is the boundary)", 
     const b = read("src/lib/backend.ts");
     expect(b).toContain('supabase.rpc("mg_company_directory")');
     expect(b).toContain("requireCompanyAuthority");
+  });
+});
+
+describe("government roles never hold a company (0032) and the Assign-role dialog", () => {
+  test("provisioning a registrar always yields national scope with no county, area or company", async () => {
+    await withRole("postgres", null, async (run) => {
+      await run(`insert into auth.users (id, email) values ('${NEWADMIN}','newadmin@x.test')`);
+      await run("set local role authenticated");
+      await as(run, f.admin);
+      await run("select public.provision_user_by_email('newadmin@x.test','registrar','county','Bomi','AgriLib Mining')");
+      expect((await run(`select role, scope, county, operator_name, organization_id from public.profiles where id = '${NEWADMIN}'`))[0]).toEqual({
+        role: "registrar", scope: "national", county: null, operator_name: null, organization_id: null,
+      });
+    });
+  });
+
+  test("making a company administrator a registrar removes every company power in the same step", async () => {
+    await world(async (run, { orgA }) => {
+      await as(run, XA);
+      expect((await run(`select * from public.mg_company_workforce('${orgA}')`)).length).toBeGreaterThan(0); // before
+      expect((await run("select id from public.sites")).length).toBeGreaterThan(0);
+      await as(run, f.admin);
+      await run("select public.provision_user_by_email('xa@agrilib.test','registrar','national')");
+      await as(run, XA);
+      expect((await run("select role, organization_id from public.profiles where id = auth.uid()"))[0]).toEqual({ role: "registrar", organization_id: null });
+      expect(await fails(run(`select * from public.mg_company_workforce('${orgA}')`))).toMatch(/FORBIDDEN/);
+      expect(await fails(run(`select public.mg_create_org_invitation('${orgA}', 'w@x.test', 'worker')`))).toMatch(/FORBIDDEN/);
+      expect((await run("select id from public.sites")).length).toBe(0);
+      await run("reset role");
+      expect((await run(`select status from public.organization_members where user_id = '${XA}'`))).toEqual([{ status: "revoked" }]);
+    });
+  });
+
+  test("the same holds for a direct update and for the owner-run script path", async () => {
+    await world(async (run, { orgA }) => {
+      await run("reset role");
+      await run(`update public.profiles set role = 'registrar' where id = '${XA}'`); // SQL-editor style, no session
+      expect(await run(`select status from public.organization_members where user_id = '${XA}'`)).toEqual([{ status: "revoked" }]);
+      expect((await run(`select organization_id, scope from public.profiles where id = '${XA}'`))[0]).toEqual({ organization_id: null, scope: "national" });
+      void orgA;
+    });
+  });
+
+  test("re-provisioning someone as the SAME government role does not wipe their staff site assignments", async () => {
+    await withRole("postgres", null, async (run) => {
+      await run("set local role authenticated");
+      await as(run, f.admin);
+      await run("select public.provision_user_by_email('frank@guest.test','inspector','national')");
+      const site = (await run("select id from public.sites limit 1"))[0].id;
+      await run("reset role");
+      const uid = (await run("select id from public.profiles where email = 'frank@guest.test'"))[0].id;
+      await run(`insert into public.site_assignments (user_id, site_id) values ('${uid}', '${site}')`);
+      await run("set local role authenticated");
+      await as(run, f.admin);
+      await run("select public.provision_user_by_email('frank@guest.test','inspector','county','Bomi')");
+      await run("reset role");
+      expect(await run(`select revoked_at from public.site_assignments where user_id = '${uid}'`)).toEqual([{ revoked_at: null }]);
+    });
+  });
+
+  test("the Assign platform role dialog offers Company registrar with the scope locked to national", () => {
+    const d = readFileSync(join(ROOT, "src/pages/PortalLayout.tsx"), "utf8");
+    expect(d).toContain('<SelectItem value="registrar">Company registrar</SelectItem>');
+    expect(d).toContain('targetRole === "registrar" ? "national" : targetScope');
+    expect(d).toContain('disabled={targetRole === "registrar"}');
   });
 });

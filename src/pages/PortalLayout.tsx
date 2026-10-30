@@ -258,8 +258,9 @@ export default function PortalLayout() {
     try {
       await provision({
         email: targetEmail.toLowerCase(),
-        role: targetRole as "admin" | "supervisor" | "inspector" | "operator",
-        scope: targetScope as "national" | "county" | "site",
+        role: targetRole as "admin" | "supervisor" | "inspector" | "operator" | "registrar",
+        // a registrar is always national (the database enforces it too)
+        scope: (targetRole === "registrar" ? "national" : targetScope) as "national" | "county" | "site",
         county: targetCounty || undefined,
         operatorName: targetOperator || undefined,
       });
@@ -518,19 +519,26 @@ export default function PortalLayout() {
             <div className="grid grid-cols-2 gap-3">
               <div className="min-w-0 space-y-1.5">
                 <Label>Role</Label>
-                <Select value={targetRole} onValueChange={setTargetRole}>
+                <Select
+                  value={targetRole}
+                  onValueChange={(v) => {
+                    setTargetRole(v);
+                    if (v === "registrar") setTargetScope("national");
+                  }}
+                >
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="admin">Admin</SelectItem>
                     <SelectItem value="supervisor">Supervisor</SelectItem>
                     <SelectItem value="inspector">Inspector</SelectItem>
+                    <SelectItem value="registrar">Company registrar</SelectItem>
                     <SelectItem value="operator">Operator</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="min-w-0 space-y-1.5">
                 <Label>Scope</Label>
-                <Select value={targetScope} onValueChange={setTargetScope}>
+                <Select value={targetRole === "registrar" ? "national" : targetScope} onValueChange={setTargetScope} disabled={targetRole === "registrar"}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="national">National</SelectItem>
@@ -540,7 +548,14 @@ export default function PortalLayout() {
                 </Select>
               </div>
             </div>
-            {targetScope === "county" && (
+            {targetRole === "registrar" && (
+              <p className="rounded-md border bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground">
+                A company registrar authorizes companies and appoints their first administrator. It has
+                no access to sites, incidents, inspections, audit records or any company&apos;s workforce,
+                and it is always national. Anyone currently in a company is removed from it.
+              </p>
+            )}
+            {targetRole !== "registrar" && targetScope === "county" && (
               <div className="space-y-1.5">
                 <Label htmlFor="prov-county">County</Label>
                 <Input
