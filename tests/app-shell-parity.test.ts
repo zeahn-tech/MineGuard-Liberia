@@ -55,3 +55,40 @@ describe.each(SHELLS)("app shell parity — $name", ({ file }) => {
     expect((src.match(/<NotificationBell/g) ?? []).length).toBe(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// PAGE GUTTERS — the operator shell's <main> deliberately has no padding (each
+// page owns its gutter), so a page that forgets it renders flush against the
+// screen edges on phones. Every operator page must carry the standard
+// `p-4 md:p-6` gutter on its root and on its loading / access-denied states.
+// ---------------------------------------------------------------------------
+
+import { readdirSync } from "node:fs";
+
+describe("operator pages keep the standard page gutter", () => {
+  const pages = readdirSync(join(ROOT, "src/pages/operate")).filter(
+    (f) => /^Operator.*\.tsx$/.test(f) && f !== "OperatorLayout.tsx",
+  );
+
+  test("the page list is not empty (guards against a moved directory)", () => {
+    expect(pages.length).toBeGreaterThanOrEqual(8);
+  });
+
+  test.each(pages)("%s carries the p-4 md:p-6 gutter", (file) => {
+    expect(read(`src/pages/operate/${file}`)).toContain("p-4 md:p-6");
+  });
+
+  test.each(["OperatorTeam.tsx", "OperatorImport.tsx"])(
+    "%s: no unpadded root and no unpadded early-return states",
+    (file) => {
+      const src = read(`src/pages/operate/${file}`);
+      // root container
+      expect(src).not.toMatch(/className="min-w-0 space-y-\d+"/);
+      // loading state
+      expect(src).not.toContain('<p className="text-sm text-muted-foreground" role="status">Loading…</p>');
+      // access-denied / not-approved cards must sit inside a padded wrapper
+      expect(src).not.toMatch(/return \(\s*<div className="paper/);
+      expect(src).not.toMatch(/return <div className="paper/);
+    },
+  );
+});
