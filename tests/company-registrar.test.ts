@@ -213,6 +213,25 @@ describe("registrar UI contracts (routing only; the database is the boundary)", 
     expect(m).toMatch(/path="\/registry"[\s\S]{0,200}RequireRegistrar[\s\S]{0,200}RegistryLayout/);
     expect(m).toMatch(/<Route index element=\{<Companies \/>\} \/>/);
   });
+  test("the registrar shell mirrors the staff portal: header, mobile drawer and sign-out", () => {
+    const l = read("src/pages/RegistryLayout.tsx");
+    // same shell pieces as PortalLayout: sticky header, hamburger drawer, bell
+    expect(l).toContain('aria-label="Open navigation menu"');
+    expect(l).toContain("<Sheet open={mobileNavOpen}");
+    expect(l).toContain("<NotificationBell");
+    expect(l).toContain("sticky top-0");
+    // sign-out exists in both the desktop sidebar and the drawer, then leaves the workspace
+    expect((l.match(/<LogOut /g) ?? []).length).toBe(2);
+    expect(l).toContain("await signOut();");
+    expect(l).toContain('navigate("/")');
+  });
+  test("the registrar navigation lists exactly Companies and Account Security — no staff destinations", () => {
+    const l = read("src/pages/RegistryLayout.tsx");
+    const to = [...l.matchAll(/\{ to: "([^"]+)"/g)].map((m) => m[1]);
+    expect(to).toEqual(["/registry", "/registry/security"]);
+    expect(l).not.toContain("/portal");
+    expect(l).not.toContain("/operate");
+  });
   test("the Companies screen admits exactly admin and registrar", () => {
     const c = read("src/pages/Companies.tsx");
     expect(c).toContain('user.role !== "admin" && user.role !== "registrar"');
