@@ -111,3 +111,30 @@ describe("landing page masthead", () => {
     expect(src).toMatch(/<section id="principles" className="[^"]*scroll-mt-14/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// PUBLIC PAGES — one shared sticky banner (PublicHeader) for the legal pages,
+// the community report form and tracker, and the invitation / join pages, so
+// none of them reintroduces a banner that scrolls away.
+// ---------------------------------------------------------------------------
+
+describe("public pages share one sticky banner", () => {
+  test("PublicHeader is a single sticky, translucent header linking home", () => {
+    const src = read("src/components/PublicHeader.tsx");
+    expect((src.match(/<header\b/g) ?? []).length).toBe(1);
+    expect(src).toContain('<header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur">');
+    expect(src).toContain('<Link to="/"');
+  });
+
+  test.each([
+    "src/components/LegalLayout.tsx",
+    "src/pages/CommunitySubmit.tsx",
+    "src/pages/CommunityTrack.tsx",
+    "src/pages/Invitation.tsx",
+    "src/pages/Join.tsx",
+  ])("%s uses PublicHeader and has no ad-hoc scrolling banner", (file) => {
+    const src = read(file);
+    expect(src).toContain("<PublicHeader");
+    expect(src).not.toContain('<header className="border-b border-border">');
+  });
+});
