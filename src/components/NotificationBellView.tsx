@@ -26,6 +26,10 @@ import {
   Loader2,
   X,
   MessageSquareWarning,
+  Building2,
+  Mail,
+  UserCog,
+  UserPlus,
 } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
@@ -34,6 +38,12 @@ const KIND_ICON = {
   ca_deadline: ClipboardList,
   ca_decision: ClipboardList,
   report_status: MessageSquareWarning,
+  // company administration (migration 0034)
+  org_invitation: Mail,
+  org_request: UserPlus,
+  org_decision: UserCog,
+  org_role: UserCog,
+  org_status: Building2,
 } as const;
 
 export interface BellNotification {

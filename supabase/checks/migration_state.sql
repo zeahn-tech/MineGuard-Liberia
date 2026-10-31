@@ -80,6 +80,8 @@ select migration, applied
        exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
                 where n.nspname = 'public' and p.proname = 'mg_resolve_organization'
                   and p.prosrc like '%UNKNOWN_COMPANY%')),
+    ('0034 company notifications',
+       exists (select 1 from pg_trigger where tgname = 'organization_members_notify' and not tgisinternal)),
     ('0018 boundaries published to Realtime',
        exists (
          select 1 from pg_publication_tables

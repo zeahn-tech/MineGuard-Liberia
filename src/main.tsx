@@ -136,6 +136,8 @@ createRoot(document.getElementById("root")!).render(
               }
             >
               <Route index element={<Companies />} />
+              {/* the registrar's own password + authenticator (MFA) settings */}
+              <Route path="security" element={<OperatorSecurity />} />
             </Route>
 
             {/* OPERATOR SECTION — a routed section of its own (Priority B

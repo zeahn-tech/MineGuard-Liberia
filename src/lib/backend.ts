@@ -1874,7 +1874,16 @@ export async function signOut() {
 
 type DerivedNotification = {
   id: string;
-  kind: "ca_deadline" | "ca_decision" | "report_status";
+  kind:
+    | "ca_deadline"
+    | "ca_decision"
+    | "report_status"
+    // created by the database from company-administration events (migration 0034)
+    | "org_invitation"
+    | "org_request"
+    | "org_decision"
+    | "org_role"
+    | "org_status";
   /** Deadline notifications are state; the state is part of the stored key so
    *  due-soon → overdue is a NEW (unread, urgent) notification. */
   state?: "overdue" | "soon";
@@ -1938,6 +1947,31 @@ async function persistNotifications(
     });
   }
   return out;
+}
+
+/** Notifications the DATABASE created for this account (invitations, join requests,
+ *  decisions, role and status changes — migration 0034). Private to the recipient;
+ *  text carries company names and role labels only. Tolerates a database that has
+ *  not received 0034 (no such rows). */
+async function loadOrgNotifications(): Promise<NotificationItem[]> {
+  try {
+    const rows = await allRows<AnyRow>("notifications");
+    return rows
+      .filter((r) => String(r.kind ?? "").startsWith("org_") && !r.dismissed_at && !r.resolved_at)
+      .map((r) => ({
+        id: String(r.source_key),
+        notificationId: r.id as string,
+        kind: r.kind as DerivedNotification["kind"],
+        severity: r.severity as DerivedNotification["severity"],
+        title: String(r.title),
+        body: String(r.body ?? ""),
+        linkTo: String(r.link_to),
+        at: toMs(r.event_at),
+        read: Boolean(r.read_at),
+      }));
+  } catch {
+    return [];
+  }
 }
 
 async function deriveNotifications(
@@ -4157,8 +4191,11 @@ export const api = {
       live<NotificationItem[]>(async () => {
         const user = await requireAuthed(true);
         if (!user.role) return [];
-        const derived = await deriveNotifications(user);
-        return persistNotifications(derived);
+        // The registrar has no safety records to derive from; its inbox is
+        // company-administration events only.
+        const derived = user.role === ROLES.REGISTRAR ? [] : await deriveNotifications(user);
+        const [stored, org] = await Promise.all([persistNotifications(derived), loadOrgNotifications()]);
+        return [...stored, ...org].sort((a, b) => b.at - a.at);
       }, [
         "corrective_actions",
         "findings",
