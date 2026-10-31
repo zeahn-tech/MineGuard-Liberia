@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { useMutation } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { toast } from "sonner";
-import { BrandMark } from "@/components/BrandMark";
+import { PublicHeader } from "@/components/PublicHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -115,17 +115,11 @@ export default function CommunitySubmit() {
 
   return (
     <div className="min-h-screen bg-background paper-grain">
-      <header className="border-b border-border">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4 md:px-8">
-          <Link to="/" className="flex min-h-9 items-center gap-2">
-            <BrandMark className="size-5" />
-            <span className="display text-base">MineGuard Liberia</span>
-          </Link>
-          <Link to="/report/track" className="inline-flex min-h-9 items-center text-sm text-muted-foreground hover:text-foreground">
-            Track a report
-          </Link>
-        </div>
-      </header>
+      <PublicHeader width="3xl">
+        <Link to="/report/track" className="inline-flex min-h-9 shrink-0 items-center text-sm text-muted-foreground hover:text-foreground">
+          Track a report
+        </Link>
+      </PublicHeader>
 
       <main className="mx-auto max-w-3xl px-4 py-10 md:px-8">
         <p className="kicker">Public reporting channel</p>

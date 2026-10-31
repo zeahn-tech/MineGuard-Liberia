@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
-import { BrandMark } from "@/components/BrandMark";
+import { PublicHeader } from "@/components/PublicHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,17 +37,11 @@ export default function CommunityTrack() {
 
   return (
     <div className="min-h-screen bg-background paper-grain">
-      <header className="border-b border-border">
-        <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-4 md:px-8">
-          <Link to="/" className="flex min-h-9 items-center gap-2">
-            <BrandMark className="size-5" />
-            <span className="display text-base">MineGuard Liberia</span>
-          </Link>
-          <Link to="/report" className="inline-flex min-h-9 items-center text-sm text-muted-foreground hover:text-foreground">
-            Submit a report
-          </Link>
-        </div>
-      </header>
+      <PublicHeader width="2xl">
+        <Link to="/report" className="inline-flex min-h-9 shrink-0 items-center text-sm text-muted-foreground hover:text-foreground">
+          Submit a report
+        </Link>
+      </PublicHeader>
 
       <main className="mx-auto max-w-2xl px-4 py-12 md:px-8">
         <p className="kicker">Public tracking</p>
