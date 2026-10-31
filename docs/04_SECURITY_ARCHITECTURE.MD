@@ -2,12 +2,10 @@
 
 **Status:** implemented controls below; gaps listed honestly.
 
-**Backend note (2026-09-24):** the authorization boundary moved from Firebase
-security rules to PostgreSQL RLS + guard triggers + security-definer RPCs in
-`supabase/migrations/0001_initial_schema.sql`. The model below is unchanged in
-intent; the enforcement technology is now Postgres. The prior committed-secret
-(0.1), tenant-isolation (0.2) and role-blind storage (0.3) defects from the
-Firebase era are structurally closed: profiles are admin-writable only via
+**Backend note:** the authorization boundary is PostgreSQL RLS + guard
+triggers + security-definer RPCs in `supabase/migrations/0001_initial_schema.sql`.
+The earlier committed-secret (0.1), tenant-isolation (0.2) and role-blind
+storage (0.3) defects are structurally closed: profiles are admin-writable only via
 trigger, every evidence/finding/CA read goes through `mg_can_access_site()`,
 and storage reads join the metadata row by path before granting access.
 

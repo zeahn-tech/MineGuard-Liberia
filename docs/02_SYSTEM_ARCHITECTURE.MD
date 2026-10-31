@@ -16,14 +16,11 @@
 | Storage | Supabase Storage (private `evidence` bucket, `{uid}/` namespace) |
 | Map | Leaflet + react-leaflet, OpenStreetMap tiles |
 
-> **Migration notes:** the backend was migrated Convex → Firebase (2026-09),
-> then **Firebase → Supabase (2026-09-24, project owner's request — storage
-> upgrade constraint)**. `src/lib/backend.ts` mirrors the former API
-> function-for-function on both hops; `src/lib/backend-react.ts` provides
-> Convex-compatible `useQuery`/`useMutation` hooks so page logic is unchanged.
-> The old `src/convex/` tree was removed; `firestore.rules`/`storage.rules` are
-> superseded by `supabase/migrations/0001_initial_schema.sql` (RLS policies,
-> guard triggers, security-definer RPCs).
+> **Backend notes:** the backend is Supabase. `src/lib/backend-react.ts`
+> provides `useQuery`/`useMutation` hooks over `src/lib/backend.ts` so page
+> logic stays independent of the data layer. Authorization is enforced by
+> `supabase/migrations/0001_initial_schema.sql` (RLS policies, guard triggers,
+> security-definer RPCs).
 
 ## Topology
 
