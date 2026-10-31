@@ -82,7 +82,16 @@ function InvitationRow({ inv, busy, onResend, onRevoke }: {
   );
 }
 
-export function CompanyCard({ company, detailTo }: { company: Company; detailTo?: string }) {
+export function CompanyCard({
+  company,
+  detailTo,
+  showActions = true,
+}: {
+  company: Company;
+  detailTo?: string;
+  /** false on the company detail page: nominate/suspend live on the Companies list. */
+  showActions?: boolean;
+}) {
   const invite = useMutation(api.companies.inviteAdmin);
   const resend = useMutation(api.companies.resendInvitation);
   const revoke = useMutation(api.companies.revokeInvitation);
@@ -174,6 +183,8 @@ export function CompanyCard({ company, detailTo }: { company: Company; detailTo?
           </section>
         )}
 
+        {showActions && (
+          <>
         <section aria-label="Nominate an administrator" className="space-y-2">
           <Label htmlFor={`inv-${company.id}`}>Nominate a company administrator</Label>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -211,6 +222,8 @@ export function CompanyCard({ company, detailTo }: { company: Company; detailTo?
             </Button>
           )}
         </section>
+          </>
+        )}
       </CardContent>
 
       <AlertDialog open={confirm !== null} onOpenChange={(o) => { if (!o) setConfirm(null); }}>

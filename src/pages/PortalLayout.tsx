@@ -105,7 +105,6 @@ export default function PortalLayout() {
   const [targetRole, setTargetRole] = useState<string>("inspector");
   const [targetScope, setTargetScope] = useState<string>("national");
   const [targetCounty, setTargetCounty] = useState("");
-  const [targetOperator, setTargetOperator] = useState("");
 
   const isAdmin = user?.role === "admin";
 
@@ -258,11 +257,12 @@ export default function PortalLayout() {
     try {
       await provision({
         email: targetEmail.toLowerCase(),
-        role: targetRole as "admin" | "supervisor" | "inspector" | "operator" | "registrar",
+        // Company people (operators) join by invitation from their company, never through
+        // this dialog: it assigns GOVERNMENT roles only.
+        role: targetRole as "admin" | "supervisor" | "inspector" | "registrar",
         // a registrar is always national (the database enforces it too)
         scope: (targetRole === "registrar" ? "national" : targetScope) as "national" | "county" | "site",
         county: targetCounty || undefined,
-        operatorName: targetOperator || undefined,
       });
       toast.success(`Role assigned to ${targetEmail}`);
       setShowProvision(false);
@@ -532,7 +532,6 @@ export default function PortalLayout() {
                     <SelectItem value="supervisor">Supervisor</SelectItem>
                     <SelectItem value="inspector">Inspector</SelectItem>
                     <SelectItem value="registrar">Company registrar</SelectItem>
-                    <SelectItem value="operator">Operator</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -563,17 +562,6 @@ export default function PortalLayout() {
                   value={targetCounty}
                   onChange={(e) => setTargetCounty(e.target.value)}
                   placeholder="Nimba"
-                />
-              </div>
-            )}
-            {targetRole === "operator" && (
-              <div className="space-y-1.5">
-                <Label htmlFor="prov-operator">Operator organization</Label>
-                <Input
-                  id="prov-operator"
-                  value={targetOperator}
-                  onChange={(e) => setTargetOperator(e.target.value)}
-                  placeholder="Must match site operatorName exactly"
                 />
               </div>
             )}

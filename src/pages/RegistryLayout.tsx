@@ -8,7 +8,11 @@
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { LogOut } from "lucide-react";
-import { Outlet } from "react-router";
+
+const link = ({ isActive }: { isActive: boolean }) =>
+  `rounded-md px-2.5 py-1.5 text-sm ${isActive ? "bg-accent font-medium" : "text-muted-foreground hover:text-foreground"}`;
+import { NavLink, Outlet } from "react-router";
+import NotificationBell from "@/components/NotificationBell";
 
 export default function RegistryLayout() {
   const { user, signOut } = useAuth();
@@ -20,8 +24,13 @@ export default function RegistryLayout() {
             <p className="kicker">MineGuard Liberia · Ministry</p>
             <p className="display text-base">Company registry</p>
           </div>
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="hidden min-w-0 truncate text-xs text-muted-foreground sm:block">{user?.email}</span>
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <nav aria-label="Registry" className="flex items-center gap-1">
+              <NavLink to="/registry" end className={link}>Companies</NavLink>
+              <NavLink to="/registry/security" className={link}>Account security</NavLink>
+            </nav>
+            <NotificationBell />
+            <span className="hidden min-w-0 truncate text-xs text-muted-foreground lg:block">{user?.email}</span>
             <Button variant="ghost" size="sm" onClick={() => void signOut()} aria-label="Sign out">
               <LogOut className="size-4" /> <span className="hidden sm:inline">Sign out</span>
             </Button>

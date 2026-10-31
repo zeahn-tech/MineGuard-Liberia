@@ -52,7 +52,7 @@ export default function CompanyDetail() {
         <ChevronLeft className="size-4" /> Companies
       </Link>
 
-      <CompanyCard company={company} />
+      <CompanyCard company={company} showActions={false} />
 
       <Card className="min-w-0">
         <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 space-y-0">

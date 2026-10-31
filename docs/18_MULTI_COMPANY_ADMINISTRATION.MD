@@ -1,6 +1,6 @@
 # 18 — Multi-company, site and workforce administration
 
-Status: implemented on branch `feature/multi-company-admin` (migrations 0024–0033).
+Status: implemented on branch `feature/multi-company-admin` (migrations 0024–0034).
 **Not applied to any live database.** Phase E (bulk CSV onboarding + the dedicated
 Onboarding officer role) is built; see §10.
 
@@ -70,7 +70,7 @@ used invitations, redirect URL fixed by server configuration.
 GitHub Pages deploys the **frontend** on merge to `main` and never applies
 migrations. Therefore:
 
-1. Staging first: apply `0024 → 0025 → 0026 → 0027 → 0028 → 0029 → 0030 → 0031 → 0032 → 0033` (0030 must be its own run: it adds the `registrar` enum value, which PostgreSQL cannot use in the same transaction) (idempotent), run
+1. Staging first: apply `0024 → 0025 → 0026 → 0027 → 0028 → 0029 → 0030 → 0031 → 0032 → 0033 → 0034` (0030 must be its own run: it adds the `registrar` enum value, which PostgreSQL cannot use in the same transaction) (idempotent), run
    `supabase/checks/migration_state.sql`.
 2. Deploy the `company-admin-invite` function; secrets `INVITE_REDIRECT_URL`
    (the site ROOT — the app uses a hash router, so the email link cannot carry a
@@ -112,8 +112,6 @@ bypass directly against the database as the attacker's role.
 
 ## 9. Remaining / unverified
 
-* In-app notifications for invitations / requests / role changes are not built
-  (email only; the `notifications.kind` CHECK would need extending).
 * UI pages were typechecked and built but not exercised in a browser; the edge
   function was exercised through its pure handler, not on Deno; real invite-email
   delivery is untested.
@@ -214,3 +212,32 @@ the company id every site carries.
 
 Rollback: restore the 0010 `mg_resolve_organization` / `mg_sync_site_org`; the screens
 degrade gracefully.
+
+## 13. In-app notifications and the registrar's account security (migration 0034)
+
+**Notifications** reuse the 0021 inbox (private per user; content immutable; read /
+dismiss state one-way). They are created BY THE DATABASE from the events themselves
+(triggers), so every route — the screens, the API, SQL, bulk import — produces them:
+
+| Event | Who is notified | Opens |
+|---|---|---|
+| invitation created | the invitee, if they already have an account (otherwise the email is their notice) | `/invitation` |
+| invitation accepted | whoever sent it | `/registry`, the company page, or Team |
+| join request | the company's administrators (that company only) | Team |
+| request approved / declined | the requester | `/operate` / `/join` |
+| role changed, removed | the member | `/operate` / `/join` |
+| company status changed | the company's administrators | `/operate` |
+| site status changed | the company's administrators | Sites |
+
+Text carries company names and role labels only — never an email address, an
+invitation link or any secret. A failure while notifying logs a warning and **never
+blocks** the action that caused it. A notification can only link inside the app. Email
+remains the channel for people without an account; no push/SMS exists. (Site
+*registration requests from companies* are not a workflow yet, so there is nothing to
+notify.) The bell appears in the staff, operator and registry headers.
+
+**Registrar account security**: `/registry/security` — the same password and
+authenticator (MFA) page the operator and staff use.
+
+Rollback: drop the four `*_notify*` triggers and their functions; restore the 0021
+guard and the two notification CHECK constraints.

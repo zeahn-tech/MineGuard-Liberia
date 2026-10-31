@@ -10,7 +10,9 @@ let f: Awaited<ReturnType<typeof getFixture>>;
 beforeAll(async () => {
   f = await getFixture();
   const db = await getDb();
-  await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", "0033_companies_are_registered_not_typed.sql"), "utf8"));
+  for (const m of ["0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql"]) {
+    await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", m), "utf8"));
+  }
 });
 
 async function fails(p: Promise<unknown>): Promise<string> {
@@ -101,12 +103,28 @@ describe("screens: Mining sites ↔ Companies (UI contracts; the database is the
   test("the company detail page is admin-only, reuses the company card, and lists the company's sites", () => {
     const d = read("src/pages/CompanyDetail.tsx");
     expect(d).toContain('user.role !== "admin"');
-    expect(d).toContain("<CompanyCard company={company} />");
+    // nominate / suspend / deactivate live on the Companies list only
+    expect(d).toContain("<CompanyCard company={company} showActions={false} />");
     expect(d).toContain("s.organizationId === company.id");
     const m = read("src/main.tsx");
     expect(m).toContain('path="companies/:companyId"');
   });
   test("the registry (registrar) cards link nowhere: they have no site access", () => {
     expect(read("src/pages/Companies.tsx")).toContain('user.role === "admin" ? `/portal/companies/${c.id}` : undefined');
+  });
+});
+
+describe("the Assign platform role dialog assigns GOVERNMENT roles only", () => {
+  const dialog = readFileSync(join(import.meta.dir, "..", "src/pages/PortalLayout.tsx"), "utf8");
+  test("no Operator role and no free-text operator organization field", () => {
+    expect(dialog).not.toContain('<SelectItem value="operator">Operator</SelectItem>');
+    expect(dialog).not.toContain("prov-operator");
+    expect(dialog).not.toContain("Must match site operatorName exactly");
+    expect(dialog).toContain('<SelectItem value="registrar">Company registrar</SelectItem>');
+  });
+  test("the company page hides exactly the nominate + status blocks", () => {
+    const c = readFileSync(join(import.meta.dir, "..", "src/pages/Companies.tsx"), "utf8");
+    expect(c).toMatch(/\{showActions && \(\s*<>\s*<section aria-label="Nominate an administrator"/);
+    expect(c).toContain('aria-label="Company status"');
   });
 });
