@@ -92,3 +92,22 @@ describe("operator pages keep the standard page gutter", () => {
     },
   );
 });
+
+// ---------------------------------------------------------------------------
+// LANDING — the public masthead is sticky too, and its in-page anchors leave
+// room for it so a jump never hides a section title under the header.
+// ---------------------------------------------------------------------------
+
+describe("landing page masthead", () => {
+  const src = read("src/pages/Landing.tsx");
+
+  test("the masthead is a single sticky header with its own background", () => {
+    expect((src.match(/<header\b/g) ?? []).length).toBe(1);
+    expect(src).toMatch(/<header className="sticky top-0 z-20 [^"]*bg-background\/95[^"]*"/);
+  });
+
+  test("anchored sections keep clear of the sticky masthead", () => {
+    expect(src).toMatch(/<section id="capabilities" className="[^"]*scroll-mt-14/);
+    expect(src).toMatch(/<section id="principles" className="[^"]*scroll-mt-14/);
+  });
+});
