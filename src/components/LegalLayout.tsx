@@ -1,4 +1,4 @@
-import { BrandMark } from "@/components/BrandMark";
+import { PublicHeader } from "@/components/PublicHeader";
 import {
   LEGAL_PRODUCT,
   LEGAL_UPDATED,
@@ -104,21 +104,15 @@ export function LegalLayout({
 
   return (
     <div className="min-h-screen min-w-0 bg-background paper-grain">
-      <header className="border-b border-border">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-4 md:px-8">
-          <Link to="/" className="flex min-h-9 min-w-0 items-center gap-2">
-            <BrandMark className="size-5 shrink-0" />
-            <span className="display text-base whitespace-nowrap">{LEGAL_PRODUCT}</span>
-          </Link>
-          <button
-            type="button"
-            onClick={() => (window.history.length > 1 ? navigate(-1) : navigate("/"))}
-            className="inline-flex min-h-9 shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="size-4" aria-hidden="true" /> Back
-          </button>
-        </div>
-      </header>
+      <PublicHeader width="3xl">
+        <button
+          type="button"
+          onClick={() => (window.history.length > 1 ? navigate(-1) : navigate("/"))}
+          className="inline-flex min-h-9 shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="size-4" aria-hidden="true" /> Back
+        </button>
+      </PublicHeader>
 
       <main className="mx-auto max-w-3xl min-w-0 px-4 py-10 md:px-8">
         <p className="kicker">{kicker}</p>
