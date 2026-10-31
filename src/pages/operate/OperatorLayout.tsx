@@ -15,6 +15,13 @@
 
 import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import NotificationBell from "@/components/NotificationBell";
 import { RequireOperator } from "@/components/RequireAuth";
 import { useAuth } from "@/hooks/use-auth";
@@ -38,6 +45,7 @@ import { useMutation, useQuery } from "@/lib/backend-react";
 import {
   Building2,
   ClipboardList,
+  CloudOff,
   FileCheck2,
   HeartPulse,
   LogOut,
@@ -79,7 +87,7 @@ function OperatorNavLinks({
           end={"end" in item ? (item as { end?: boolean }).end : false}
           onClick={onNavigate}
           className={({ isActive }) =>
-            `flex items-center gap-2.5 rounded px-3 py-2 text-sm transition-colors ${
+            `flex items-center gap-2.5 rounded-sm px-3 py-2 text-sm transition-colors ${
               isActive
                 ? "bg-accent font-medium text-accent-foreground"
                 : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
@@ -175,6 +183,12 @@ export default function OperatorLayout() {
 
   const pendingCount = queue.filter((q) => q.status !== "done").length;
 
+  const handleSignOut = async () => {
+    setMobileNavOpen(false);
+    await signOut();
+    navigate("/");
+  };
+
   const handleSyncNow = async () => {
     const scheduler = schedulerRef.current;
     if (!scheduler) return;
@@ -200,9 +214,11 @@ export default function OperatorLayout() {
     }
   };
 
+  const identity = `operator · ${user?.operatorName ?? "—"}`;
+
   return (
     <RequireOperator>
-      <div className="min-h-screen bg-background">
+      <div className="min-h-dvh bg-background">
         {/* Accessibility: keyboard users skip the sidebar straight to content */}
         <a
           href="#main-content"
@@ -211,9 +227,9 @@ export default function OperatorLayout() {
         >
           Skip to main content
         </a>
-        <div className="mx-auto flex min-h-screen w-full max-w-[1400px]">
-          {/* Sidebar */}
-          <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar md:flex">
+        <div className="mx-auto flex min-h-dvh w-full max-w-[1400px]">
+          {/* Sidebar (≥md) */}
+          <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar md:flex print:!hidden">
             <div className="flex items-center gap-2 border-b border-border px-4 py-5">
               <BrandMark className="size-6" />
               <div>
@@ -222,110 +238,94 @@ export default function OperatorLayout() {
               </div>
               <span className="ml-auto stamp text-[9px] text-muted-foreground">V1.0</span>
             </div>
-            <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-4">
+            <nav aria-label="Operator" className="flex-1 space-y-1 overflow-y-auto px-2 py-4">
               <OperatorNavLinks items={navItems} />
             </nav>
             <div className="border-t border-border p-3">
               <div className="mb-2 px-2 text-[11px] leading-snug text-muted-foreground">
                 <span className="font-medium text-foreground">{user?.email}</span>
                 <br />
-                operator · {user?.operatorName ?? "—"}
+                {identity}
               </div>
               <Button
                 variant="ghost"
                 size="sm"
                 className="w-full justify-start text-muted-foreground"
-                onClick={async () => {
-                  await signOut();
-                  navigate("/");
-                }}
+                onClick={() => void handleSignOut()}
               >
                 <LogOut className="size-3.5" /> Sign out
               </Button>
+              <div className="mt-2 border-t border-border pt-2">
+                <NotificationBell side="top" align="start" />
+              </div>
             </div>
           </aside>
 
           {/* Main column */}
           <div className="flex min-w-0 flex-1 flex-col">
-            {/* Top bar */}
-            <header className="flex items-center gap-3 border-b border-border px-4 py-3 md:hidden">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setMobileNavOpen((v) => !v)}
-                aria-label="Toggle navigation"
-              >
-                <Menu className="size-5" strokeWidth={1.5} />
-              </Button>
-              <Link to="/operate" className="display text-sm">
-                MineGuard <span className="kicker text-[10px]">Operator</span>
-              </Link>
-              <div className="ml-auto flex items-center gap-1">
-                <NotificationBell />
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground"
-                onClick={() => void handleSyncNow()}
-                disabled={syncing}
-                aria-label={pendingCount > 0 ? `Sync ${pendingCount} queued` : "Sync"}
-              >
-                <RefreshCw className={`size-3.5 ${syncing ? "animate-spin" : ""}`} />
-                {/* icon-only on phones when nothing is queued (320px overflow) */}
-                {pendingCount > 0 ? (
-                  `${pendingCount} queued`
-                ) : (
-                  <span className="hidden sm:inline">Sync</span>
-                )}
-              </Button>
-              <QueueManagerButton
-                label={`Queue${pendingCount > 0 ? ` · ${pendingCount}` : ""}`}
-              />
+            {/* Top bar — sticky and identical in structure to the staff portal
+                and registry shells: it stays in view while the page scrolls. */}
+            <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur print:hidden">
+              <div className="flex items-center gap-3 px-4 py-3 md:px-6">
+                <button
+                  type="button"
+                  onClick={() => setMobileNavOpen(true)}
+                  className="rounded-sm border border-border p-2 text-foreground transition-colors hover:bg-accent md:hidden"
+                  aria-label="Open navigation menu"
+                >
+                  <Menu className="size-5" strokeWidth={1.5} />
+                </button>
+                <Link to="/operate" className="display text-sm md:hidden">
+                  MineGuard Liberia
+                </Link>
+                <p className="kicker hidden md:block">
+                  {membership?.organizationName ?? "Operator portal"}
+                </p>
+                <div className="ml-auto flex items-center gap-2">
+                  {/* Mobile-only bell: on ≥md the sidebar footer bell serves the
+                      operator; below md the sidebar is hidden, so the
+                      notification entry point must live in the header. */}
+                  <div className="md:hidden">
+                    <NotificationBell />
+                  </div>
+                  <QueueManagerButton
+                    label={`Queue${pendingCount > 0 ? ` · ${pendingCount}` : ""}`}
+                  />
+                  {pendingCount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleSyncNow()}
+                      disabled={syncing}
+                      className="flex items-center gap-1.5 rounded-sm border border-destructive/40 bg-destructive/5 px-2.5 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
+                    >
+                      <CloudOff className="size-3.5" />
+                      {/* Keep the label compact on phones so the bell beside it
+                          stays visible; full wording on ≥sm. */}
+                      <span>
+                        {pendingCount} queued
+                        <span className="hidden sm:inline"> offline</span>
+                      </span>
+                      <span className="hidden sm:inline">
+                        {syncing ? " — syncing…" : " — tap to sync"}
+                      </span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleSyncNow()}
+                      disabled={syncing}
+                      aria-label="Refresh — sync queue and reload data"
+                      title="Refresh — sync queue and reload data"
+                      className="flex items-center gap-1.5 rounded-sm border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent"
+                    >
+                      <RefreshCw className={`size-3.5 ${syncing ? "animate-spin" : ""}`} />
+                      {/* icon-only on phones: the full label overflowed 320px */}
+                      <span className="hidden sm:inline">Queue synced</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </header>
-
-            {mobileNavOpen && (
-              <nav className="space-y-1 border-b border-border px-3 py-3 md:hidden">
-                <OperatorNavLinks
-                  items={navItems}
-                  onNavigate={() => setMobileNavOpen(false)}
-                />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start text-muted-foreground"
-                  onClick={async () => {
-                    await signOut();
-                    navigate("/");
-                  }}
-                >
-                  <LogOut className="size-3.5" /> Sign out
-                </Button>
-              </nav>
-            )}
-
-            {/* Desktop sync strip */}
-            <div className="hidden items-center justify-end gap-3 border-b border-border px-6 py-2 md:flex">
-              <NotificationBell />
-              {pendingCount > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  {pendingCount} submission(s) queued offline
-                </span>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground"
-                onClick={() => void handleSyncNow()}
-                disabled={syncing}
-              >
-                <RefreshCw className={`mr-1.5 size-3.5 ${syncing ? "animate-spin" : ""}`} />
-                Sync now
-              </Button>
-              <QueueManagerButton
-                label={`Queue${pendingCount > 0 ? ` · ${pendingCount}` : ""}`}
-              />
-            </div>
 
             <main id="main-content" tabIndex={-1} className="min-w-0 flex-1">
               {membership && membership.companyStatus !== "approved" && (
@@ -337,13 +337,49 @@ export default function OperatorLayout() {
               <Outlet />
             </main>
 
-            <footer className="border-t border-border px-6 py-3 text-center text-[11px] text-muted-foreground">
+            <footer className="border-t border-border px-6 py-3 text-center text-[11px] text-muted-foreground print:hidden">
               Operator access is tenant-isolated: your company's records only,
               enforced server-side. Not an official Government of Liberia
               system.
             </footer>
           </div>
         </div>
+
+        {/* Mobile navigation drawer — slides in from the left, mirrors the
+            desktop sidebar (same component as the staff portal and registry).
+            Tapping a link navigates and slides it back. */}
+        <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+          <SheetContent side="left" className="w-72 bg-sidebar p-0 sm:max-w-[18rem]">
+            <SheetHeader className="shrink-0 border-b border-border py-5 pr-14 pl-4 text-left">
+              <SheetTitle className="flex items-center gap-2 text-sm">
+                <BrandMark className="size-5" />
+                <span className="display min-w-0 whitespace-nowrap">MineGuard Liberia</span>
+                <span className="stamp ml-auto shrink-0 text-[9px] text-muted-foreground">V1.0</span>
+              </SheetTitle>
+              <SheetDescription className="truncate text-[11px]">
+                {user?.email ?? ""}
+                <br />
+                {identity}
+              </SheetDescription>
+            </SheetHeader>
+            <nav aria-label="Operator" className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 py-4">
+              <OperatorNavLinks
+                items={navItems}
+                onNavigate={() => setMobileNavOpen(false)}
+              />
+            </nav>
+            <div className="shrink-0 space-y-2 border-t border-border bg-sidebar p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start text-muted-foreground"
+                onClick={() => void handleSignOut()}
+              >
+                <LogOut className="size-3.5" /> Sign out
+              </Button>
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
     </RequireOperator>
   );
