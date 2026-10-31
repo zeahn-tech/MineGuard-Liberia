@@ -97,23 +97,21 @@ it is not a substitute for the live-anon probes.
   normalizes before re-applying (0002's re-run chain recreates pre-0013
   policy text).
 
-Authorization rules tests (Firebase Emulator Suite) and the UI smoke layer
-remain [PLANNED].
+Further authorization tests at the browser layer remain [PLANNED].
 
 ## Priority 1 — Authorization unit tests (highest value)
 
-Target: the authorization helpers in `src/lib/backend.ts` and the security
-rules (`firestore.rules`) — the rules are best exercised with the Firebase
-Emulator Suite.
+Target: the authorization helpers in `src/lib/backend.ts` and the RLS
+policies in `supabase/migrations/` — the policies are exercised against a real
+Postgres engine (PGlite).
 
 - `requireUser` rejects unauthenticated; `requireStaff` rejects operator/none;
   `requireReviewer` rejects inspector; `requireAdmin` rejects everyone else.
 - `canAccessSite`: admin all; staff national all; staff county only matching
   county; operator only matching operatorName (case-exact).
 - Every public function in sites/inspections/records/stats/evidence throws
-  FORBIDDEN/UNAUTHENTICATED for out-of-role callers (rules unit tests via the
-  Firebase Emulator Suite; data-layer guards via Vitest with a mocked auth
-  module).
+  FORBIDDEN/UNAUTHENTICATED for out-of-role callers (policy tests via PGlite;
+  data-layer guards via bun:test with a mocked auth module).
 
 ## Priority 2 — Compliance-chain state machine
 
@@ -150,8 +148,8 @@ Emulator Suite.
 
 ## Tooling plan
 
-- `bun test` (bun:test) for the data layer and pure helpers; Firebase Emulator
-  Suite for rules.
+- `bun test` (bun:test) for the data layer and pure helpers; PGlite for RLS
+  policies.
 - Vitest + happy-dom for `offline-queue` and pure UI helpers.
 - Playwright for the smoke layer.
 - `bun test` runs the current suite; a broader aggregate is added as later

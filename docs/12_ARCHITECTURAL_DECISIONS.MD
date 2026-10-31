@@ -46,27 +46,24 @@ leave the other exploitable; verifying both closes the gap. The live probe
 suite re-runs on every test pass, so regression detection does not depend on
 manual audits.
 
-## ADR-09 — Backend migrated from Convex to Firebase [2026-09]
-**Decision:** Replace Convex with Firebase (Firestore + Firebase Auth + Cloud
-Storage + Security Rules) at the project owner's request; the project
-`mineguard-liberia` was provided by the owner.
-**Rationale:** Owner-managed infrastructure. The migration preserved the entire
-API surface (`src/lib/backend.ts` mirrors every former Convex function) and the
-authorization model (now enforced by `firestore.rules`/`storage.rules`, with
-identical checks re-derived in the data layer). Page logic was untouched via
-Convex-compatible React hooks. Trade-offs accepted: rules cannot express some
-per-county list filters (doc 04 gap 5); multi-step mutations are no longer
-single transactions (the audit write is best-effort ordered after the business
-write; a Cloud Functions hardening pass can restore atomicity).
+## ADR-09 — Backend: Supabase [2026-09]
+**Decision:** The backend is Supabase (Postgres + Auth + Storage + Realtime),
+using RLS policies, guard triggers and security-definer RPCs as the
+authorization boundary, with identical checks re-derived in the data layer.
+**Rationale:** Owner-managed infrastructure and relational data. The API
+surface in `src/lib/backend.ts` is preserved and page logic is isolated from
+the data layer by `useQuery`/`useMutation` hooks. RLS can express per-row and
+per-county scoping, and multi-step mutations can run as single database
+transactions.
 
-## ADR-01 — Backend consolidated in one managed platform (superseded detail: now Firebase)
+## ADR-01 — Backend consolidated in one managed platform
 **Decision:** All server logic in the managed backend; no second API layer.
-**Rationale:** Originally Convex (template default); migrated to Firebase per
-ADR-09. Reactive subscriptions are preserved via Firestore listeners; rejected:
-Express/Postgres stack (duplicated auth, more deployment surface for a pilot).
+**Rationale:** Supabase per ADR-09. Reactive subscriptions use Postgres
+realtime; rejected: a separate Express API layer (duplicated auth, more
+deployment surface for a pilot).
 
 ## ADR-02 — Authorization centralized (two layers after ADR-09)
-**Decision:** Originally `src/convex/lib/authz.ts`; now the security rules own
+**Decision:** Postgres RLS policies and guard triggers own
 authorization authoritatively and `src/lib/backend.ts` re-derives the same
 checks per call.
 **Rationale:** One place to review the security model per layer; modules cannot

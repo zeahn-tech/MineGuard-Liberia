@@ -1,8 +1,7 @@
 // ---------------------------------------------------------------------------
 // MINEGUARD LIBERIA — SUPABASE DATA LAYER
 //
-// Replaces the previous Firebase data layer function-for-function. Every
-// function re-derives authorization from the caller's profile BEFORE touching
+// Every function re-derives authorization from the caller's profile BEFORE touching
 // data (defense in depth); Postgres RLS + guard triggers + security-definer
 // RPCs (supabase/migrations/0001_initial_schema.sql) are the authoritative
 // server-side boundary. Every consequential write is appended to audit_log
@@ -10,8 +9,7 @@
 // 0009_audit_integrity.sql): clients hold no INSERT privilege on the audit
 // trail, so nothing in this file can forge or lose an audit row.
 //
-// Timestamp contract: the UI speaks epoch-ms numbers (the former Firestore
-// shape). Postgres timestamptz values are mapped to ms numbers at this edge,
+// Timestamp contract: the UI speaks epoch-ms numbers. Postgres timestamptz values are mapped to ms numbers at this edge,
 // and ms numbers back to ISO strings on write — pages need no changes.
 // Column contract: Postgres snake_case rows are mapped to the camelCase
 // domain types in ./types.ts (with `_id` for the primary key) at this edge.
@@ -1091,7 +1089,7 @@ function mapCommandCenterStats(
 // ---------------------------------------------------------------------------
 // LIVE QUERIES — fetch once, then push-refresh via Postgres realtime
 //
-// PERF CONTRACT (unchanged from the Firebase layer):
+// PERF CONTRACT:
 //  - The fetcher runs ONCE on subscribe, then at most once per burst of
 //    realtime events (300ms trailing debounce), never concurrently.
 //  - authBound (default true): the result depends on the signed-in user, so
