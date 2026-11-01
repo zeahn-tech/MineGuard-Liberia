@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { ShieldAlert } from "lucide-react";
 import EvidenceSection from "@/components/EvidenceSection";
 import { PageLoading } from "@/components/PageLoading";
+import { toastError } from "@/lib/feedback";
 
 export default function Community() {
   const reports = useQuery(api.records.listCommunityReports);
@@ -22,7 +23,7 @@ export default function Community() {
       await fn();
       toast.success(ok);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Action failed");
+      toastError(e, { action: "complete that action" });
     }
   };
 

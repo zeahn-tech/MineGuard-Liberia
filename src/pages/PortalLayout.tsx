@@ -74,6 +74,7 @@ import {
 } from "@/lib/offline-sync";
 import { QueueManagerButton } from "@/components/QueueManager";
 import { toast } from "sonner";
+import { toastError } from "@/lib/feedback";
 
 const NAV: { to: string; label: string; icon: typeof Map; adminOnly?: boolean }[] = [
   { to: "/portal", label: "Command Center", icon: LayoutDashboard },
@@ -198,7 +199,7 @@ export default function PortalLayout() {
         refresh();
       },
       onError: (e) =>
-        toast.error(e instanceof Error ? e.message : "Background sync failed"),
+        toastError(e, { action: "sync your saved work in the background" }),
     });
     schedulerRef.current = scheduler;
     return () => {
@@ -253,7 +254,7 @@ export default function PortalLayout() {
       if (result?.seeded) toast.success("Demo data seeded (synthetic records)");
       else toast.info("Database already contains data — seed skipped");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Seed failed");
+      toastError(e, { action: "load the demo data" });
     }
   };
 
@@ -272,7 +273,7 @@ export default function PortalLayout() {
       toast.success(`Role assigned to ${targetEmail}`);
       setShowProvision(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to assign role");
+      toastError(e, { action: "assign that role" });
     }
   };
 

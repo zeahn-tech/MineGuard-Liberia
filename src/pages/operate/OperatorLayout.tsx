@@ -63,6 +63,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { toast } from "sonner";
+import { toastError } from "@/lib/feedback";
 
 const OPERATOR_NAV = [
   { to: "/operate", label: "Overview", icon: ClipboardList, end: true },
@@ -176,7 +177,7 @@ export default function OperatorLayout() {
         refresh();
       },
       onError: (e) =>
-        toast.error(e instanceof Error ? e.message : "Background sync failed"),
+        toastError(e, { action: "sync your saved work in the background" }),
     });
     schedulerRef.current = scheduler;
     return () => {

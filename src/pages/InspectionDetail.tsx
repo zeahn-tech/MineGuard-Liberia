@@ -21,6 +21,7 @@ import type { Doc, Id } from "@/lib/entity-types";
 import { isStaffRole } from "@/lib/types";
 import EvidenceSection from "@/components/EvidenceSection";
 import { PageLoading } from "@/components/PageLoading";
+import { toastError } from "@/lib/feedback";
 
 const SEV_STYLES: Record<string, string> = {
   low: "text-muted-foreground",
@@ -72,7 +73,7 @@ export default function InspectionDetail() {
       await fn();
       toast.success(ok);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Action failed");
+      toastError(e, { action: "complete that action" });
     }
   };
 

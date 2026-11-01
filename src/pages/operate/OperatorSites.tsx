@@ -20,6 +20,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 import { PageLoading } from "@/components/PageLoading";
+import { toastError } from "@/lib/feedback";
 
 export function OperatorSites() {
   const sitesQ = useQuery(api.sites.list);
@@ -97,7 +98,7 @@ function SiteTeam({ siteId }: { siteId: string }) {
       else await api.workforce.assignSite({ memberId, siteId });
       toast.success(assigned ? "Removed from this site." : "Assigned to this site.");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not update the assignment.");
+      toastError(e, { action: "update the assignment" });
     } finally {
       setBusy(null);
     }

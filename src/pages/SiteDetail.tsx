@@ -25,6 +25,7 @@ import type { Id } from "@/lib/entity-types";
 import { RiskAiPanel } from "../components/RiskAiPanel";
 import { useNow } from "@/hooks/use-now";
 import { PageLoading } from "@/components/PageLoading";
+import { toastError } from "@/lib/feedback";
 
 export default function SiteDetail() {
   const now = useNow();
@@ -71,7 +72,7 @@ export default function SiteDetail() {
       toast.success(`Status set to ${newStatus.replace(/_/g, " ")}`);
       setStatusOpen(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed");
+      toastError(e, { action: "save that change" });
     }
   };
 
