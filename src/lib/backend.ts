@@ -1,8 +1,7 @@
 // ---------------------------------------------------------------------------
 // MINEGUARD LIBERIA — SUPABASE DATA LAYER
 //
-// Replaces the previous Firebase data layer function-for-function. Every
-// function re-derives authorization from the caller's profile BEFORE touching
+// Every function re-derives authorization from the caller's profile BEFORE touching
 // data (defense in depth); Postgres RLS + guard triggers + security-definer
 // RPCs (supabase/migrations/0001_initial_schema.sql) are the authoritative
 // server-side boundary. Every consequential write is appended to audit_log
@@ -10,8 +9,7 @@
 // 0009_audit_integrity.sql): clients hold no INSERT privilege on the audit
 // trail, so nothing in this file can forge or lose an audit row.
 //
-// Timestamp contract: the UI speaks epoch-ms numbers (the former Firestore
-// shape). Postgres timestamptz values are mapped to ms numbers at this edge,
+// Timestamp contract: the UI speaks epoch-ms numbers. Postgres timestamptz values are mapped to ms numbers at this edge,
 // and ms numbers back to ISO strings on write — pages need no changes.
 // Column contract: Postgres snake_case rows are mapped to the camelCase
 // domain types in ./types.ts (with `_id` for the primary key) at this edge.
@@ -189,6 +187,7 @@ function mapProfile(r: AnyRow): UserProfile {
     operatorName: (r.operator_name as string) ?? undefined,
     organizationId: (r.organization_id as string) ?? undefined,
     profileComplete: r.profile_complete === true,
+    avatarPath: (r.avatar_path as string) ?? undefined,
     createdAt: toMs(r.created_at),
   };
 }
@@ -1092,7 +1091,7 @@ function mapCommandCenterStats(
 // ---------------------------------------------------------------------------
 // LIVE QUERIES — fetch once, then push-refresh via Postgres realtime
 //
-// PERF CONTRACT (unchanged from the Firebase layer):
+// PERF CONTRACT:
 //  - The fetcher runs ONCE on subscribe, then at most once per burst of
 //    realtime events (300ms trailing debounce), never concurrently.
 //  - authBound (default true): the result depends on the signed-in user, so
@@ -2224,6 +2223,78 @@ async function legacyCompanyList(): Promise<Company[]> {
 
 export const api = {
   // ----------------------------------------------------------------- users
+  /** The signed-in person's own profile: details, photo, and account deletion (migration 0035). */
+  account: {
+    updateProfile: async (args: { name: string; jobTitle: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_update_my_profile", {
+        p_name: args.name,
+        p_job_title: args.jobTitle,
+      });
+      if (error) throw new Error(error.message.replace(/^[A-Z_]+:\s*/, "") || "Could not save your details.");
+      // keep the sign-in account's display name in step (best effort)
+      await supabase.auth
+        .updateUser({ data: { name: args.name.trim(), full_name: args.name.trim(), display_name: args.name.trim() } })
+        .catch(() => undefined);
+      bumpProfileVersion();
+    },
+    /** `blob` is the small square JPEG from prepareAvatar. */
+    uploadAvatar: async (blob: Blob) => {
+      await requireAuthed();
+      const uid = authUserId();
+      if (!uid) throw new Error("Sign in again.");
+      const up = await supabase.storage.from("avatars").upload(`${uid}/avatar.jpg`, blob, {
+        upsert: true,
+        contentType: "image/jpeg",
+        cacheControl: "0",
+      });
+      if (up.error) throw new Error("The photo could not be uploaded. Try again.");
+      const { error } = await supabase.rpc("mg_set_my_avatar", { p_set: true });
+      if (error) throw new Error("The photo could not be saved. Try again.");
+      bumpProfileVersion();
+    },
+    removeAvatar: async () => {
+      await requireAuthed();
+      const uid = authUserId();
+      const { error } = await supabase.rpc("mg_set_my_avatar", { p_set: false });
+      if (error) throw new Error("The photo could not be removed. Try again.");
+      if (uid) await supabase.storage.from("avatars").remove([`${uid}/avatar.jpg`]).catch(() => undefined);
+      bumpProfileVersion();
+    },
+    /** A short-lived link to the private photo (null when there is none). */
+    avatarUrl: async (path: string | undefined): Promise<string | null> => {
+      if (!path) return null;
+      const { data, error } = await supabase.storage.from("avatars").createSignedUrl(path, 3600);
+      return error ? null : (data?.signedUrl ?? null);
+    },
+    deletionBlockers: async (): Promise<{ code: string; message: string }[]> => {
+      await requireAuthed();
+      const { data, error } = await supabase.rpc("mg_account_deletion_blockers");
+      if (error) throw backendError(error);
+      return (data ?? []) as { code: string; message: string }[];
+    },
+    /** Re-checks the password on the server, then removes / anonymizes the account. */
+    deleteAccount: async (args: { password: string }): Promise<{ mode: "removed" | "anonymized" }> => {
+      await requireAuthed();
+      const { data, error } = await supabase.functions.invoke("account-delete", {
+        body: { confirm: "DELETE", password: args.password },
+      });
+      if (error) {
+        let message = "The account could not be deleted. Nothing was removed.";
+        try {
+          const ctx = (error as { context?: Response }).context;
+          const parsed = ctx ? ((await ctx.json()) as { message?: string }) : null;
+          if (parsed?.message) message = parsed.message;
+        } catch {
+          /* not JSON */
+        }
+        throw new Error(message);
+      }
+      await signOut();
+      return { mode: (data as { mode: "removed" | "anonymized" }).mode };
+    },
+  },
+
   companies: {
     /** Ministry view: every company with its status, invitations and members. */
     list: () =>

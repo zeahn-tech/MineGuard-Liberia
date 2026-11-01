@@ -148,8 +148,7 @@ function lastActiveAt(key: string): number {
 
 // ---------------------------------------------------------------------------
 // AUTH STATE — module-level, shared, no per-component subscriptions.
-// Backed by the Supabase auth store in ./supabase.ts (mirrors the former
-// Firebase onAuthStateChanged wiring).
+// Backed by the Supabase auth store in ./supabase.ts.
 // ---------------------------------------------------------------------------
 
 let authEpoch = 0;

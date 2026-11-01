@@ -36,8 +36,9 @@ export default function Landing() {
 
   return (
     <div className="min-h-screen bg-background paper-grain">
-      {/* Masthead */}
-      <header className="border-b border-foreground/80">
+      {/* Masthead — sticky, like the portal, registry and operator top bars,
+          so sign-in and the section links stay in reach while scrolling. */}
+      <header className="sticky top-0 z-20 border-b border-foreground/80 bg-background/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 md:px-8">
           <div className="flex items-center gap-2">
             <BrandMark className="size-5" />
@@ -110,7 +111,7 @@ export default function Landing() {
       </section>
 
       {/* Capabilities */}
-      <section id="capabilities" className="mx-auto max-w-6xl px-4 py-14 md:px-8">
+      <section id="capabilities" className="mx-auto max-w-6xl scroll-mt-14 px-4 py-14 md:px-8">
         <div className="border-t-2 border-foreground/70 pt-3">
           <p className="kicker">Capabilities</p>
           <h2 className="display mt-2 text-3xl md:text-4xl">
@@ -129,7 +130,7 @@ export default function Landing() {
       </section>
 
       {/* Principles */}
-      <section id="principles" className="mx-auto max-w-6xl px-4 py-14 md:px-8">
+      <section id="principles" className="mx-auto max-w-6xl scroll-mt-14 px-4 py-14 md:px-8">
         <div className="border-t-2 border-foreground/70 pt-3">
           <p className="kicker">Operating principles</p>
           <h2 className="display mt-2 text-3xl md:text-4xl">

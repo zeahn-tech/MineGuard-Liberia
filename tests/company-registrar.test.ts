@@ -25,7 +25,7 @@ beforeAll(async () => {
     "0028_account_names_invitation_cleanup.sql",
     "0029_onboarding_officer_bulk_import.sql",
     "0030_registrar_role_value.sql",
-    "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql",
+    "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql",
   ]) await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
 });
 
@@ -212,6 +212,26 @@ describe("registrar UI contracts (routing only; the database is the boundary)", 
     const m = read("src/main.tsx");
     expect(m).toMatch(/path="\/registry"[\s\S]{0,200}RequireRegistrar[\s\S]{0,200}RegistryLayout/);
     expect(m).toMatch(/<Route index element=\{<Companies \/>\} \/>/);
+  });
+  test("the registrar shell mirrors the staff portal: header, mobile drawer and sign-out", () => {
+    const l = read("src/pages/RegistryLayout.tsx");
+    // same shell pieces as PortalLayout: sticky header, hamburger drawer, bell
+    expect(l).toContain('aria-label="Open navigation menu"');
+    expect(l).toContain("<Sheet open={mobileNavOpen}");
+    expect(l).toContain("<NotificationBell");
+    expect(l).toContain("sticky top-0");
+    // sign-out exists in both the desktop sidebar and the drawer, then leaves the workspace
+    expect((l.match(/<LogOut /g) ?? []).length).toBe(2);
+    expect(l).toContain("await signOut();");
+    expect(l).toContain('navigate("/")');
+  });
+  test("the registrar navigation lists exactly Companies, My Profile and Account Security — no staff destinations", () => {
+    const l = read("src/pages/RegistryLayout.tsx");
+    const to = [...l.matchAll(/\{ to: "([^"]+)"/g)].map((m) => m[1]);
+    // (My Profile is the person's own page; it exposes nothing about companies or records)
+    expect(to).toEqual(["/registry", "/registry/profile", "/registry/security"]);
+    expect(l).not.toContain("/portal");
+    expect(l).not.toContain("/operate");
   });
   test("the Companies screen admits exactly admin and registrar", () => {
     const c = read("src/pages/Companies.tsx");
