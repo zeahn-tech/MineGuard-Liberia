@@ -64,18 +64,24 @@ export default function OperatorImport() {
   const [sending, setSending] = useState(false);
   const [key] = useState(() => crypto.randomUUID());
 
-  if (me === undefined) return <p className="text-sm text-muted-foreground" role="status">Loading…</p>;
+  if (me === undefined) return <p className="p-4 text-sm text-muted-foreground md:p-6" role="status">Loading…</p>;
   const allowed = me?.memberStatus === "active" && (me.orgRole === "company_admin" || me.orgRole === "onboarding_officer");
   if (!me || !allowed) {
     return (
-      <div className="paper flex min-w-0 items-start gap-3 p-6">
-        <ShieldAlert className="mt-0.5 size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
-        <p className="text-sm">Importing workers is limited to company administrators and onboarding officers.</p>
+      <div className="p-4 md:p-6">
+        <div className="paper flex min-w-0 items-start gap-3 p-6">
+          <ShieldAlert className="mt-0.5 size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+          <p className="text-sm">Importing workers is limited to company administrators and onboarding officers.</p>
+        </div>
       </div>
     );
   }
   if (me.companyStatus !== "approved") {
-    return <div className="paper p-6 text-sm">{me.organizationName} is not currently approved, so onboarding is paused.</div>;
+    return (
+      <div className="p-4 md:p-6">
+        <div className="paper p-6 text-sm">{me.organizationName} is not currently approved, so onboarding is paused.</div>
+      </div>
+    );
   }
   const orgId = me.organizationId;
 
@@ -186,7 +192,7 @@ export default function OperatorImport() {
   const ready = counts.ok ?? 0;
 
   return (
-    <div className="min-w-0 space-y-6">
+    <div className="min-w-0 space-y-6 p-4 md:p-6">
       <header className="min-w-0">
         <p className="kicker">{me.organizationName}</p>
         <h1 className="display mt-1 text-2xl break-words sm:text-3xl">Import workers</h1>

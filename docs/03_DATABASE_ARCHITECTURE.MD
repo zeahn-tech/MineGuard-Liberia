@@ -1,7 +1,6 @@
 # 03 — Database Architecture
 
-**Status:** implemented as PostgreSQL on Supabase (migrated Convex → Firebase →
-Supabase). Tables mirror the former Convex tables 1:1 in snake_case; rows are
+**Status:** implemented as PostgreSQL on Supabase. Tables mirror the former Convex tables 1:1 in snake_case; rows are
 mapped to camelCase domain types (with `_id` for the primary key) at the
 `src/lib/backend.ts` edge. Timestamps are `timestamptz` in the database and
 epoch-ms numbers in the UI (mapped at the same edge).

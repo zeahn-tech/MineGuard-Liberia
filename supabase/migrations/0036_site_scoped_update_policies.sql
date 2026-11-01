@@ -1,5 +1,5 @@
 -- ============================================================================
--- MINEGUARD LIBERIA — migration 0035: site-scope the UPDATE policies (audit finding E1)
+-- MINEGUARD LIBERIA — migration 0036: site-scope the UPDATE policies (audit finding E1)
 --
 -- DEFECT (confirmed against the fully migrated schema, not just by reading code):
 -- five UPDATE policies checked only WHO the caller is, never WHICH SITE the row
@@ -36,7 +36,7 @@
 -- DATA: no rows are read, changed or deleted. Policies only.
 -- Idempotent (drop-if-exists + create). Run in a transaction: all five change or
 -- none do. Safe to run while the application is live.
--- Rollback: re-create the five policies from their pre-0035 definitions, which
+-- Rollback: re-create the five policies from their pre-0036 definitions, which
 -- are reproduced in the comment block at the end of this file.
 -- ============================================================================
 
@@ -102,7 +102,7 @@ create policy "inspections update" on public.inspections
 commit;
 
 -- ----------------------------------------------------------------------------
--- ROLLBACK (pre-0035 definitions; run in a transaction):
+-- ROLLBACK (pre-0036 definitions; run in a transaction):
 --
 --   drop policy if exists "incidents update" on public.incidents;
 --   create policy "incidents update" on public.incidents

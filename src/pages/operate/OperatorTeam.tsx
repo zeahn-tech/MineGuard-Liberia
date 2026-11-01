@@ -91,27 +91,31 @@ export default function OperatorTeam() {
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<WorkforceMember | null>(null);
 
-  if (me === undefined) return <p className="text-sm text-muted-foreground" role="status">Loading…</p>;
+  if (me === undefined) return <p className="p-4 text-sm text-muted-foreground md:p-6" role="status">Loading…</p>;
   if (!me || me.orgRole !== "company_admin" || me.memberStatus !== "active") {
     return (
-      <div className="paper flex min-w-0 items-start gap-3 p-6">
-        <ShieldAlert className="mt-0.5 size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
-        <div className="min-w-0">
-          <p className="text-sm font-medium">Company administrator access required</p>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Managing a company's workforce is limited to its company administrators.
-          </p>
+      <div className="p-4 md:p-6">
+        <div className="paper flex min-w-0 items-start gap-3 p-6">
+          <ShieldAlert className="mt-0.5 size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Company administrator access required</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Managing a company's workforce is limited to its company administrators.
+            </p>
+          </div>
         </div>
       </div>
     );
   }
   if (me.companyStatus !== "approved") {
     return (
-      <div className="paper p-6 text-sm">
-        <p className="font-medium">{me.organizationName} is not currently approved.</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Workforce administration is paused until the Ministry restores the company. Nothing has been deleted.
-        </p>
+      <div className="p-4 md:p-6">
+        <div className="paper p-6 text-sm">
+          <p className="font-medium">{me.organizationName} is not currently approved.</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Workforce administration is paused until the Ministry restores the company. Nothing has been deleted.
+          </p>
+        </div>
       </div>
     );
   }
@@ -145,7 +149,7 @@ export default function OperatorTeam() {
   }
 
   return (
-    <div className="min-w-0 space-y-8">
+    <div className="min-w-0 space-y-8 p-4 md:p-6">
       <header className="min-w-0">
         <p className="kicker">{me.organizationName}</p>
         <h1 className="display mt-1 text-2xl break-words sm:text-3xl">Team</h1>

@@ -23,7 +23,7 @@ Built with React 19 + Vite + TypeScript, a **Papery** editorial design system (p
 | Environment | Observations with explicit verification states: observed / measured / verified / unverified / alleged |
 | Community reports | Public submission (no account), tracking code, human triage workflow — a report is never an automatic accusation |
 | Audit log | Append-only trail of every consequential action, visible in-app |
-| Access control | 4 roles (admin / supervisor / inspector / operator), geographic scope, operator tenant isolation — enforced by Firestore rules (including per-document list scoping) *and* re-derived per call |
+| Access control | 4 roles (admin / supervisor / inspector / operator), geographic scope, operator tenant isolation — enforced by Postgres RLS policies (including per-row scoping) *and* re-derived per call |
 | PWA | Installable, offline app shell, theme-colored, maskable icons |
 
 ## Quick start
