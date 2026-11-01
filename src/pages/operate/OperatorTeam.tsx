@@ -28,6 +28,11 @@ import { Loader2, MailPlus, RotateCw, ShieldAlert, UserCheck, UserX, XCircle } f
 import { useState } from "react";
 import { toast } from "sonner";
 import { PageLoading } from "@/components/PageLoading";
+import { FormField } from "@/components/FormField";
+import { errorSentence } from "@/lib/error-messages";
+import { toastSuccess } from "@/lib/feedback";
+import { validateInvite } from "@/lib/form-rules";
+import { emailProblem, focusField } from "@/lib/validation";
 
 const ASSIGNABLE = ["worker", "safety_officer", "site_manager", "onboarding_officer"] as const;
 /** Join requests are approved into an operational role only (the server enforces this too). */
@@ -41,8 +46,7 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 function errMsg(e: unknown): string {
-  if (typeof navigator !== "undefined" && navigator.onLine === false) return "You're offline — reconnect and try again.";
-  return e instanceof Error && e.message ? e.message : "Something went wrong. Try again.";
+  return errorSentence(e, { action: "complete that" });
 }
 
 function RoleSelect({ value, onChange, disabled, label, roles = ASSIGNABLE }: {
@@ -88,6 +92,7 @@ export default function OperatorTeam() {
   const orgId = me?.organizationId;
   const data = useQuery(api.workforce.list, orgId && me?.orgRole === "company_admin" && me.memberStatus === "active" ? { organizationId: orgId } : "skip");
   const [email, setEmail] = useState("");
+  const [emailError, setEmailError] = useState<string | undefined>();
   const [role, setRole] = useState("worker");
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<WorkforceMember | null>(null);
@@ -128,11 +133,11 @@ export default function OperatorTeam() {
   const invitations = (data?.invitations ?? []).filter((i) => i.status === "pending" || i.status === "expired").slice(0, 20);
   const counts = ASSIGNABLE.map((r) => ({ r, n: active.filter((m) => m.orgRole === r).length }));
 
-  async function run(fn: () => Promise<unknown>, ok: string) {
+  async function run(fn: () => Promise<unknown>, ok: string, reassure?: string) {
     setBusy(true);
     try {
       await fn();
-      toast.success(ok);
+      toastSuccess({ title: ok, reassure });
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -142,11 +147,16 @@ export default function OperatorTeam() {
 
   async function sendInvite() {
     const address = email.trim();
-    if (!address) return;
+    const problem = validateInvite({ email: address }).email;
+    setEmailError(problem);
+    if (problem) {
+      focusField("team-email");
+      return;
+    }
     await run(async () => {
       await api.workforce.invite({ organizationId: orgIdStrict, email: address, role });
       setEmail("");
-    }, `Invitation sent to ${address.toLowerCase()}.`);
+    }, `Invitation sent to ${address.toLowerCase()}.`, "They'll join only after they accept the email link, which is valid for 7 days. You can revoke it below.");
   }
 
   return (
@@ -185,17 +195,22 @@ export default function OperatorTeam() {
         <CardHeader><CardTitle className="text-base">Invite someone</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <div className="min-w-0 flex-1 space-y-1">
-              <Label htmlFor="team-email">Email address</Label>
-              <Input id="team-email" type="email" inputMode="email" autoComplete="off" placeholder="worker@company.com"
-                value={email} disabled={busy} onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") void sendInvite(); }} />
-            </div>
+            <FormField label="Email address" id="team-email" error={emailError} className="min-w-0 flex-1 space-y-1">
+              {(a11y) => (
+                <Input {...a11y} type="email" inputMode="email" autoComplete="off" placeholder="worker@company.com"
+                  value={email} disabled={busy}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (emailError) setEmailError(emailProblem(e.target.value));
+                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") void sendInvite(); }} />
+              )}
+            </FormField>
             <div className="space-y-1">
               <Label>Role</Label>
               <RoleSelect value={role} onChange={setRole} disabled={busy} label="Role for the invitation" />
             </div>
-            <Button disabled={busy || !email.trim()} onClick={() => void sendInvite()}>
+            <Button disabled={busy} onClick={() => void sendInvite()}>
               {busy ? <Loader2 className="size-4 animate-spin" /> : <MailPlus className="size-4" />} Send
             </Button>
           </div>
