@@ -20,6 +20,12 @@ export function toastError(err: unknown, opts: DescribeOptions & { action?: stri
   });
 }
 
+/** An error whose cause we already know exactly (a domain rule), in the same
+ *  what / whose / how-to-fix shape as toastError. */
+export function toastProblem(p: { what: string; whose: string; fix: string }): void {
+  toast.error(p.what, { description: `${p.whose} ${p.fix}`, duration: 9000 });
+}
+
 export interface NextStep {
   label: string;
   /** Router path (the app uses hash routing). */

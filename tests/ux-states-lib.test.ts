@@ -214,3 +214,105 @@ describe("session expiry — idle countdown rules", () => {
     expect(ended.body).toMatch(/kept on this device/i);
   });
 });
+
+import {
+  INCIDENT_FIELD_ORDER,
+  localDateString,
+  pastDateProblem,
+  validateCompanyName,
+  validateIncident,
+  validateInvite,
+} from "../src/lib/form-rules";
+import {
+  chooseProblem,
+  confirmProblem,
+  countProblem,
+  emailProblem,
+  firstInvalid,
+  hasErrors,
+  passwordProblem,
+  requiredProblem,
+} from "../src/lib/validation";
+
+describe("form validation — exact field, with how to fix it", () => {
+  test("messages say what to do, not just that something is wrong", () => {
+    expect(requiredProblem("", "a short account", "rockfall at the north pit")).toBe(
+      "Enter a short account, for example rockfall at the north pit.",
+    );
+    expect(requiredProblem("   ", "a name")).toBe("Enter a name.");
+    expect(requiredProblem("ok", "a name")).toBeUndefined();
+    expect(chooseProblem("", "the site")).toBe("Choose the site from the list.");
+    expect(chooseProblem("s1", "the site")).toBeUndefined();
+  });
+
+  test("email: empty, missing @, incomplete, valid", () => {
+    expect(emailProblem("")).toMatch(/Enter an email address/);
+    expect(emailProblem("worker.company.com")).toMatch(/needs an @/);
+    expect(emailProblem("worker@company")).toMatch(/incomplete/);
+    expect(emailProblem("worker@company.com")).toBeUndefined();
+    expect(emailProblem("  worker@company.com  ")).toBeUndefined();
+  });
+
+  test("password: says how many characters are missing; confirmation names the second field", () => {
+    expect(passwordProblem("")).toMatch(/at least 6/);
+    expect(passwordProblem("abc")).toBe("Use at least 6 characters — you have 3.");
+    expect(passwordProblem("abcdef")).toBeUndefined();
+    expect(confirmProblem("abcdef", "")).toMatch(/again/);
+    expect(confirmProblem("abcdef", "abcdeg")).toMatch(/don't match/);
+    expect(confirmProblem("abcdef", "abcdef")).toBeUndefined();
+  });
+
+  test("counts: optional, whole numbers only, sanity ceiling", () => {
+    expect(countProblem("", "Injured")).toBeUndefined();
+    expect(countProblem("3", "Injured")).toBeUndefined();
+    expect(countProblem("-1", "Injured")).toMatch(/whole number/);
+    expect(countProblem("2.5", "Injured")).toMatch(/whole number/);
+    expect(countProblem("1e3", "Injured")).toMatch(/whole number/);
+    expect(countProblem("999999", "Injured")).toMatch(/too large/);
+  });
+
+  test("dates: required, real, and not in the future", () => {
+    expect(pastDateProblem("", "it happened", "2026-11-01")).toMatch(/Enter the date it happened/);
+    expect(pastDateProblem("11/01/2026", "it happened", "2026-11-01")).toMatch(/valid date/);
+    expect(pastDateProblem("2026-13-45", "it happened", "2026-11-01")).toMatch(/valid date/);
+    expect(pastDateProblem("2026-11-02", "it happened", "2026-11-01")).toMatch(/in the future/);
+    expect(pastDateProblem("2026-11-01", "it happened", "2026-11-01")).toBeUndefined();
+    expect(pastDateProblem("2025-01-31", "it happened", "2026-11-01")).toBeUndefined();
+    expect(localDateString(new Date(2026, 10, 1))).toBe("2026-11-01");
+  });
+
+  test("incident form: flags EACH bad field separately, in on-screen order", () => {
+    const e = validateIncident(
+      { siteId: "", description: "", occurredAt: "2999-01-01", fatalities: "-2", injured: "x" },
+      "2026-11-01",
+    );
+    expect(Object.keys(e).sort()).toEqual(["description", "fatalities", "injured", "occurredAt", "siteId"]);
+    expect(e.siteId).toMatch(/Choose the site/);
+    expect(e.description).toMatch(/Enter a short, factual account/);
+    expect(e.occurredAt).toMatch(/future/);
+    expect(firstInvalid(e, INCIDENT_FIELD_ORDER)).toBe("siteId");
+    expect(hasErrors(e)).toBe(true);
+  });
+
+  test("incident form: a valid form has no errors; only the bad field is flagged", () => {
+    const ok = validateIncident(
+      { siteId: "s1", description: "Rockfall", occurredAt: "2026-10-30", fatalities: "", injured: "" },
+      "2026-11-01",
+    );
+    expect(hasErrors(ok)).toBe(false);
+    const one = validateIncident(
+      { siteId: "s1", description: "Rockfall", occurredAt: "2026-10-30", fatalities: "", injured: "1.5" },
+      "2026-11-01",
+    );
+    expect(Object.keys(one)).toEqual(["injured"]);
+    expect(firstInvalid(one, INCIDENT_FIELD_ORDER)).toBe("injured");
+  });
+
+  test("invitation and company forms", () => {
+    expect(validateInvite({ email: "nope" }).email).toMatch(/@/);
+    expect(hasErrors(validateInvite({ email: "a@b.co" }))).toBe(false);
+    expect(validateCompanyName({ name: "" }).name).toMatch(/registered name/);
+    expect(validateCompanyName({ name: "A" }).name).toMatch(/too short/);
+    expect(hasErrors(validateCompanyName({ name: "Bomi Gold" }))).toBe(false);
+  });
+});

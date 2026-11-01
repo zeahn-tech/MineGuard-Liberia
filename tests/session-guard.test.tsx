@@ -6,7 +6,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { act, createElement, type ReactElement } from "react";
+import { act, createElement, useState, type ReactElement } from "react";
 import type { Root } from "react-dom/client";
 import { ACTIVITY_KEY } from "../src/lib/session-expiry";
 
@@ -284,6 +284,32 @@ describe("useFormDraft", () => {
     await a.unmount(); // well before DRAFT_DEBOUNCE_MS
     await settle(200);
     expect((await drafts.loadFormDraft<Form>("worker-1", "probe-form"))?.data.description).toBe("typed then navigated away");
+  });
+
+  test("a form its parent hides in the SAME batch as a successful submit does NOT write the submitted text back as a draft", async () => {
+    supa.__testSetAuthUserId("worker-1");
+    let hook!: ReturnType<typeof useFormDraft<Form>>;
+    let hide!: () => void;
+    function Host() {
+      const [show, setShow] = useState(true);
+      hide = () => setShow(false);
+      return show ? createElement(Probe, { onHook: (d) => (hook = d) }) : createElement("span", null, "sent");
+    }
+    const a = await mount(createElement(Host));
+    await settle(50);
+    await act(async () => hook.setForm({ description: "already sent to the server", count: "1" }));
+    await settle(30); // typed text is now the form's current value
+    // Exactly what OperatorIncidentForm does on success: reset, clear, and let
+    // the parent unmount the form — all in one batch, so the form's effects
+    // never get to refresh their "latest value" before the cleanup runs.
+    await act(async () => {
+      hook.setForm(BLANK);
+      hook.clearDraft();
+      hide();
+    });
+    await settle(DRAFT_DEBOUNCE_MS + 250);
+    expect(await drafts.loadFormDraft("worker-1", "probe-form")).toBeNull();
+    await a.unmount();
   });
 
   test("signed out: behaves like plain useState and stores nothing", async () => {

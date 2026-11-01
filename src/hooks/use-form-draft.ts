@@ -46,6 +46,14 @@ export function useFormDraft<T extends object>(formKey: string, initial: T): For
     latest.current = { form, uid, ready };
   });
 
+  // Set by clearDraft(): the form was just submitted or discarded, so the
+  // flush-on-unmount must not write the old text back as a "draft". Lifted as
+  // soon as the form changes again.
+  const cleared = useRef(false);
+  useEffect(() => {
+    cleared.current = false;
+  }, [form]);
+
   const persist = useCallback(
     async (value: T, user: string) => {
       try {
@@ -91,6 +99,7 @@ export function useFormDraft<T extends object>(formKey: string, initial: T): For
   useEffect(() => {
     const flush = () => {
       const l = latest.current;
+      if (cleared.current) return;
       if (l.uid && l.ready) void persist(l.form, l.uid);
     };
     const onHide = () => {
@@ -106,6 +115,7 @@ export function useFormDraft<T extends object>(formKey: string, initial: T): For
   }, [persist]);
 
   const clearDraft = useCallback(() => {
+    cleared.current = true;
     setRestoredAt(null);
     if (uid) void clearFormDraft(uid, formKey).catch(() => undefined);
   }, [uid, formKey]);
