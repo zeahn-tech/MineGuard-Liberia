@@ -29,9 +29,12 @@
 //   findings, overdue corrective actions, open serious incidents. A critical
 //   finding therefore stays visible even when every other figure is favorable.
 //
-// STALE_AFTER_DAYS is a policy default awaiting owner approval (roadmap
-// "decision for you"). It is a single exported constant so the approved value
-// is a one-line change; callers may also pass their own thresholds.
+// STALE_AFTER_DAYS = 180 is the APPROVED policy (approved by the project owner,
+// 2026-11-01): roughly one inspection every six months. It only controls when a
+// site moves between "Recent information available" and "Data stale"; it never
+// changes access, risk scores or incident counts, and never hides a finding.
+// It is a single exported constant so a future change is a one-line edit plus a
+// test update. Callers may also pass their own threshold.
 // ---------------------------------------------------------------------------
 
 import type { Severity } from "./types";

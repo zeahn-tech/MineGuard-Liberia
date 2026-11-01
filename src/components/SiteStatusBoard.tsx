@@ -239,7 +239,7 @@ export function SiteStatusBoardView({
           value={summary.noApprovedInspection}
           sub="information insufficient"
         />
-        <Cell label="Staleness window" value={STALE_AFTER_DAYS} sub="days (default, pending approval)" />
+        <Cell label="Staleness window" value={STALE_AFTER_DAYS} sub="days (approved policy)" />
       </dl>
 
       {/* Filters */}
