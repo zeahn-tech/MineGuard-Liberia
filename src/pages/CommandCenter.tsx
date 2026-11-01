@@ -10,6 +10,7 @@ import {
 } from "@/lib/offline-queue";
 import { useEffect, useState } from "react";
 import TrendsPanel from "@/components/TrendsPanel";
+import SiteStatusBoard from "@/components/SiteStatusBoard";
 import { ArrowRight, ShieldAlert, TriangleAlert } from "lucide-react";
 import { PageLoading } from "@/components/PageLoading";
 
@@ -133,6 +134,8 @@ export default function CommandCenter() {
         <StatCell label="Inspection coverage" value={stats.inspectionCoveragePct} suffix="%" sub="sites with an approved inspection" />
       </div>
 
+      <SiteStatusBoard />
+
       <div className="grid min-w-0 grid-cols-1 gap-8 lg:grid-cols-2">
         {/* Priority sites */}
         <section className="min-w-0">
@@ -142,7 +145,9 @@ export default function CommandCenter() {
           </div>
           {priority.length === 0 ? (
             <p className="py-6 text-sm text-muted-foreground">
-              No elevated-risk sites in your scope.
+              No site has an elevated risk indicator in your scope. This is not a
+              finding that sites are safe — sites with no recent or verified data
+              are listed in the site status board above.
             </p>
           ) : (
             <ul className="divide-y divide-border">

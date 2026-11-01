@@ -10,7 +10,7 @@ let f: Awaited<ReturnType<typeof getFixture>>;
 beforeAll(async () => {
   f = await getFixture();
   const db = await getDb();
-  for (const m of ["0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql"]) {
+  for (const m of ["0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql"]) {
     await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", m), "utf8"));
   }
 });

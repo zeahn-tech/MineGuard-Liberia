@@ -82,6 +82,15 @@ select migration, applied
                   and p.prosrc like '%UNKNOWN_COMPANY%')),
     ('0034 company notifications',
        exists (select 1 from pg_trigger where tgname = 'organization_members_notify' and not tgisinternal)),
+    ('0035 profile settings, photo, account deletion',
+       exists (select 1 from fns where proname = 'mg_prepare_account_deletion')
+       and exists (select 1 from information_schema.columns
+                    where table_schema = 'public' and table_name = 'profiles' and column_name = 'avatar_path')),
+    ('0036 site-scoped update policies',
+       exists (select 1 from pg_policies
+                where schemaname = 'public' and tablename = 'incidents'
+                  and policyname = 'incidents update'
+                  and qual like '%mg_can_access_site%')),
     ('0018 boundaries published to Realtime',
        exists (
          select 1 from pg_publication_tables

@@ -109,6 +109,7 @@ import {
   ROLES,
 } from "./types";
 import type { ImportRow } from "./csv-import";
+import type { SiteStatusInputs } from "./site-status";
 
 // ---------------------------------------------------------------------------
 // QUERY HANDLES — a Convex useQuery-compatible subscription surface
@@ -187,6 +188,7 @@ function mapProfile(r: AnyRow): UserProfile {
     operatorName: (r.operator_name as string) ?? undefined,
     organizationId: (r.organization_id as string) ?? undefined,
     profileComplete: r.profile_complete === true,
+    avatarPath: (r.avatar_path as string) ?? undefined,
     createdAt: toMs(r.created_at),
   };
 }
@@ -2246,6 +2248,78 @@ async function legacyCompanyList(): Promise<Company[]> {
 
 export const api = {
   // ----------------------------------------------------------------- users
+  /** The signed-in person's own profile: details, photo, and account deletion (migration 0035). */
+  account: {
+    updateProfile: async (args: { name: string; jobTitle: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_update_my_profile", {
+        p_name: args.name,
+        p_job_title: args.jobTitle,
+      });
+      if (error) throw new Error(error.message.replace(/^[A-Z_]+:\s*/, "") || "Could not save your details.");
+      // keep the sign-in account's display name in step (best effort)
+      await supabase.auth
+        .updateUser({ data: { name: args.name.trim(), full_name: args.name.trim(), display_name: args.name.trim() } })
+        .catch(() => undefined);
+      bumpProfileVersion();
+    },
+    /** `blob` is the small square JPEG from prepareAvatar. */
+    uploadAvatar: async (blob: Blob) => {
+      await requireAuthed();
+      const uid = authUserId();
+      if (!uid) throw new Error("Sign in again.");
+      const up = await supabase.storage.from("avatars").upload(`${uid}/avatar.jpg`, blob, {
+        upsert: true,
+        contentType: "image/jpeg",
+        cacheControl: "0",
+      });
+      if (up.error) throw new Error("The photo could not be uploaded. Try again.");
+      const { error } = await supabase.rpc("mg_set_my_avatar", { p_set: true });
+      if (error) throw new Error("The photo could not be saved. Try again.");
+      bumpProfileVersion();
+    },
+    removeAvatar: async () => {
+      await requireAuthed();
+      const uid = authUserId();
+      const { error } = await supabase.rpc("mg_set_my_avatar", { p_set: false });
+      if (error) throw new Error("The photo could not be removed. Try again.");
+      if (uid) await supabase.storage.from("avatars").remove([`${uid}/avatar.jpg`]).catch(() => undefined);
+      bumpProfileVersion();
+    },
+    /** A short-lived link to the private photo (null when there is none). */
+    avatarUrl: async (path: string | undefined): Promise<string | null> => {
+      if (!path) return null;
+      const { data, error } = await supabase.storage.from("avatars").createSignedUrl(path, 3600);
+      return error ? null : (data?.signedUrl ?? null);
+    },
+    deletionBlockers: async (): Promise<{ code: string; message: string }[]> => {
+      await requireAuthed();
+      const { data, error } = await supabase.rpc("mg_account_deletion_blockers");
+      if (error) throw backendError(error);
+      return (data ?? []) as { code: string; message: string }[];
+    },
+    /** Re-checks the password on the server, then removes / anonymizes the account. */
+    deleteAccount: async (args: { password: string }): Promise<{ mode: "removed" | "anonymized" }> => {
+      await requireAuthed();
+      const { data, error } = await supabase.functions.invoke("account-delete", {
+        body: { confirm: "DELETE", password: args.password },
+      });
+      if (error) {
+        let message = "The account could not be deleted. Nothing was removed.";
+        try {
+          const ctx = (error as { context?: Response }).context;
+          const parsed = ctx ? ((await ctx.json()) as { message?: string }) : null;
+          if (parsed?.message) message = parsed.message;
+        } catch {
+          /* not JSON */
+        }
+        throw new Error(message);
+      }
+      await signOut();
+      return { mode: (data as { mode: "removed" | "anonymized" }).mode };
+    },
+  },
+
   companies: {
     /** Ministry view: every company with its status, invitations and members. */
     list: () =>
@@ -4272,6 +4346,106 @@ export const api = {
 
   // ----------------------------------------------------------------- stats
   stats: {
+    // ------------------------------------------------ Phase 1: site status board
+    // Feed for the National Mining Intelligence Dashboard's site-status board
+    // (src/lib/site-status.ts holds the documented rules). AUTHORIZATION IS
+    // ROW LEVEL SECURITY: every table is read through the caller's own
+    // Postgres session, so a company user receives only their company's
+    // sites and a scoped regulator only their scope — nothing is widened or
+    // re-derived here. DATA MINIMIZATION: only the columns the status rules
+    // need are selected — never descriptions, notes, answers, evidence,
+    // reporter or inspector identities, or community-report contact data.
+    siteStatusFeed: () =>
+      live<SiteStatusInputs>(
+        async () => {
+          const user = await requireAuthed(true);
+          const loadedAt = Date.now();
+          // Unassigned accounts: an honest empty snapshot, no denied queries.
+          if (!user.role)
+            return {
+              sites: [],
+              inspections: [],
+              findings: [],
+              actions: [],
+              incidents: [],
+              loadedAt,
+            };
+          const cols = (table: string, columns: string) =>
+            pagedRows<AnyRow>((from, to) =>
+              supabase
+                .from(table)
+                .select(columns)
+                .order("id", { ascending: true })
+                .range(from, to),
+            );
+          const [sites, inspections, findings, actions, incidents] =
+            await Promise.all([
+              cols(
+                "sites",
+                "id,code,name,operator_name,organization_id,county,district,status,latitude,longitude",
+              ),
+              cols(
+                "inspections",
+                "id,site_id,status,submitted_at,reviewed_at,created_at",
+              ),
+              cols("findings", "id,site_id,severity,status"),
+              cols("corrective_actions", "id,site_id,status,due_at"),
+              cols(
+                "incidents",
+                "id,site_id,severity,status,occurred_at,fatalities,created_at",
+              ),
+            ]);
+          return {
+            loadedAt,
+            sites: sites.map((r) => ({
+              id: r.id as string,
+              code: r.code,
+              name: r.name,
+              operatorName: r.operator_name,
+              organizationId: r.organization_id ?? undefined,
+              county: r.county,
+              district: r.district ?? undefined,
+              registryStatus: r.status,
+              latitude: r.latitude ?? undefined,
+              longitude: r.longitude ?? undefined,
+            })),
+            inspections: inspections.map((r) => ({
+              siteId: r.site_id,
+              status: r.status,
+              submittedAt: toMsOrNull(r.submitted_at) ?? undefined,
+              reviewedAt: toMsOrNull(r.reviewed_at) ?? undefined,
+              createdAt: toMs(r.created_at),
+            })),
+            findings: findings.map((r) => ({
+              siteId: r.site_id,
+              severity: r.severity,
+              status: r.status,
+            })),
+            actions: actions.map((r) => ({
+              siteId: r.site_id,
+              status: r.status,
+              dueAt: toMs(r.due_at),
+            })),
+            incidents: incidents.map((r) => ({
+              siteId: r.site_id,
+              severity: r.severity,
+              status: r.status,
+              occurredAt: toMs(r.occurred_at),
+              fatalities: r.fatalities ?? undefined,
+              createdAt: toMs(r.created_at),
+            })),
+          };
+        },
+        [
+          "sites",
+          "inspections",
+          "findings",
+          "corrective_actions",
+          "incidents",
+        ],
+        { authBound: true, timeoutMs: 60_000 },
+      ),
+
     // ------------------------------------------------ Session 9: trends + report
     // Time-series and per-county trends and the summary report are computed
     // IN SQL (migration 0021, SECURITY INVOKER): every figure is limited to

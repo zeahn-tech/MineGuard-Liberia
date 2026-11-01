@@ -37,6 +37,7 @@ import {
   HeartPulse,
   Loader2,
   Building2,
+  UserRound,
   Landmark,
   LayoutDashboard,
   Layers,
@@ -88,6 +89,7 @@ const NAV: { to: string; label: string; icon: typeof Map; adminOnly?: boolean }[
   { to: "/portal/audit", label: "Audit Log", icon: ScrollText },
   { to: "/portal/risk-config", label: "Risk Model", icon: Scale },
   { to: "/portal/templates", label: "Templates", icon: ClipboardList },
+  { to: "/portal/profile", label: "My Profile", icon: UserRound },
   { to: "/portal/security", label: "Account Security", icon: ShieldEllipsis },
 ];
 
