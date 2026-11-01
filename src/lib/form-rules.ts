@@ -91,6 +91,21 @@ export function coordinateProblem(value: string, axis: "latitude" | "longitude")
   return undefined;
 }
 
+/**
+ * Liberia lies WEST of the prime meridian (longitudes of about -12 to -7), so a
+ * positive longitude paired with a Liberian latitude is almost always a dropped
+ * minus sign — and files the record in the wrong country. Suggest the fix.
+ */
+export function missingMinusProblem(latitude: string, longitude: string): string | undefined {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!latitude.trim() || !longitude.trim() || !Number.isFinite(lat) || !Number.isFinite(lng)) return undefined;
+  if (lat >= 3 && lat <= 10 && lng >= 7 && lng <= 12) {
+    return `Longitude in Liberia is negative (west of the meridian). Did you mean -${lng}?`;
+  }
+  return undefined;
+}
+
 export type ObservationField = "siteId" | "description" | "observedAt" | "latitude" | "longitude";
 export const OBSERVATION_FIELD_ORDER: readonly ObservationField[] = [
   "siteId",
@@ -111,6 +126,55 @@ export function validateObservation(
     description: requiredProblem(f.description, "what was observed, including how it was measured if it was"),
     observedAt: pastDateProblem(f.observedAt, "it was observed", today),
     latitude: lat ?? (!f.latitude.trim() && f.longitude.trim() ? "Add the latitude too, or clear the longitude." : undefined),
-    longitude: lng ?? (f.latitude.trim() && !f.longitude.trim() ? "Add the longitude too, or clear the latitude." : undefined),
+    longitude:
+      lng ??
+      (f.latitude.trim() && !f.longitude.trim() ? "Add the longitude too, or clear the latitude." : undefined) ??
+      missingMinusProblem(f.latitude, f.longitude),
+  });
+}
+
+// ---- public community report ----------------------------------------------
+
+export type CommunityField = "category" | "county" | "description" | "phone" | "latitude" | "longitude";
+export const COMMUNITY_FIELD_ORDER: readonly CommunityField[] = [
+  "category",
+  "county",
+  "description",
+  "phone",
+  "latitude",
+  "longitude",
+];
+
+/** Optional phone: 7-15 digits, allowing + ( ) - and spaces. */
+export function phoneProblem(value: string): string | undefined {
+  const v = value.trim();
+  if (!v) return undefined;
+  const digits = v.replace(/\D/g, "");
+  if (!/^[+()\d\s-]+$/.test(v) || digits.length < 7 || digits.length > 15) {
+    return "Enter a phone number with the country code, like +231 77 000 0000 — or leave it blank.";
+  }
+  return undefined;
+}
+
+export function validateCommunityReport(f: {
+  category: string;
+  county: string;
+  description: string;
+  phone: string;
+  latitude: string;
+  longitude: string;
+}): FieldErrors<CommunityField> {
+  const lat = coordinateProblem(f.latitude, "latitude");
+  const lng = coordinateProblem(f.longitude, "longitude");
+  return compact<CommunityField>({
+    category: chooseProblem(f.category, "what you are reporting"),
+    county: chooseProblem(f.county, "the county where it is happening"),
+    description: requiredProblem(f.description, "what you saw or heard, in your own words"),
+    phone: phoneProblem(f.phone),
+    latitude: lat ?? (!f.latitude.trim() && f.longitude.trim() ? "Add the latitude too, or clear the longitude." : undefined),
+    longitude:
+      lng ??
+      (f.latitude.trim() && !f.longitude.trim() ? "Add the longitude too, or clear the latitude." : undefined) ??
+      missingMinusProblem(f.latitude, f.longitude),
   });
 }

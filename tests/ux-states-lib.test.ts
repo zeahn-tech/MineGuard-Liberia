@@ -216,6 +216,10 @@ describe("session expiry — idle countdown rules", () => {
 });
 
 import {
+  COMMUNITY_FIELD_ORDER,
+  missingMinusProblem,
+  phoneProblem,
+  validateCommunityReport,
   INCIDENT_FIELD_ORDER,
   OBSERVATION_FIELD_ORDER,
   coordinateProblem,
@@ -339,5 +343,41 @@ describe("observation form rules", () => {
     expect(validateObservation({ ...ok, latitude: "6.4" }, "2026-11-01").longitude).toMatch(/Add the longitude/);
     expect(validateObservation({ ...ok, longitude: "-9.4" }, "2026-11-01").latitude).toMatch(/Add the latitude/);
     expect(validateObservation({ ...ok, latitude: "91", longitude: "-9.4" }, "2026-11-01").latitude).toMatch(/Liberia is roughly 4 to 9/);
+  });
+});
+
+describe("community report rules and the missing-minus longitude check", () => {
+  test("a Liberian latitude with a positive longitude suggests the minus sign", () => {
+    expect(missingMinusProblem("7.4", "9.5")).toBe("Longitude in Liberia is negative (west of the meridian). Did you mean -9.5?");
+    expect(missingMinusProblem("7.4", "-9.5")).toBeUndefined();
+    expect(missingMinusProblem("51.5", "9.5")).toBeUndefined(); // not a Liberian latitude: no opinion
+    expect(missingMinusProblem("", "9.5")).toBeUndefined();
+    expect(missingMinusProblem("7.4", "x")).toBeUndefined();
+  });
+
+  test("phone is optional, but if given must look like a phone number", () => {
+    expect(phoneProblem("")).toBeUndefined();
+    expect(phoneProblem("+231 77 000 0000")).toBeUndefined();
+    expect(phoneProblem("(231) 77-000-0000")).toBeUndefined();
+    expect(phoneProblem("12345")).toMatch(/country code/);
+    expect(phoneProblem("call me")).toMatch(/country code/);
+    expect(phoneProblem("+231 77 000 0000 0000 0000")).toMatch(/country code/);
+  });
+
+  test("a valid public report passes; each missing required field is flagged separately", () => {
+    const ok = { category: "pollution", county: "Nimba", description: "Brown water in the creek", phone: "", latitude: "", longitude: "" };
+    expect(hasErrors(validateCommunityReport(ok))).toBe(false);
+    const bad = validateCommunityReport({ ...ok, category: "", county: "", description: "" });
+    expect(Object.keys(bad).sort()).toEqual(["category", "county", "description"]);
+    expect(firstInvalid(bad, COMMUNITY_FIELD_ORDER)).toBe("category");
+  });
+
+  test("the observation form gets the same minus-sign suggestion at the longitude field", () => {
+    const e = validateObservation(
+      { siteId: "s1", description: "x", observedAt: "2026-10-30", latitude: "6.4", longitude: "9.4" },
+      "2026-11-01",
+    );
+    expect(e.longitude).toMatch(/Did you mean -9.4/);
+    expect(Object.keys(e)).toEqual(["longitude"]);
   });
 });
