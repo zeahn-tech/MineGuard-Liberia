@@ -86,6 +86,11 @@ select migration, applied
        exists (select 1 from fns where proname = 'mg_prepare_account_deletion')
        and exists (select 1 from information_schema.columns
                     where table_schema = 'public' and table_name = 'profiles' and column_name = 'avatar_path')),
+    ('0036 site-scoped update policies',
+       exists (select 1 from pg_policies
+                where schemaname = 'public' and tablename = 'incidents'
+                  and policyname = 'incidents update'
+                  and qual like '%mg_can_access_site%')),
     ('0018 boundaries published to Realtime',
        exists (
          select 1 from pg_publication_tables
