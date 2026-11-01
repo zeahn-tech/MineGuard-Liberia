@@ -381,3 +381,42 @@ describe("community report rules and the missing-minus longitude check", () => {
     expect(Object.keys(e)).toEqual(["longitude"]);
   });
 });
+
+import { normalizeTrackingCode, suggestTrackingCode, trackingCodeProblem } from "../src/lib/tracking-code";
+import { makeTrackingCode } from "../src/lib/types";
+
+describe("tracking codes — tolerant entry for the public lookup", () => {
+  test("a freshly generated code is already normal and passes the format check", () => {
+    for (let i = 0; i < 20; i++) {
+      const c = makeTrackingCode();
+      expect(normalizeTrackingCode(c)).toBe(c);
+      expect(trackingCodeProblem(c)).toBeUndefined();
+    }
+  });
+
+  test("lower case, spaces, a missing prefix and stray punctuation are fixed silently", () => {
+    const c = "CR-MH1ABC23DEF45678";
+    expect(normalizeTrackingCode("cr-mh1abc23def45678")).toBe(c);
+    expect(normalizeTrackingCode("  CR MH1A BC23 DEF4 5678 ")).toBe(c);
+    expect(normalizeTrackingCode("MH1ABC23DEF45678")).toBe(c);
+    expect(normalizeTrackingCode("cr_mh1abc23def45678.")).toBe(c);
+    expect(normalizeTrackingCode("")).toBe("");
+    expect(normalizeTrackingCode(" - ")).toBe("");
+  });
+
+  test("problems say what is wrong and what a code looks like", () => {
+    expect(trackingCodeProblem("")).toMatch(/Enter the tracking code/);
+    expect(trackingCodeProblem("CR-ABC")).toMatch(/too short/);
+    expect(trackingCodeProblem("CR-MH1ABC23DEF45678")).toBeUndefined();
+  });
+
+  test("suggests the lookalike fix only in the hex-only tail (O->0, I/L->1), never elsewhere", () => {
+    // tail "DEF45O78" has an O that cannot be hex
+    expect(suggestTrackingCode("CR-MH1ABC23DEF45O78")).toBe("CR-MH1ABC23DEF45078");
+    expect(suggestTrackingCode("CR-MH1ABC23DEF4I678")).toBe("CR-MH1ABC23DEF41678");
+    // an O in the base-36 timestamp part is legitimate: leave it alone
+    expect(suggestTrackingCode("CR-MHOABC23DEF45678")).toBeNull();
+    expect(suggestTrackingCode("CR-MH1ABC23DEF45678")).toBeNull();
+    expect(suggestTrackingCode("CR-")).toBeNull();
+  });
+});

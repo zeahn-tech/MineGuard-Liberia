@@ -5,8 +5,12 @@ import { api } from "@/lib/backend";
 import { PublicHeader } from "@/components/PublicHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Search } from "lucide-react";
+import { FormField } from "@/components/FormField";
+import { NoResults } from "@/components/NoResults";
+import { PageLoading } from "@/components/PageLoading";
+import { normalizeTrackingCode, suggestTrackingCode, trackingCodeProblem } from "@/lib/tracking-code";
+import { focusField } from "@/lib/validation";
 
 const STATUS_COPY: Record<string, string> = {
   submitted: "Received — awaiting triage by authorized personnel.",
@@ -30,10 +34,15 @@ export default function CommunityTrack() {
   }
 
   // Only fetch when a code is present (public endpoint, coarse fields only).
+  // The code is tidied (case, spaces, missing "CR-") before it is looked up, so
+  // harmless slips don't read as "not found".
+  const lookup = normalizeTrackingCode(code);
   const report = useQuery(
     api.records.trackCommunityReport,
-    code ? { trackingCode: code.trim().toUpperCase() } : "skip",
+    lookup ? { trackingCode: lookup } : "skip",
   );
+  const [inputError, setInputError] = useState<string | undefined>();
+  const suggestion = suggestTrackingCode(lookup);
 
   return (
     <div className="min-h-screen bg-background paper-grain">
@@ -51,22 +60,36 @@ export default function CommunityTrack() {
         </p>
 
         <form
-          className="paper mt-6 flex items-end gap-3 p-5"
+          className="paper mt-6 flex items-start gap-3 p-5"
+          noValidate
           onSubmit={(e) => {
             e.preventDefault();
-            setSearchParams(input.trim() ? { code: input.trim().toUpperCase() } : {});
+            const problem = trackingCodeProblem(input);
+            setInputError(problem);
+            if (problem) {
+              focusField("code");
+              return;
+            }
+            setSearchParams({ code: normalizeTrackingCode(input) });
           }}
         >
-          <div className="flex-1 space-y-1.5">
-            <Label htmlFor="code">Tracking code</Label>
-            <Input
-              id="code"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="CR-XXXXXXXX"
-              className="font-mono uppercase"
-            />
-          </div>
+          <FormField label="Tracking code" id="code" error={inputError} className="flex-1 space-y-1.5">
+            {(a11y) => (
+              <Input
+                {...a11y}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  if (inputError) setInputError(trackingCodeProblem(e.target.value));
+                }}
+                placeholder="CR-XXXXXXXXXXXXXXXX"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                className="font-mono uppercase"
+              />
+            )}
+          </FormField>
           <Button type="submit">
             <Search className="size-4" /> Look up
           </Button>
@@ -75,12 +98,22 @@ export default function CommunityTrack() {
         {code && (
           <div className="paper mt-6 p-6">
             {report === undefined ? (
-              <p className="text-sm text-muted-foreground">Looking up…</p>
+              <PageLoading shape="form" label="your report" rows={2} compact />
             ) : report === null ? (
-              <p className="text-sm text-muted-foreground">
-                No report found for code <span className="font-mono">{code}</span>.
-                Check the code and try again.
-              </p>
+              <NoResults
+                query={lookup}
+                suggestion={suggestion}
+                onUseSuggestion={(c) => {
+                  setInput(c);
+                  setSearchParams({ code: c });
+                }}
+                hint="Check each character — O (the letter) and 0 (zero), I and 1 look alike. If you were sent the code in a message, copy and paste it instead of typing it."
+                onClear={() => {
+                  setInput("");
+                  setSearchParams({});
+                }}
+                className="border-0 p-0"
+              />
             ) : (
               <div>
                 <p className="kicker">Status for {report.trackingCode}</p>
