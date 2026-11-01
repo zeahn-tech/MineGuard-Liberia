@@ -20,6 +20,7 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import { useRecoveryState } from "@/hooks/use-recovery";
 import { clearRecovery, dismissRecoveryLinkError } from "@/lib/recovery";
+import { clearSignedOutNotice, peekSignedOutNotice, signedOutCopy } from "@/lib/session-expiry";
 import {
   mfaAal,
   resetPasswordEmail,
@@ -67,6 +68,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Why the person is here again, when the app (not they) ended the session.
+  // Read purely, cleared once shown, so a refresh does not repeat it.
+  const [signedOut] = useState(peekSignedOutNotice);
+  useEffect(() => {
+    if (signedOut) clearSignedOutNotice();
+  }, [signedOut]);
 
   // Password-recovery mode (deep link from the recovery email) and the
   // "forgot password" request panel are part of this page — Gap #4.
@@ -464,6 +471,15 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   Accounts are provisioned by the program office. All sign-ins
                   are attributed in the audit trail.
                 </CardDescription>
+                {signedOut && (
+                  <div
+                    role="status"
+                    className="mt-3 rounded-sm border border-border bg-muted/50 p-3 text-left text-sm"
+                  >
+                    <p className="font-medium">{signedOutCopy(signedOut).title}</p>
+                    <p className="mt-1 text-muted-foreground">{signedOutCopy(signedOut).body}</p>
+                  </div>
+                )}
               </CardHeader>
               <TabsList className="mx-auto grid w-[calc(100%-3rem)] grid-cols-2">
                 <TabsTrigger value="signin">Sign in</TabsTrigger>

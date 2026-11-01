@@ -9,6 +9,9 @@ import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { sectionJump } from "@/lib/utils";
 import NotificationBell from "@/components/NotificationBell";
+import { OfflineBanner } from "@/components/OfflineBanner";
+import { LightPathProvider } from "@/components/PageLoading";
+import { SessionGuard } from "@/components/SessionGuard";
 import {
   Dialog,
   DialogContent,
@@ -275,6 +278,7 @@ export default function PortalLayout() {
 
   return (
     <div className="min-h-screen bg-background">
+      <SessionGuard />
       {/* Accessibility: keyboard users skip the sidebar straight to content */}
       <a
         href="#main-content"
@@ -394,9 +398,21 @@ export default function PortalLayout() {
                 )}
               </div>
             </div>
+            <OfflineBanner variant="app" pending={pendingItems.length} />
           </header>
           <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">
-            <Outlet />
+            {/* The light path a loading screen offers on a poor connection:
+                incident reports are saved on the device first, so they work
+                however weak the signal is. */}
+            <LightPathProvider
+              value={{
+                label: "Report an incident",
+                to: "/portal/incidents",
+                hint: "Reports are saved on this device first and sent when your connection allows.",
+              }}
+            >
+              <Outlet />
+            </LightPathProvider>
           </main>
 
           <footer className="border-t border-border px-4 py-4 text-[11px] text-muted-foreground md:px-8">
