@@ -13,6 +13,7 @@ const link = ({ isActive }: { isActive: boolean }) =>
   `rounded-md px-2.5 py-1.5 text-sm ${isActive ? "bg-accent font-medium" : "text-muted-foreground hover:text-foreground"}`;
 import { NavLink, Outlet } from "react-router";
 import NotificationBell from "@/components/NotificationBell";
+import { UserAvatar } from "@/components/UserAvatar";
 
 export default function RegistryLayout() {
   const { user, signOut } = useAuth();
@@ -27,9 +28,11 @@ export default function RegistryLayout() {
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <nav aria-label="Registry" className="flex items-center gap-1">
               <NavLink to="/registry" end className={link}>Companies</NavLink>
+              <NavLink to="/registry/profile" className={link}>My profile</NavLink>
               <NavLink to="/registry/security" className={link}>Account security</NavLink>
             </nav>
             <NotificationBell />
+            <UserAvatar name={user?.name} email={user?.email} avatarPath={user?.avatarPath} className="size-7 text-[10px]" />
             <span className="hidden min-w-0 truncate text-xs text-muted-foreground lg:block">{user?.email}</span>
             <Button variant="ghost" size="sm" onClick={() => void signOut()} aria-label="Sign out">
               <LogOut className="size-4" /> <span className="hidden sm:inline">Sign out</span>
