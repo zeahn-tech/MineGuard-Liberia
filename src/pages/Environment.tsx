@@ -15,10 +15,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { toast } from "sonner";
-import { CloudOff, Plus } from "lucide-react";
+import { CloudOff, Leaf, Plus } from "lucide-react";
 import { enqueueObservationReport, newClientRef, syncQueue } from "@/lib/offline-queue";
 import { PageLoading } from "@/components/PageLoading";
+import { EmptyState } from "@/components/EmptyState";
+import { FormField, invalidControlClass } from "@/components/FormField";
+import { useFormDraft } from "@/hooks/use-form-draft";
+import { toastError, toastSuccess } from "@/lib/feedback";
+import { OBSERVATION_FIELD_ORDER, localDateString, validateObservation, type ObservationField } from "@/lib/form-rules";
+import { firstInvalid, focusField, hasErrors, type FieldErrors } from "@/lib/validation";
 
 const CATEGORIES = [
   { value: "water_pollution", label: "Water pollution" },
@@ -53,13 +58,14 @@ export default function Environment() {
   const observations = useQuery(api.records.listObservations);
   const sites = useQuery(api.sites.list);
   const setStatus = useMutation(api.records.setObservationStatus);
+  const [recordOpen, setRecordOpen] = useState(false);
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     try {
       await fn();
-      toast.success(ok);
+      toastSuccess({ title: ok });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Action failed");
+      toastError(e, { action: "update the observation" });
     }
   };
 
@@ -74,15 +80,28 @@ export default function Environment() {
             integrity rule of this platform.
           </p>
         </div>
-        {sites && sites.length > 0 && <ObservationDialog />}
+        {sites && sites.length > 0 && <ObservationDialog open={recordOpen} onOpenChange={setRecordOpen} />}
       </header>
 
       {!observations ? (
         <PageLoading shape="list" label="observations" />
       ) : observations.length === 0 ? (
-        <div className="paper p-10 text-center text-sm text-muted-foreground">
-          No observations recorded in your scope.
-        </div>
+        <EmptyState
+          icon={Leaf}
+          title="No observations recorded yet"
+          why={
+            sites && sites.length === 0
+              ? "Observations are recorded against a registered site, and none are registered in your area yet. An administrator registers sites."
+              : "Nothing has been recorded for the sites in your area. Record what you see, and how sure you are of it, as soon as you observe it."
+          }
+          action={
+            sites && sites.length === 0
+              ? { label: "Go to Sites", to: "/portal/sites" }
+              : sites
+                ? { label: "Record an observation", onClick: () => setRecordOpen(true) }
+                : undefined
+          }
+        />
       ) : (
         <ul className="divide-y divide-border rounded-sm border border-border">
           {observations.map((o) => (
@@ -137,28 +156,64 @@ export default function Environment() {
   );
 }
 
-function ObservationDialog() {
-  const sites = useQuery(api.sites.list);
-  const report = useMutation(api.records.reportObservation);
-  const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
+function blankObservation() {
+  return {
     siteId: "",
     category: "water_pollution",
     verification: "observed",
     description: "",
-    observedAt: new Date().toISOString().slice(0, 10),
+    observedAt: localDateString(),
     latitude: "",
     longitude: "",
-  });
+  };
+}
+
+const OBS_FIELD_IDS: Record<ObservationField, string> = {
+  siteId: "obs-site",
+  description: "obs-description",
+  observedAt: "obs-date",
+  latitude: "obs-lat",
+  longitude: "obs-lng",
+};
+
+function ObservationDialog({
+  open: openProp,
+  onOpenChange,
+}: {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const sites = useQuery(api.sites.list);
+  const report = useMutation(api.records.reportObservation);
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = onOpenChange ?? setOpenState;
+  const [saving, setSaving] = useState(false);
+  const { form, setForm, restoredAt, hasDraft, saveFailed, clearDraft, discardDraft } = useFormDraft(
+    "observation-report",
+    blankObservation(),
+  );
+  const [errors, setErrors] = useState<FieldErrors<ObservationField>>({});
+  const [attempted, setAttempted] = useState(false);
+
+  const change = (patch: Partial<typeof form>) => {
+    const next = { ...form, ...patch };
+    setForm(next);
+    if (attempted) setErrors(validateObservation(next));
+  };
 
   const submit = async () => {
     if (saving) return;
-    if (!form.siteId || !form.description.trim()) {
-      toast.error("Site and description are required.");
+    const found = validateObservation(form);
+    setErrors(found);
+    setAttempted(true);
+    if (hasErrors(found)) {
+      const first = firstInvalid(found, OBSERVATION_FIELD_ORDER);
+      if (first) focusField(OBS_FIELD_IDS[first]);
       return;
     }
     setSaving(true);
+    let queued = false;
     try {
       // Offline-first: enqueue BEFORE any network attempt; syncs immediately
       // when online, or on reconnect with server-side clientRef dedupe.
@@ -176,23 +231,50 @@ function ObservationDialog() {
         latitude: form.latitude ? Number(form.latitude) : undefined,
         longitude: form.longitude ? Number(form.longitude) : undefined,
       });
+      queued = true;
+      const siteId = form.siteId;
       const result = await syncQueue({ reportObservation: report });
-      if (result.synced > 0) toast.success("Observation recorded");
-      else toast.info("Saved and queued — will sync when online.");
+      if (result.synced > 0) {
+        toastSuccess({
+          title: "Observation recorded.",
+          reassure: "It's saved with the verification state you chose, and is now part of this site's record.",
+          next: { label: "View site", to: `/portal/sites/${siteId}` },
+        });
+      } else {
+        toastSuccess({
+          title: "Saved on this device.",
+          reassure: "It will be sent automatically as soon as you're back online — nothing is lost, and you can keep working.",
+        });
+      }
       setOpen(false);
-      setForm({ ...form, siteId: "", description: "", latitude: "", longitude: "" });
+      setForm(blankObservation());
+      clearDraft();
+      setErrors({});
+      setAttempted(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to record observation");
+      if (queued) {
+        toastSuccess({
+          title: "Saved on this device.",
+          reassure: "We couldn't send it just now, so it will be retried automatically. Nothing is lost.",
+        });
+        setOpen(false);
+        setForm(blankObservation());
+        clearDraft();
+      } else {
+        toastError(e, { action: "save the observation" });
+      }
     } finally {
       setSaving(false);
     }
   };
 
+  const failing = Object.values(errors).filter(Boolean).length;
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button>
-          <Plus className="size-4" /> Record observation
+          <Plus className="size-4" /> {hasDraft ? "Resume draft" : "Record observation"}
         </Button>
       </DialogTrigger>
       <DialogContent className="paper max-h-[85vh] overflow-y-auto">
@@ -203,26 +285,40 @@ function ObservationDialog() {
             used in analysis and reporting.
           </DialogDescription>
         </DialogHeader>
+        {restoredAt && (
+          <p role="status" className="flex flex-wrap items-center gap-x-2 rounded-sm border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+            <span>
+              Restored your unsaved draft from{" "}
+              {new Date(restoredAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.
+            </span>
+            <button type="button" className="font-medium text-foreground underline underline-offset-2" onClick={discardDraft}>
+              Start over
+            </button>
+          </p>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label>Site *</Label>
-            <select
-              className="w-full rounded-sm border border-input bg-card px-3 py-2 text-sm"
-              value={form.siteId}
-              onChange={(e) => setForm({ ...form, siteId: e.target.value })}
-            >
-              <option value="">Select site…</option>
-              {(sites ?? []).map((s) => (
-                <option key={s._id} value={s._id}>{s.code} — {s.name}</option>
-              ))}
-            </select>
-          </div>
+          <FormField label="Site" required id={OBS_FIELD_IDS.siteId} error={errors.siteId} className="sm:col-span-2">
+            {(a11y) => (
+              <select
+                {...a11y}
+                className={`w-full rounded-sm border border-input bg-card px-3 py-2 text-sm ${invalidControlClass}`}
+                value={form.siteId}
+                onChange={(e) => change({ siteId: e.target.value })}
+              >
+                <option value="">Select site…</option>
+                {(sites ?? []).map((s) => (
+                  <option key={s._id} value={s._id}>{s.code} — {s.name}</option>
+                ))}
+              </select>
+            )}
+          </FormField>
           <div className="space-y-1.5">
-            <Label>Category</Label>
+            <Label htmlFor="obs-category">Category</Label>
             <select
+              id="obs-category"
               className="w-full rounded-sm border border-input bg-card px-3 py-2 text-sm"
               value={form.category}
-              onChange={(e) => setForm({ ...form, category: e.target.value })}
+              onChange={(e) => change({ category: e.target.value })}
             >
               {CATEGORIES.map((c) => (
                 <option key={c.value} value={c.value}>{c.label}</option>
@@ -230,51 +326,85 @@ function ObservationDialog() {
             </select>
           </div>
           <div className="space-y-1.5">
-            <Label>Verification state</Label>
+            <Label htmlFor="obs-verification">Verification state</Label>
             <select
+              id="obs-verification"
               className="w-full rounded-sm border border-input bg-card px-3 py-2 text-sm"
               value={form.verification}
-              onChange={(e) => setForm({ ...form, verification: e.target.value })}
+              onChange={(e) => change({ verification: e.target.value })}
             >
               {VERIFICATION.map((v) => (
                 <option key={v.value} value={v.value}>{v.label}</option>
               ))}
             </select>
           </div>
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label>What was observed? *</Label>
-            <Textarea
-              rows={4}
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="Factual description; note measurement method if applicable…"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Date observed</Label>
-            <Input
-              type="date"
-              value={form.observedAt}
-              onChange={(e) => setForm({ ...form, observedAt: e.target.value })}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Coordinates (optional)</Label>
-            <div className="flex gap-2">
-              <Input value={form.latitude} onChange={(e) => setForm({ ...form, latitude: e.target.value })} placeholder="Lat" />
-              <Input value={form.longitude} onChange={(e) => setForm({ ...form, longitude: e.target.value })} placeholder="Lng" />
-            </div>
+          <FormField label="What was observed?" required id={OBS_FIELD_IDS.description} error={errors.description} className="sm:col-span-2">
+            {(a11y) => (
+              <Textarea
+                {...a11y}
+                rows={4}
+                value={form.description}
+                onChange={(e) => change({ description: e.target.value })}
+                placeholder="Factual description; note measurement method if applicable…"
+              />
+            )}
+          </FormField>
+          <FormField label="Date observed" required id={OBS_FIELD_IDS.observedAt} error={errors.observedAt}>
+            {(a11y) => (
+              <Input
+                {...a11y}
+                type="date"
+                max={localDateString()}
+                value={form.observedAt}
+                onChange={(e) => change({ observedAt: e.target.value })}
+              />
+            )}
+          </FormField>
+          <div className="grid grid-cols-2 gap-2">
+            <FormField label="Latitude" id={OBS_FIELD_IDS.latitude} error={errors.latitude} hint="Optional">
+              {(a11y) => (
+                <Input
+                  {...a11y}
+                  inputMode="decimal"
+                  value={form.latitude}
+                  onChange={(e) => change({ latitude: e.target.value })}
+                  placeholder="6.43"
+                />
+              )}
+            </FormField>
+            <FormField label="Longitude" id={OBS_FIELD_IDS.longitude} error={errors.longitude} hint="Optional">
+              {(a11y) => (
+                <Input
+                  {...a11y}
+                  inputMode="decimal"
+                  value={form.longitude}
+                  onChange={(e) => change({ longitude: e.target.value })}
+                  placeholder="-9.43"
+                />
+              )}
+            </FormField>
           </div>
         </div>
+        {attempted && failing > 0 && (
+          <p role="alert" className="text-sm text-destructive">
+            {failing === 1 ? "One field needs attention" : `${failing} fields need attention`} — marked above.
+          </p>
+        )}
+        {saveFailed && (
+          <p role="status" className="text-xs text-muted-foreground">
+            This device couldn't keep a draft of this form (its storage may be full or blocked). Finish and submit
+            it now so nothing is lost.
+          </p>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
           <Button onClick={submit} disabled={saving}>
             {navigator.onLine === false ? (
               <>
                 <CloudOff className="size-4" /> Queue for sync
-            </>
+              </>
             ) : saving ? (
-              "Recording…"
+              "Recording..."
             ) : (
               "Record observation"
             )}

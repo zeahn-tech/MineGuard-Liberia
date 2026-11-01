@@ -217,6 +217,9 @@ describe("session expiry — idle countdown rules", () => {
 
 import {
   INCIDENT_FIELD_ORDER,
+  OBSERVATION_FIELD_ORDER,
+  coordinateProblem,
+  validateObservation,
   localDateString,
   pastDateProblem,
   validateCompanyName,
@@ -314,5 +317,27 @@ describe("form validation — exact field, with how to fix it", () => {
     expect(validateCompanyName({ name: "" }).name).toMatch(/registered name/);
     expect(validateCompanyName({ name: "A" }).name).toMatch(/too short/);
     expect(hasErrors(validateCompanyName({ name: "Bomi Gold" }))).toBe(false);
+  });
+});
+
+describe("observation form rules", () => {
+  const ok = { siteId: "s1", description: "Brown water downstream", observedAt: "2026-10-30", latitude: "", longitude: "" };
+  test("a valid observation, with or without coordinates, has no errors", () => {
+    expect(hasErrors(validateObservation(ok, "2026-11-01"))).toBe(false);
+    expect(hasErrors(validateObservation({ ...ok, latitude: "6.43", longitude: "-9.43" }, "2026-11-01"))).toBe(false);
+  });
+  test("each bad field is flagged on its own", () => {
+    const e = validateObservation({ siteId: "", description: " ", observedAt: "", latitude: "", longitude: "" }, "2026-11-01");
+    expect(Object.keys(e).sort()).toEqual(["description", "observedAt", "siteId"]);
+    expect(firstInvalid(e, OBSERVATION_FIELD_ORDER)).toBe("siteId");
+  });
+  test("coordinates: numeric, in range, and given as a pair", () => {
+    expect(coordinateProblem("abc", "latitude")).toMatch(/as a number/);
+    expect(coordinateProblem("200", "latitude")).toMatch(/between -90 and 90/);
+    expect(coordinateProblem("-200", "longitude")).toMatch(/between -180 and 180/);
+    expect(coordinateProblem("", "longitude")).toBeUndefined();
+    expect(validateObservation({ ...ok, latitude: "6.4" }, "2026-11-01").longitude).toMatch(/Add the longitude/);
+    expect(validateObservation({ ...ok, longitude: "-9.4" }, "2026-11-01").latitude).toMatch(/Add the latitude/);
+    expect(validateObservation({ ...ok, latitude: "91", longitude: "-9.4" }, "2026-11-01").latitude).toMatch(/Liberia is roughly 4 to 9/);
   });
 });

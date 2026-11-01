@@ -74,3 +74,43 @@ export function validateCompanyName(f: { name: string }): FieldErrors<CompanyFie
         : undefined,
   });
 }
+
+// ---- environmental observation --------------------------------------------
+
+/** A coordinate that is optional, but if present must be a number in range. */
+export function coordinateProblem(value: string, axis: "latitude" | "longitude"): string | undefined {
+  const v = value.trim();
+  if (!v) return undefined;
+  const n = Number(v);
+  const [lo, hi, hint] =
+    axis === "latitude"
+      ? [-90, 90, "Liberia is roughly 4 to 9"]
+      : [-180, 180, "Liberia is roughly -12 to -7"];
+  if (!Number.isFinite(n)) return `Enter ${axis} as a number like ${axis === "latitude" ? "6.43" : "-9.43"}.`;
+  if (n < lo || n > hi) return `${axis[0].toUpperCase()}${axis.slice(1)} must be between ${lo} and ${hi}. ${hint}.`;
+  return undefined;
+}
+
+export type ObservationField = "siteId" | "description" | "observedAt" | "latitude" | "longitude";
+export const OBSERVATION_FIELD_ORDER: readonly ObservationField[] = [
+  "siteId",
+  "description",
+  "observedAt",
+  "latitude",
+  "longitude",
+];
+
+export function validateObservation(
+  f: { siteId: string; description: string; observedAt: string; latitude: string; longitude: string },
+  today?: string,
+): FieldErrors<ObservationField> {
+  const lat = coordinateProblem(f.latitude, "latitude");
+  const lng = coordinateProblem(f.longitude, "longitude");
+  return compact<ObservationField>({
+    siteId: chooseProblem(f.siteId, "the site where you made the observation"),
+    description: requiredProblem(f.description, "what was observed, including how it was measured if it was"),
+    observedAt: pastDateProblem(f.observedAt, "it was observed", today),
+    latitude: lat ?? (!f.latitude.trim() && f.longitude.trim() ? "Add the latitude too, or clear the longitude." : undefined),
+    longitude: lng ?? (f.latitude.trim() && !f.longitude.trim() ? "Add the longitude too, or clear the latitude." : undefined),
+  });
+}
