@@ -24,6 +24,7 @@ import {
   type SiteStatusRow,
 } from "@/lib/site-status";
 import { TriangleAlert, WifiOff } from "lucide-react";
+import { PageLoading } from "@/components/PageLoading";
 
 const PAGE = 25;
 
@@ -160,9 +161,7 @@ export function SiteStatusBoardView({
   if (!feed) {
     if (!timedOut) {
       return (
-        <section aria-busy="true" className="py-6 text-sm text-muted-foreground">
-          Loading site status…
-        </section>
+        <PageLoading shape="table" label="site status" compact />
       );
     }
     return (
@@ -170,8 +169,8 @@ export function SiteStatusBoardView({
         <p className="display text-base">Site status could not load</p>
         <p className="mt-1 text-sm text-muted-foreground">
           {online
-            ? "The request failed. Try again; the exact error is logged in the browser console."
-            : "You appear to be offline. Reconnect and try again."}
+            ? "This is usually a slow or unstable connection, not a problem with your account. Try again in a moment."
+            : "You appear to be offline. The board will load as soon as you reconnect — or try again once you have signal."}
         </p>
         <Button
           className="mt-3"
