@@ -45,6 +45,7 @@ import {
   type LocalDraft,
 } from "@/lib/offline-queue";
 import type { Doc } from "@/lib/entity-types";
+import { PageLoading } from "@/components/PageLoading";
 
 type TemplateDoc = Doc<"inspectionTemplates">;
 type SiteDoc = Doc<"sites">;
@@ -188,7 +189,7 @@ export default function Inspections() {
       <section>
         <h2 className="display border-b border-border pb-2 text-lg">All inspections</h2>
         {!inspections ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+          <PageLoading shape="list" label="inspections" compact />
         ) : inspections.length === 0 ? (
           <p className="py-8 text-sm text-muted-foreground">
             No inspections yet. Start one above.

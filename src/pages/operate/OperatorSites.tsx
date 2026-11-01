@@ -19,6 +19,7 @@ import { Building2, FileCheck2, Loader2, MapPin } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
+import { PageLoading } from "@/components/PageLoading";
 
 export function OperatorSites() {
   const sitesQ = useQuery(api.sites.list);
@@ -36,9 +37,7 @@ export function OperatorSites() {
       </div>
 
       {sitesQ === undefined && (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Loading…
-        </p>
+        <PageLoading shape="list" label="sites" />
       )}
       {sitesQ !== undefined && (sitesQ ?? []).length === 0 && (
         <p className="text-sm text-muted-foreground">
@@ -163,9 +162,7 @@ export function OperatorSiteDetail() {
       </Link>
 
       {siteQ === undefined && (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Loading…
-        </p>
+        <PageLoading shape="detail" label="site" />
       )}
       {siteQ === null && (
         <Card className="paper rounded-none border-border shadow-none">

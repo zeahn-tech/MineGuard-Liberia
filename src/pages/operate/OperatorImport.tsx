@@ -22,6 +22,7 @@ import type { ImportOutcome, ImportStatus } from "@/lib/types";
 import { Download, FileUp, Loader2, MailCheck, ShieldAlert } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
+import { PageLoading } from "@/components/PageLoading";
 
 type Stage = "choose" | "checking" | "preview" | "importing" | "done";
 
@@ -64,7 +65,7 @@ export default function OperatorImport() {
   const [sending, setSending] = useState(false);
   const [key] = useState(() => crypto.randomUUID());
 
-  if (me === undefined) return <p className="p-4 text-sm text-muted-foreground md:p-6" role="status">Loading…</p>;
+  if (me === undefined) return <div className="p-4 md:p-6"><PageLoading shape="form" label="import" /></div>;
   const allowed = me?.memberStatus === "active" && (me.orgRole === "company_admin" || me.orgRole === "onboarding_officer");
   if (!me || !allowed) {
     return (

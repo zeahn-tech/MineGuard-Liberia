@@ -24,6 +24,7 @@ import { draftFromSite, parsePositionInput, type PositionDraft, EMPTY_POSITION_D
 import type { Id } from "@/lib/entity-types";
 import { RiskAiPanel } from "../components/RiskAiPanel";
 import { useNow } from "@/hooks/use-now";
+import { PageLoading } from "@/components/PageLoading";
 
 export default function SiteDetail() {
   const now = useNow();
@@ -55,7 +56,7 @@ export default function SiteDetail() {
 
   if (!siteId) return <p className="text-sm text-muted-foreground">No site selected.</p>;
   if (site === undefined)
-    return <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>;
+    return <PageLoading shape="detail" label="site" />;
   if (site === null)
     return <p className="py-16 text-center text-sm text-muted-foreground">Site not found or access denied.</p>;
 
@@ -231,7 +232,7 @@ export default function SiteDetail() {
 
         <RecordSection title="Corrective actions">
           {cas === undefined ? (
-            <Empty text="Loading…" />
+            <PageLoading shape="list" label="corrective actions" rows={2} compact />
           ) : cas.length === 0 ? (
             <Empty text="No corrective actions for this site." />
           ) : (

@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { ArrowLeft, MapPin, UserCheck } from "lucide-react";
 import { isStaffRole } from "@/lib/types";
 import EvidenceSection from "@/components/EvidenceSection";
+import { PageLoading } from "@/components/PageLoading";
 
 const SEV_STYLES: Record<string, string> = {
   low: "text-muted-foreground",
@@ -30,7 +31,7 @@ export default function IncidentDetail() {
   if (!incidentId)
     return <p className="text-sm text-muted-foreground">No incident selected.</p>;
   if (incident === undefined)
-    return <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>;
+    return <PageLoading shape="detail" label="incident" />;
   if (incident === null)
     return (
       <p className="py-16 text-center text-sm text-muted-foreground">

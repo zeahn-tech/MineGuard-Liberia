@@ -12,8 +12,8 @@ import {
 import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import type { Severity } from "@/lib/types";
-import { Loader2 } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
+import { PageLoading } from "@/components/PageLoading";
 
 function severityClasses(sev: Severity): string {
   switch (sev) {
@@ -58,9 +58,7 @@ export default function OperatorFindings() {
       )}
 
       {findingsQ === undefined && (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Loading…
-        </p>
+        <PageLoading shape="list" label="findings" />
       )}
       {findingsQ !== undefined && findings.length === 0 && (
         <p className="text-sm text-muted-foreground">

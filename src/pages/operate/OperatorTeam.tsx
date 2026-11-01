@@ -27,6 +27,7 @@ import type { CompanyInvitation, WorkforceMember } from "@/lib/types";
 import { Loader2, MailPlus, RotateCw, ShieldAlert, UserCheck, UserX, XCircle } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { PageLoading } from "@/components/PageLoading";
 
 const ASSIGNABLE = ["worker", "safety_officer", "site_manager", "onboarding_officer"] as const;
 /** Join requests are approved into an operational role only (the server enforces this too). */
@@ -91,7 +92,7 @@ export default function OperatorTeam() {
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<WorkforceMember | null>(null);
 
-  if (me === undefined) return <p className="p-4 text-sm text-muted-foreground md:p-6" role="status">Loading…</p>;
+  if (me === undefined) return <div className="p-4 md:p-6"><PageLoading shape="list" label="team" /></div>;
   if (!me || me.orgRole !== "company_admin" || me.memberStatus !== "active") {
     return (
       <div className="p-4 md:p-6">
@@ -236,7 +237,7 @@ export default function OperatorTeam() {
         <CardHeader><CardTitle className="text-base">Members</CardTitle></CardHeader>
         <CardContent>
           {data === undefined ? (
-            <p className="text-sm text-muted-foreground" role="status">Loading team…</p>
+            <PageLoading shape="list" label="team" rows={3} compact />
           ) : (
             <ul className="space-y-2">
               {active.map((m) => {

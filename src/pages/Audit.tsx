@@ -1,6 +1,7 @@
 import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { StaffOnly } from "@/components/StaffOnly";
+import { PageLoading } from "@/components/PageLoading";
 
 export default function Audit() {
   const entries = useQuery(api.stats.recentAuditLog, {});
@@ -18,7 +19,7 @@ export default function Audit() {
       </header>
 
       {entries === undefined ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>
+        <PageLoading shape="table" label="audit log" />
       ) : entries.length === 0 ? (
         <div className="paper p-10 text-center text-sm text-muted-foreground">
           No audit entries yet.

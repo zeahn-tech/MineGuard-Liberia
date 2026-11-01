@@ -11,6 +11,7 @@ import {
 import { useEffect, useState } from "react";
 import TrendsPanel from "@/components/TrendsPanel";
 import { ArrowRight, ShieldAlert, TriangleAlert } from "lucide-react";
+import { PageLoading } from "@/components/PageLoading";
 
 // NOTE: the demo-data seed is an explicit admin action ("Load demo data"
 // button in the sidebar). It must NOT auto-run on page mount — an implicit
@@ -63,17 +64,16 @@ export default function CommandCenter() {
   if (!stats) {
     if (!timedOut) {
       return (
-        <div className="py-20 text-center text-sm text-muted-foreground">
-          Loading…
-        </div>
+        <PageLoading shape="cards" label="command center" rows={4} />
       );
     }
     return (
       <div className="py-20 text-center">
-        <p className="display text-lg">The dashboard could not load</p>
+        <p className="display text-lg">The dashboard is taking too long to load</p>
         <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-          The request failed — check your connection and try again. The exact
-          error is logged in the browser console.
+          This is usually a slow or unstable connection, not a problem with
+          your account. Try again, or move to a spot with a better signal. Your
+          saved and queued work is not affected.
         </p>
         <Button
           className="mt-4"

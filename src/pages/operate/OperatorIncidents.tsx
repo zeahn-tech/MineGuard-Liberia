@@ -38,6 +38,7 @@ import type { Incident } from "@/lib/types";
 import { Loader2, Paperclip, Send, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
+import { PageLoading } from "@/components/PageLoading";
 
 const DAY = 86_400_000;
 
@@ -396,9 +397,7 @@ export default function OperatorIncidents() {
       )}
 
       {incidentsQ === undefined && (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Loading…
-        </p>
+        <PageLoading shape="list" label="incidents" />
       )}
       {incidentsQ !== undefined && incidents.length === 0 && (
         <p className="text-sm text-muted-foreground">No incidents reported.</p>

@@ -17,6 +17,7 @@ import { useState } from "react";
 import { Navigate, useNavigate } from "react-router";
 import { PublicHeader } from "@/components/PublicHeader";
 import { toast } from "sonner";
+import { PageLoading } from "@/components/PageLoading";
 
 const ROLE_LABEL: Record<string, string> = {
   company_admin: "Company administrator",
@@ -37,7 +38,7 @@ export default function Invitation() {
   const [pw2, setPw2] = useState("");
   const [pwBusy, setPwBusy] = useState(false);
 
-  if (isLoading) return <p className="p-6 text-sm text-muted-foreground" role="status">Loading…</p>;
+  if (isLoading) return <PageLoading shape="form" label="invitation" className="p-6" />;
   if (!isAuthenticated) return <Navigate to="/auth?returnTo=%2Finvitation" replace />;
 
   async function accept(id: string) {

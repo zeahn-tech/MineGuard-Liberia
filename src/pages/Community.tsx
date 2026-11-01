@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { ShieldAlert } from "lucide-react";
 import EvidenceSection from "@/components/EvidenceSection";
+import { PageLoading } from "@/components/PageLoading";
 
 export default function Community() {
   const reports = useQuery(api.records.listCommunityReports);
@@ -50,7 +51,7 @@ export default function Community() {
           Awaiting triage ({pending.length})
         </h2>
         {!reports ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+          <PageLoading shape="list" label="community reports" compact />
         ) : pending.length === 0 ? (
           <p className="py-6 text-sm text-muted-foreground">Queue is clear.</p>
         ) : (

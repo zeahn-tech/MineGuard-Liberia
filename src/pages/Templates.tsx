@@ -59,6 +59,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
+import { PageLoading } from "@/components/PageLoading";
 
 function blankQuestion(): TemplateSection["questions"][number] {
   return { label: "", answerType: "boolean", required: true };
@@ -141,9 +142,7 @@ export function TemplateList() {
       </div>
 
       {templatesQ === undefined && (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Loading…
-        </p>
+        <PageLoading shape="list" label="templates" />
       )}
       {templatesQ !== undefined && templates.length === 0 && (
         <p className="text-sm text-muted-foreground">
@@ -618,9 +617,7 @@ export function TemplateEditor() {
 
   if (templatesQ === undefined) {
     return (
-      <p className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" /> Loading…
-      </p>
+      <PageLoading shape="form" label="template" />
     );
   }
 

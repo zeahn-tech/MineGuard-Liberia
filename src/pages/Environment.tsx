@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 import { CloudOff, Plus } from "lucide-react";
 import { enqueueObservationReport, newClientRef, syncQueue } from "@/lib/offline-queue";
+import { PageLoading } from "@/components/PageLoading";
 
 const CATEGORIES = [
   { value: "water_pollution", label: "Water pollution" },
@@ -77,7 +78,7 @@ export default function Environment() {
       </header>
 
       {!observations ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>
+        <PageLoading shape="list" label="observations" />
       ) : observations.length === 0 ? (
         <div className="paper p-10 text-center text-sm text-muted-foreground">
           No observations recorded in your scope.

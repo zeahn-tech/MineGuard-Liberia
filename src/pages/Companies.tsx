@@ -29,6 +29,7 @@ import { Building2, Loader2, MailPlus, RotateCw, ShieldAlert, XCircle } from "lu
 import { useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
+import { PageLoading } from "@/components/PageLoading";
 
 const STATUS_LABEL: Record<CompanyStatus, string> = {
   pending_review: "Pending review",
@@ -320,7 +321,7 @@ export default function Companies() {
       </Card>
 
       {companies === undefined ? (
-        <p className="text-sm text-muted-foreground" role="status">Loading companies…</p>
+        <PageLoading shape="list" label="companies" />
       ) : companies.length === 0 ? (
         <p className="text-sm text-muted-foreground">No companies registered yet.</p>
       ) : (

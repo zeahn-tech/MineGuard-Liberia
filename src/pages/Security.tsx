@@ -34,6 +34,7 @@ import { KeyRound, Loader2, ShieldCheck, ShieldOff } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useMfaState } from "@/hooks/use-mfa-state";
+import { PageLoading } from "@/components/PageLoading";
 
 function friendlyMfaError(err: unknown, fallback: string): string {
   const msg = err instanceof Error ? err.message : "";
@@ -187,7 +188,7 @@ export default function SecurityPage() {
                 </Button>
               </div>
             ))}
-            {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+            {loading && <PageLoading shape="form" label="security settings" rows={2} compact />}
           </CardContent>
         )}
 

@@ -20,6 +20,7 @@ import {
 import type { Doc, Id } from "@/lib/entity-types";
 import { isStaffRole } from "@/lib/types";
 import EvidenceSection from "@/components/EvidenceSection";
+import { PageLoading } from "@/components/PageLoading";
 
 const SEV_STYLES: Record<string, string> = {
   low: "text-muted-foreground",
@@ -61,7 +62,7 @@ export default function InspectionDetail() {
 
   if (!inspectionId) return <p className="text-sm text-muted-foreground">No inspection selected.</p>;
   if (inspection === undefined)
-    return <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>;
+    return <PageLoading shape="detail" label="inspection" />;
   if (inspection === null)
     return <p className="py-16 text-center text-sm text-muted-foreground">Not found or access denied.</p>;
 
@@ -239,7 +240,7 @@ export default function InspectionDetail() {
         </div>
 
         {findings === undefined ? (
-          <p className="py-4 text-sm text-muted-foreground">Loading…</p>
+          <PageLoading shape="list" label="findings" rows={2} compact />
         ) : findings.length === 0 ? (
           <p className="py-4 text-sm text-muted-foreground">No findings recorded.</p>
         ) : (

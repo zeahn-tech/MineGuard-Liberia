@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { ArrowLeft, MapPin, ShieldCheck } from "lucide-react";
 import { isStaffRole } from "@/lib/types";
 import EvidenceSection from "@/components/EvidenceSection";
+import { PageLoading } from "@/components/PageLoading";
 
 const VERIF_STYLE: Record<string, string> = {
   verified: "text-foreground",
@@ -33,7 +34,7 @@ export default function ObservationDetail() {
       <p className="text-sm text-muted-foreground">No observation selected.</p>
     );
   if (observation === undefined)
-    return <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>;
+    return <PageLoading shape="detail" label="observation" />;
   if (observation === null)
     return (
       <p className="py-16 text-center text-sm text-muted-foreground">

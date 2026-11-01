@@ -29,6 +29,7 @@ import {
   newClientRef,
 } from "@/lib/offline-queue";
 import { useNow } from "@/hooks/use-now";
+import { PageLoading } from "@/components/PageLoading";
 
 const DAY = 86_400_000;
 
@@ -207,9 +208,7 @@ export default function OperatorCorrectiveActions() {
       </div>
 
       {obligationsQ === undefined && (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Loading…
-        </p>
+        <PageLoading shape="list" label="corrective actions" />
       )}
       {obligationsQ !== undefined && obligations.length === 0 && (
         <p className="text-sm text-muted-foreground">

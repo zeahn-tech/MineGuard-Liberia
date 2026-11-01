@@ -24,6 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
 import { Plus, MapPin, MapPinOff, ChevronLeft, ChevronRight } from "lucide-react";
+import { PageLoading } from "@/components/PageLoading";
 
 const COUNTIES = [
   "Bomi", "Bong", "Gbarpolu", "Grand Bassa", "Grand Cape Mount", "Grand Gedeh",
@@ -120,7 +121,7 @@ export default function Sites() {
       )}
 
       {!sites ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>
+        <PageLoading shape="list" label="sites" />
       ) : sites.length === 0 ? (
         <div className="paper p-10 text-center">
           <p className="text-sm text-muted-foreground">

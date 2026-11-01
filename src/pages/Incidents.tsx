@@ -20,6 +20,7 @@ import {
 import { toast } from "sonner";
 import { CloudOff, Plus } from "lucide-react";
 import { enqueueIncidentReport, newClientRef, syncQueue } from "@/lib/offline-queue";
+import { PageLoading } from "@/components/PageLoading";
 
 const TYPES = [
   { value: "fatality", label: "Fatality" },
@@ -77,7 +78,7 @@ export default function Incidents() {
       </header>
 
       {incidents.length === 0 && feed.loading ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>
+        <PageLoading shape="list" label="incidents" />
       ) : incidents.length === 0 ? (
         <div className="paper p-10 text-center text-sm text-muted-foreground">
           No incidents recorded in your scope.
