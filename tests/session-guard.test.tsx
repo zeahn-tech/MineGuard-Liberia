@@ -6,7 +6,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { act, createElement, useState, type ReactElement } from "react";
+import { act, createElement, useEffect, useState, type ReactElement } from "react";
 import type { Root } from "react-dom/client";
 import { ACTIVITY_KEY } from "../src/lib/session-expiry";
 
@@ -290,12 +290,25 @@ describe("useFormDraft", () => {
     supa.__testSetAuthUserId("worker-1");
     let hook!: ReturnType<typeof useFormDraft<Form>>;
     let hide!: () => void;
-    function Host() {
+    function Host({
+      onHook,
+      onReady,
+    }: {
+      onHook: (d: ReturnType<typeof useFormDraft<Form>>) => void;
+      onReady: (hideForm: () => void) => void;
+    }) {
       const [show, setShow] = useState(true);
-      hide = () => setShow(false);
-      return show ? createElement(Probe, { onHook: (d) => (hook = d) }) : createElement("span", null, "sent");
+      useEffect(() => {
+        onReady(() => setShow(false));
+      }, [onReady]);
+      return show ? createElement(Probe, { onHook }) : createElement("span", null, "sent");
     }
-    const a = await mount(createElement(Host));
+    const a = await mount(
+      createElement(Host, {
+        onHook: (d) => (hook = d),
+        onReady: (fn) => (hide = fn),
+      }),
+    );
     await settle(50);
     await act(async () => hook.setForm({ description: "already sent to the server", count: "1" }));
     await settle(30); // typed text is now the form's current value
