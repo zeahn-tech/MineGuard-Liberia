@@ -110,6 +110,7 @@ import {
   ROLES,
 } from "./types";
 import type { ImportRow } from "./csv-import";
+import type { SiteStatusInputs } from "./site-status";
 
 // ---------------------------------------------------------------------------
 // QUERY HANDLES — a Convex useQuery-compatible subscription surface
@@ -4249,6 +4250,106 @@ export const api = {
 
   // ----------------------------------------------------------------- stats
   stats: {
+    // ------------------------------------------------ Phase 1: site status board
+    // Feed for the National Mining Intelligence Dashboard's site-status board
+    // (src/lib/site-status.ts holds the documented rules). AUTHORIZATION IS
+    // ROW LEVEL SECURITY: every table is read through the caller's own
+    // Postgres session, so a company user receives only their company's
+    // sites and a scoped regulator only their scope — nothing is widened or
+    // re-derived here. DATA MINIMIZATION: only the columns the status rules
+    // need are selected — never descriptions, notes, answers, evidence,
+    // reporter or inspector identities, or community-report contact data.
+    siteStatusFeed: () =>
+      live<SiteStatusInputs>(
+        async () => {
+          const user = await requireAuthed(true);
+          const loadedAt = Date.now();
+          // Unassigned accounts: an honest empty snapshot, no denied queries.
+          if (!user.role)
+            return {
+              sites: [],
+              inspections: [],
+              findings: [],
+              actions: [],
+              incidents: [],
+              loadedAt,
+            };
+          const cols = (table: string, columns: string) =>
+            pagedRows<AnyRow>((from, to) =>
+              supabase
+                .from(table)
+                .select(columns)
+                .order("id", { ascending: true })
+                .range(from, to),
+            );
+          const [sites, inspections, findings, actions, incidents] =
+            await Promise.all([
+              cols(
+                "sites",
+                "id,code,name,operator_name,organization_id,county,district,status,latitude,longitude",
+              ),
+              cols(
+                "inspections",
+                "id,site_id,status,submitted_at,reviewed_at,created_at",
+              ),
+              cols("findings", "id,site_id,severity,status"),
+              cols("corrective_actions", "id,site_id,status,due_at"),
+              cols(
+                "incidents",
+                "id,site_id,severity,status,occurred_at,fatalities,created_at",
+              ),
+            ]);
+          return {
+            loadedAt,
+            sites: sites.map((r) => ({
+              id: r.id as string,
+              code: r.code,
+              name: r.name,
+              operatorName: r.operator_name,
+              organizationId: r.organization_id ?? undefined,
+              county: r.county,
+              district: r.district ?? undefined,
+              registryStatus: r.status,
+              latitude: r.latitude ?? undefined,
+              longitude: r.longitude ?? undefined,
+            })),
+            inspections: inspections.map((r) => ({
+              siteId: r.site_id,
+              status: r.status,
+              submittedAt: toMsOrNull(r.submitted_at) ?? undefined,
+              reviewedAt: toMsOrNull(r.reviewed_at) ?? undefined,
+              createdAt: toMs(r.created_at),
+            })),
+            findings: findings.map((r) => ({
+              siteId: r.site_id,
+              severity: r.severity,
+              status: r.status,
+            })),
+            actions: actions.map((r) => ({
+              siteId: r.site_id,
+              status: r.status,
+              dueAt: toMs(r.due_at),
+            })),
+            incidents: incidents.map((r) => ({
+              siteId: r.site_id,
+              severity: r.severity,
+              status: r.status,
+              occurredAt: toMs(r.occurred_at),
+              fatalities: r.fatalities ?? undefined,
+              createdAt: toMs(r.created_at),
+            })),
+          };
+        },
+        [
+          "sites",
+          "inspections",
+          "findings",
+          "corrective_actions",
+          "incidents",
+        ],
+        { authBound: true, timeoutMs: 60_000 },
+      ),
+
     // ------------------------------------------------ Session 9: trends + report
     // Time-series and per-county trends and the summary report are computed
     // IN SQL (migration 0021, SECURITY INVOKER): every figure is limited to
