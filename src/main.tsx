@@ -25,6 +25,7 @@ const OperatorPortal = lazy(() => import("./pages/OperatorPortal.tsx"));
 const Companies = lazy(() => import("./pages/Companies.tsx"));
 const RegistryLayout = lazy(() => import("./pages/RegistryLayout.tsx"));
 const CompanyDetail = lazy(() => import("./pages/CompanyDetail.tsx"));
+const ProfileSettings = lazy(() => import("./pages/ProfileSettings.tsx"));
 const Invitation = lazy(() => import("./pages/Invitation.tsx"));
 const Join = lazy(() => import("./pages/Join.tsx"));
 const OperatorTeam = lazy(() => import("./pages/operate/OperatorTeam.tsx"));
@@ -138,6 +139,7 @@ createRoot(document.getElementById("root")!).render(
               <Route index element={<Companies />} />
               {/* the registrar's own password + authenticator (MFA) settings */}
               <Route path="security" element={<OperatorSecurity />} />
+              <Route path="profile" element={<ProfileSettings />} />
             </Route>
 
             {/* OPERATOR SECTION — a routed section of its own (Priority B
@@ -155,6 +157,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="corrective-actions" element={<OperatorCorrectiveActions />} />
               <Route path="incidents" element={<OperatorIncidents />} />
               <Route path="team" element={<OperatorTeam />} />
+              <Route path="profile" element={<ProfileSettings />} />
               <Route path="import" element={<OperatorImport />} />
               <Route path="security" element={<OperatorSecurity />} />
             </Route>
@@ -195,6 +198,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="templates/new" element={<TemplateEditor />} />
               <Route path="templates/:templateId" element={<TemplateEditor />} />
               <Route path="security" element={<Security />} />
+              <Route path="profile" element={<ProfileSettings />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

@@ -1,6 +1,6 @@
 # 18 — Multi-company, site and workforce administration
 
-Status: implemented on branch `feature/multi-company-admin` (migrations 0024–0034).
+Status: implemented on branch `feature/multi-company-admin` (migrations 0024–0035).
 **Not applied to any live database.** Phase E (bulk CSV onboarding + the dedicated
 Onboarding officer role) is built; see §10.
 
@@ -70,7 +70,7 @@ used invitations, redirect URL fixed by server configuration.
 GitHub Pages deploys the **frontend** on merge to `main` and never applies
 migrations. Therefore:
 
-1. Staging first: apply `0024 → 0025 → 0026 → 0027 → 0028 → 0029 → 0030 → 0031 → 0032 → 0033 → 0034` (0030 must be its own run: it adds the `registrar` enum value, which PostgreSQL cannot use in the same transaction) (idempotent), run
+1. Staging first: apply `0024 → 0025 → 0026 → 0027 → 0028 → 0029 → 0030 → 0031 → 0032 → 0033 → 0034 → 0035` (0030 must be its own run: it adds the `registrar` enum value, which PostgreSQL cannot use in the same transaction) (idempotent), run
    `supabase/checks/migration_state.sql`.
 2. Deploy the `company-admin-invite` function; secrets `INVITE_REDIRECT_URL`
    (the site ROOT — the app uses a hash router, so the email link cannot carry a
@@ -241,3 +241,36 @@ authenticator (MFA) page the operator and staff use.
 
 Rollback: drop the four `*_notify*` triggers and their functions; restore the 0021
 guard and the two notification CHECK constraints.
+
+## 14. Profile settings, profile photo and account deletion (migration 0035)
+
+**My profile** (`/portal/profile`, `/operate/profile`, `/registry/profile`): photo,
+full name and job title (validated by `mg_update_my_profile`), links to password /
+authenticator settings, and *Delete my account*. Role, company and email are shown, not
+editable (the existing profile guard keeps them administrator-only).
+
+**Photo.** Private bucket `avatars` (2 MB, JPEG only). Only the owner can read, write or
+remove `<uid>/avatar.jpg` — not even an administrator can read it. The browser crops to
+a small square JPEG first (this also removes any GPS location in the original) and the
+picture is shown through a one-hour signed link. `mg_set_my_avatar` refuses a path with no
+file; a CHECK keeps `profiles.avatar_path` equal to the person's own path.
+
+**Deleting an account** (self-service only; an administrator removing *someone else* is
+still the SQL procedure). Needs the typed word DELETE **and** the password, re-verified on
+the server by the `account-delete` edge function (a stolen session alone is not enough).
+1. *Blocked* when the person is the last platform administrator or the sole
+   administrator of a company (they are told why and what to do).
+2. The database, as the caller: ends company memberships and site assignments, clears
+   the person's notifications, and scrubs the profile (name -> "Deleted user", email,
+   job title, photo, role, company binding).
+3. *No records of their own* -> the sign-in is **deleted outright**.
+   *They created safety records* (sites, inspections, findings, incidents, corrective
+   actions, evidence, templates) -> **nothing is deleted**: the sign-in is disabled and
+   anonymized and the records keep their history under "Deleted user".
+4. Audit entries keep their text (accountability) but no longer point at the account
+   when the sign-in is removed.
+Retrying is safe at every step. Deploy: `supabase functions deploy account-delete --use-api`
+(uses the existing `INVITE_ALLOWED_ORIGIN` secret).
+
+Rollback: drop the four functions, the `avatars` policies and bucket, and the two columns;
+restore the 0034 notifications guard.

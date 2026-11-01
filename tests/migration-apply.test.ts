@@ -36,7 +36,7 @@ afterEach(async () => {
     "0025_company_status_membership_invitations.sql",
     "0026_company_workforce.sql",
     "0027_site_scoped_access.sql",
-    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql",
+    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql",
   ]) {
     await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
   }
@@ -142,7 +142,8 @@ describe("migrations apply to a clean database", () => {
       `select count(*)::text as n from pg_policies
         where schemaname = 'storage' and tablename = 'objects'`,
     );
-    expect(Number(storage.rows[0]?.n)).toBe(3);
+    // 3 evidence policies + 4 avatar policies (0035)
+    expect(Number(storage.rows[0]?.n)).toBe(7);
   });
 
   test("0003 is idempotent — it can be re-run without error", async () => {
@@ -296,7 +297,12 @@ describe("migrations apply to a clean database", () => {
       const names = rows.map((r) => r.policyname);
       // 0001 and 0002 converge on the same three names; the historical
       // 0002-only names ("…own namespace", "…storage read") must be gone.
+      // …plus 0035's four owner-only avatar policies.
       expect(names).toEqual([
+        "avatars delete own",
+        "avatars insert own",
+        "avatars read own",
+        "avatars update own",
         "evidence owner update",
         "evidence read scoped",
         "evidence upload own folder",
@@ -756,6 +762,8 @@ describe("GAP-0: function execute surface (0011)", () => {
     "evidence_for_parent(text, uuid)",
     "evidence_url(uuid, integer)",
     "mg_accept_invitation(uuid)",
+    // 0035 (profile settings, photo, deletion): each acts only on the caller
+    "mg_account_deletion_blockers()",
     "mg_any_profile_role()",
     // 0027 (Phase D): site-scoped personnel
     "mg_assign_member_site(uuid, uuid)",
@@ -793,6 +801,7 @@ describe("GAP-0: function execute surface (0011)", () => {
     // 0021 (Session 9): notification sync
     "mg_notifications_sync(jsonb)",
     "mg_operator_name()",
+    "mg_prepare_account_deletion()",
     "mg_prepare_invitation_send(uuid)",
     "mg_profile()",
     "mg_register_company(text)",
@@ -810,6 +819,7 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_search_companies(text)",
     "mg_set_company_status(uuid, text, text)",
     "mg_set_member_role(uuid, text)",
+    "mg_set_my_avatar(boolean)",
     "mg_site_roster(uuid)",
     // 0021 (Session 9): summary report + trend source/geo/series (invoker)
     "mg_summary_report(date, date)",
@@ -817,6 +827,7 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_trend_geo(text, date, date)",
     "mg_trend_series(text, text, date, date)",
     "mg_unassign_member_site(uuid, uuid)",
+    "mg_update_my_profile(text, text)",
     // 0015 (GIS): pure definer validator the boundary CHECK constraints call.
     "mg_valid_geojson_polygon(jsonb)",
     "provision_user_by_email(text, text, text, text, text)",

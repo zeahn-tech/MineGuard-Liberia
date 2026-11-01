@@ -40,6 +40,8 @@ export interface UserProfile {
    *  display/compatibility mirror of organizations.name. */
   organizationId?: string;
   profileComplete?: boolean;
+  /** Private profile photo (migration 0035); shown through a short-lived signed URL. */
+  avatarPath?: string;
   createdAt: number;
 }
 

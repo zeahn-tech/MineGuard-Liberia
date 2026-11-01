@@ -54,6 +54,7 @@ import {
   ShieldCheck,
   ShieldEllipsis,
   Upload,
+  UserRound,
   Users,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -68,6 +69,7 @@ const OPERATOR_NAV = [
   { to: "/operate/incidents", label: "Incidents", icon: HeartPulse },
   { to: "/operate/team", label: "Team", icon: Users, adminOnly: true },
   { to: "/operate/import", label: "Import workers", icon: Upload, onboardOnly: true },
+  { to: "/operate/profile", label: "My Profile", icon: UserRound },
   { to: "/operate/security", label: "Account Security", icon: ShieldEllipsis },
 ];
 

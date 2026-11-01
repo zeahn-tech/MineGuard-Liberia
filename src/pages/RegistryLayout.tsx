@@ -12,11 +12,12 @@
 
 import { useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
-import { Building2, LogOut, Menu, RefreshCw, ShieldEllipsis } from "lucide-react";
+import { Building2, LogOut, Menu, RefreshCw, ShieldEllipsis, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { BrandMark } from "@/components/BrandMark";
 import { LegalLinks } from "@/components/LegalLayout";
 import NotificationBell from "@/components/NotificationBell";
+import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -31,6 +32,7 @@ import { sectionJump } from "@/lib/utils";
 
 const NAV: { to: string; label: string; icon: typeof Building2; end?: boolean }[] = [
   { to: "/registry", label: "Companies", icon: Building2, end: true },
+  { to: "/registry/profile", label: "My Profile", icon: UserRound },
   { to: "/registry/security", label: "Account Security", icon: ShieldEllipsis },
 ];
 
@@ -106,10 +108,12 @@ export default function RegistryLayout() {
             <NavLinks />
           </nav>
           <div className="border-t border-border p-3">
-            <div className="mb-2 px-2 text-[11px] leading-snug text-muted-foreground">
-              <span className="font-medium text-foreground">{user?.email}</span>
-              <br />
-              {identity}
+            <div className="mb-2 flex items-center gap-2 px-2 text-[11px] leading-snug text-muted-foreground">
+              <UserAvatar name={user?.name} email={user?.email} avatarPath={user?.avatarPath} className="size-8 shrink-0 text-[11px]" />
+              <div className="min-w-0">
+                <span className="block truncate font-medium text-foreground">{user?.email}</span>
+                {identity}
+              </div>
             </div>
             <Button
               variant="ghost"
