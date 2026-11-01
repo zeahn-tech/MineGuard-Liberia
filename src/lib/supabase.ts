@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // SUPABASE INITIALIZATION — MineGuard Liberia backend
 //
-// The Supabase URL and anon key are public client identifiers by design
-// (equivalent to the former Firebase web config). All access control is
+// The Supabase URL and anon key are public client identifiers by design.
+// All access control is
 // enforced by Postgres Row Level Security + security-definer RPCs (see
 // supabase/migrations/0001_initial_schema.sql), never by secrecy of these
 // values.
@@ -41,8 +41,8 @@ export let supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_K
 });
 
 // ---------------------------------------------------------------------------
-// AUTH STATE STORE — mirrors the previous Firebase onAuthStateChanged shape so
-// backend-react.ts and use-auth.ts keep their semantics.
+// AUTH STATE STORE — a small listener store over Supabase auth, consumed by
+// backend-react.ts and use-auth.ts.
 // ---------------------------------------------------------------------------
 
 type AuthListener = (userId: string | null) => void;
@@ -67,8 +67,7 @@ function setUserId(id: string | null) {
 
 export function onAuthStateChangedSupabase(cb: AuthListener): () => void {
   listeners.add(cb);
-  // Emit the current state immediately (mirrors Firebase's behavior of firing
-  // with the restored session on startup).
+  // Emit the current state immediately (the restored session on startup).
   if (authReady) cb(currentUserId);
   return () => listeners.delete(cb);
 }

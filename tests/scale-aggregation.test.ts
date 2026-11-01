@@ -26,7 +26,7 @@
 // drifts FAILS here instead of shipping wrong numbers.
 // ---------------------------------------------------------------------------
 
-import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -54,6 +54,14 @@ import {
   EDGE_IDS as f,
   getEdgeDb,
 } from "./helpers/backend-edge";
+
+// This suite seeds 5,000+ rows per table into an in-process Postgres (PGlite)
+// and walks every page, which exceeds Bun's 5-second default test timeout on
+// modest machines (a plain `bun test` then reports false "timed out" failures
+// even though the results are correct). `bun run test` and CI pass
+// `--timeout 60000`; declaring the same budget here keeps this file correct
+// however it is run. Scoped to this file only — Bun resets it per test file.
+setDefaultTimeout(60_000);
 
 // ------------------------------- scale -------------------------------------
 // Every table below is seeded past 5,000 rows so "exact" can only be true

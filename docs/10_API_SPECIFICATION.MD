@@ -1,9 +1,9 @@
 # 10 — API Specification
 
 The API is the `api` object in `src/lib/backend.ts` — a function-for-function
-mirror of the original Convex surface, now backed by Firebase (Firestore +
-Storage). Authorization is enforced by `firestore.rules`/`storage.rules`
-(authoritative) and re-derived in each function (fail-fast). Errors are thrown
+mirror of the original Convex surface, backed by Supabase (Postgres +
+Storage). Authorization is enforced by Postgres RLS policies, guard triggers
+and security-definer RPCs (authoritative) and re-derived in each function (fail-fast). Errors are thrown
 as short codes (`UNAUTHENTICATED`, `FORBIDDEN`, `NOT_FOUND`, `NOT_EDITABLE`,
 `FILE_TOO_LARGE`, `USER_NOT_FOUND: …`). Queries return a subscribable handle;
 the React layer (`src/lib/backend-react.ts`) exposes them with Convex
