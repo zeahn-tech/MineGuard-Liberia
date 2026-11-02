@@ -26,6 +26,9 @@ const Companies = lazy(() => import("./pages/Companies.tsx"));
 const RegistryLayout = lazy(() => import("./pages/RegistryLayout.tsx"));
 const CompanyDetail = lazy(() => import("./pages/CompanyDetail.tsx"));
 const ProfileSettings = lazy(() => import("./pages/ProfileSettings.tsx"));
+const SiteRequests = lazy(() => import("./pages/SiteRequests.tsx"));
+const OperatorCompany = lazy(() => import("./pages/operate/OperatorCompany.tsx"));
+const OperatorSiteRequests = lazy(() => import("./pages/operate/OperatorSiteRequests.tsx"));
 const Invitation = lazy(() => import("./pages/Invitation.tsx"));
 const Join = lazy(() => import("./pages/Join.tsx"));
 const OperatorTeam = lazy(() => import("./pages/operate/OperatorTeam.tsx"));
@@ -157,6 +160,8 @@ createRoot(document.getElementById("root")!).render(
               <Route path="corrective-actions" element={<OperatorCorrectiveActions />} />
               <Route path="incidents" element={<OperatorIncidents />} />
               <Route path="team" element={<OperatorTeam />} />
+              <Route path="company" element={<OperatorCompany />} />
+              <Route path="site-requests" element={<OperatorSiteRequests />} />
               <Route path="profile" element={<ProfileSettings />} />
               <Route path="import" element={<OperatorImport />} />
               <Route path="security" element={<OperatorSecurity />} />
@@ -176,6 +181,7 @@ createRoot(document.getElementById("root")!).render(
               <Route index element={<CommandCenter />} />
               <Route path="operate" element={<OperatorPortal />} />
               <Route path="companies" element={<Companies />} />
+              <Route path="site-requests" element={<SiteRequests />} />
               <Route path="companies/:companyId" element={<CompanyDetail />} />
               <Route path="sites" element={<Sites />} />
               <Route path="sites/:siteId" element={<SiteDetail />} />

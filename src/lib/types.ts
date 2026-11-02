@@ -83,6 +83,37 @@ export interface Company {
   members: CompanyAdminMember[];
 }
 
+/** The company's own contact details (migration 0037). Name and status are Ministry-only. */
+export interface CompanyProfile {
+  id: string;
+  name: string;
+  status: CompanyStatus;
+  contactEmail?: string;
+  contactPhone?: string;
+  address?: string;
+  website?: string;
+  description?: string;
+}
+
+export interface SiteRequest {
+  id: string;
+  organizationId: string;
+  companyName: string;
+  name: string;
+  county: string;
+  district?: string;
+  community?: string;
+  mineralType?: string;
+  latitude?: number;
+  longitude?: number;
+  notes?: string;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  decisionNote?: string;
+  siteId?: string;
+  createdAt: number;
+  decidedAt?: number;
+}
+
 /** One row of a company's workforce (migration 0026). */
 export interface WorkforceMember {
   memberId: string;

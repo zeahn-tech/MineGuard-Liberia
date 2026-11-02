@@ -14,7 +14,7 @@ const U2 = "aaaaaaaa-0000-4000-8000-0000000000d2";
 beforeAll(async () => {
   f = await getFixture();
   const db = await getDb();
-  for (const m of ["0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql"]) {
+  for (const m of ["0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql"]) {
     await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
   }
 });

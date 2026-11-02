@@ -27,6 +27,7 @@ import {
   X,
   MessageSquareWarning,
   Building2,
+  MapPin,
   Mail,
   UserCog,
   UserPlus,
@@ -44,6 +45,7 @@ const KIND_ICON = {
   org_decision: UserCog,
   org_role: UserCog,
   org_status: Building2,
+  org_site_request: MapPin,
 } as const;
 
 export interface BellNotification {

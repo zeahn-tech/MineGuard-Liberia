@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { COUNTIES } from "@/lib/counties";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { SiteLocationPicker } from "@/components/SiteLocationPicker";
 import {
@@ -25,11 +26,6 @@ import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
 import { Plus, MapPin, MapPinOff, ChevronLeft, ChevronRight } from "lucide-react";
 
-const COUNTIES = [
-  "Bomi", "Bong", "Gbarpolu", "Grand Bassa", "Grand Cape Mount", "Grand Gedeh",
-  "Grand Kru", "Lofa", "Margibi", "Maryland", "Montserrado", "Nimba",
-  "River Cess", "River Gee", "Sinoe",
-];
 
 const STATUS_STYLES: Record<string, string> = {
   active: "text-foreground",
