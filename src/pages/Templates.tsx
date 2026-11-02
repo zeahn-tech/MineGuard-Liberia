@@ -60,6 +60,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 import { PageLoading } from "@/components/PageLoading";
+import { EmptyState } from "@/components/EmptyState";
+import { ClipboardList } from "lucide-react";
 
 function blankQuestion(): TemplateSection["questions"][number] {
   return { label: "", answerType: "boolean", required: true };
@@ -145,9 +147,12 @@ export function TemplateList() {
         <PageLoading shape="list" label="templates" />
       )}
       {templatesQ !== undefined && templates.length === 0 && (
-        <p className="text-sm text-muted-foreground">
-          No templates yet — create the first one.
-        </p>
+        <EmptyState
+          icon={ClipboardList}
+          title="No inspection templates yet"
+          why="Inspectors can only start an inspection from a published template, so none can be carried out until one exists."
+          action={{ label: "Create the first template", to: "/portal/templates/new" }}
+        />
       )}
 
       <div className="space-y-3">

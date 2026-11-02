@@ -51,6 +51,7 @@ import { toastError, toastSuccess } from "@/lib/feedback";
 import { describeGeolocationError } from "@/lib/site-position";
 import { FormField, invalidControlClass } from "@/components/FormField";
 import { chooseProblem, focusField } from "@/lib/validation";
+import { EmptyState } from "@/components/EmptyState";
 
 type TemplateDoc = Doc<"inspectionTemplates">;
 type SiteDoc = Doc<"sites">;
@@ -196,9 +197,24 @@ export default function Inspections() {
         {!inspections ? (
           <PageLoading shape="list" label="inspections" compact />
         ) : inspections.length === 0 ? (
-          <p className="py-8 text-sm text-muted-foreground">
-            No inspections yet. Start one above.
-          </p>
+          <EmptyState
+            icon={FilePlus2}
+            title="No inspections yet"
+            why={
+              !isStaff
+                ? "Inspections appear here once an inspector submits one for a site in your area."
+                : templates && templates.length > 0
+                  ? "Each inspection starts as a draft saved on this device and is submitted when you're ready, so it works without a connection."
+                  : "Inspections are built from published templates, and none is published yet. An administrator publishes one first."
+            }
+            action={
+              !isStaff
+                ? undefined
+                : templates && templates.length > 0
+                  ? { label: "Start an inspection", onClick: () => setOpen(true) }
+                  : { label: "Go to Templates", to: "/portal/templates" }
+            }
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="mt-1 w-full text-sm">

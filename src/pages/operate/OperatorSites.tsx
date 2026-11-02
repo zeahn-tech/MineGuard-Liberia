@@ -21,6 +21,7 @@ import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 import { PageLoading } from "@/components/PageLoading";
 import { toastError } from "@/lib/feedback";
+import { EmptyState } from "@/components/EmptyState";
 
 export function OperatorSites() {
   const sitesQ = useQuery(api.sites.list);
@@ -41,9 +42,11 @@ export function OperatorSites() {
         <PageLoading shape="list" label="sites" />
       )}
       {sitesQ !== undefined && (sitesQ ?? []).length === 0 && (
-        <p className="text-sm text-muted-foreground">
-          No sites are registered to your company yet.
-        </p>
+        <EmptyState
+          icon={Building2}
+          title="No sites registered to your company yet"
+          why="The Ministry registers each site once it is authorized. Until then there is nothing to inspect, report on or respond to — ask the oversight administrator to register your sites."
+        />
       )}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

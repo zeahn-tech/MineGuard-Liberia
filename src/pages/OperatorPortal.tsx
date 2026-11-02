@@ -44,6 +44,7 @@ import { PageLoading } from "@/components/PageLoading";
 import { FieldError } from "@/components/ui/field";
 import { toastSuccess } from "@/lib/feedback";
 import { focusField } from "@/lib/validation";
+import { EmptyState } from "@/components/EmptyState";
 
 const DAY = 86_400_000;
 
@@ -286,9 +287,11 @@ export default function OperatorPortal() {
             <PageLoading shape="list" label="sites" rows={2} compact />
           )}
           {sitesQ !== undefined && sites.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              No sites are registered to your company yet.
-            </p>
+            <EmptyState
+              icon={Building2}
+              title="No sites registered to your company yet"
+              why="The Ministry registers each site once it is authorized, so there is nothing to inspect or respond to yet. Ask the oversight administrator to register your sites."
+            />
           )}
           {sites.map((s) => (
             <Link key={s._id} to={`/portal/sites/${s._id}`} className="block">
