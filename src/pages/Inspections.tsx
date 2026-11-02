@@ -46,6 +46,9 @@ import {
 } from "@/lib/offline-queue";
 import type { Doc } from "@/lib/entity-types";
 import { PageLoading } from "@/components/PageLoading";
+import { PermissionNotice } from "@/components/PermissionNotice";
+import { toastError, toastSuccess } from "@/lib/feedback";
+import { describeGeolocationError } from "@/lib/site-position";
 
 type TemplateDoc = Doc<"inspectionTemplates">;
 type SiteDoc = Doc<"sites">;
@@ -369,6 +372,8 @@ export function LocalInspectionForm() {
   const [draftLoading, setDraftLoading] = useState(true);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [gps, setGps] = useState<{ lat: number; lng: number; acc: number } | null>(null);
+  // Why GPS capture failed, so the screen can explain and offer a way on.
+  const [gpsProblem, setGpsProblem] = useState<{ denied: boolean; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
   // The draft lives in IndexedDB now (OFF-1) — load it after the durable
@@ -410,13 +415,13 @@ export function LocalInspectionForm() {
       .catch((e) => {
         const msg = e instanceof Error ? e.message : "storage unavailable";
         setSaveError(msg);
-        toast.error(`Not saved on this device — ${msg}`);
+        toastError(e, { action: "keep this draft on the device" });
       });
   };
 
   const captureGps = () => {
     if (!navigator.geolocation) {
-      toast.error("Geolocation unavailable on this device.");
+      setGpsProblem({ denied: false, text: "This device or browser can't provide a location." });
       return;
     }
     navigator.geolocation.getCurrentPosition(
@@ -427,10 +432,11 @@ export function LocalInspectionForm() {
           acc: pos.coords.accuracy,
         };
         setGps(g);
+        setGpsProblem(null);
         saveDraft({ latitude: g.lat, longitude: g.lng, gpsAccuracyM: g.acc });
         toast.success("GPS captured");
       },
-      (err) => toast.error(`GPS error: ${err.message}`),
+      (err) => setGpsProblem({ denied: err.code === 1, text: describeGeolocationError(err.code) }),
       { enableHighAccuracy: true, timeout: 15000 },
     );
   };
@@ -455,13 +461,22 @@ export function LocalInspectionForm() {
       });
       // 2. Try immediate sync; if offline it stays queued and syncs on reconnect.
       const { syncQueue } = await import("@/lib/offline-queue");
-      await syncQueue({
+      const result = await syncQueue({
         createDraft: (args) => syncCreateDraft(args as never) as unknown as Promise<string>,
         updateDraft: (args) => syncUpdateDraft(args as never) as unknown as Promise<void>,
         submit: (args) => syncSubmit(args as never) as unknown as Promise<void>,
-      });      toast.success(
-        draft.latitude != null ? "Submitted with GPS captured" : "Submitted",
-      );
+      });
+      if (result.synced > 0) {
+        toastSuccess({
+          title: draft.latitude != null ? "Inspection submitted, with GPS." : "Inspection submitted.",
+          reassure: "It's saved with your findings and is ready for review.",
+        });
+      } else {
+        toastSuccess({
+          title: "Saved on this device.",
+          reassure: "You're offline, so it will be submitted automatically when you reconnect — nothing is lost.",
+        });
+      }
       navigate("/portal/inspections");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
@@ -524,6 +539,30 @@ export function LocalInspectionForm() {
           )}
         </div>
       </header>
+
+      {gpsProblem && (
+        <PermissionNotice
+          title={gpsProblem.denied ? "Location access is blocked" : "Couldn't get your location"}
+          why="GPS records where the inspection was carried out. Your position is read once, when you press Capture GPS — it isn't tracked."
+          howToAllow={
+            gpsProblem.denied
+              ? "Allow location for this site in your browser's settings, then press Capture GPS again."
+              : gpsProblem.text
+          }
+        >
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={captureGps}>
+              Try again
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setGpsProblem(null)}>
+              Continue without GPS
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Without it, the inspection is still saved and submitted — just without a location.
+          </p>
+        </PermissionNotice>
+      )}
 
       {/* OFF-2: a failed on-device write blocks any "saved" impression —
           the banner stays until the next successful persist. */}

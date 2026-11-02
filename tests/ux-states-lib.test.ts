@@ -420,3 +420,20 @@ describe("tracking codes — tolerant entry for the public lookup", () => {
     expect(suggestTrackingCode("CR-")).toBeNull();
   });
 });
+
+import { CAMERA_REASON_TEXT, cameraReason } from "../src/lib/camera-reason";
+
+describe("camera permission reasons", () => {
+  test("maps getUserMedia failures to a cause a person can act on", () => {
+    expect(cameraReason({ name: "NotAllowedError" })).toBe("denied");
+    expect(cameraReason({ name: "SecurityError" })).toBe("denied");
+    expect(cameraReason({ name: "NotFoundError" })).toBe("none");
+    expect(cameraReason({ name: "NotReadableError" })).toBe("busy");
+    expect(cameraReason(new Error("boom"))).toBe("unavailable");
+    expect(cameraReason(null)).toBe("unavailable");
+  });
+  test("every non-denied reason has plain-language text with a next step or a clear cause", () => {
+    for (const text of Object.values(CAMERA_REASON_TEXT)) expect(text.length).toBeGreaterThan(20);
+    expect(CAMERA_REASON_TEXT.busy).toMatch(/Close that app/);
+  });
+});
