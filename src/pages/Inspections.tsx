@@ -531,9 +531,7 @@ export function LocalInspectionForm() {
 
   if (draftLoading) {
     return (
-      <p className="py-16 text-center text-sm text-muted-foreground">
-        Loading draft from this device…
-      </p>
+      <PageLoading shape="form" label="your draft" local compact />
     );
   }
 

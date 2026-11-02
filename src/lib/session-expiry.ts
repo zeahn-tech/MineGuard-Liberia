@@ -15,9 +15,9 @@ export const IDLE_LIMIT_MS = 30 * 60 * 1000;
 /** Countdown shown before the sign-out. */
 export const WARNING_MS = 60 * 1000;
 /** localStorage key shared between tabs: last activity, epoch ms. */
-export const ACTIVITY_KEY = "mg.session.lastActive.v1";
+export const ACTIVITY_KEY = "mg.session.lastactive.v1";
 /** sessionStorage key for the notice shown on the sign-in screen. */
-export const NOTICE_KEY = "mg.session.signedOutNotice.v1";
+export const NOTICE_KEY = "mg.session.signedoutnotice.v1";
 
 export type IdlePhase = "active" | "warning" | "expired";
 

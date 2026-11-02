@@ -158,6 +158,8 @@ export interface PageLoadingProps {
   lightPath?: LightPath | null;
   /** Tighter spacing for sections inside a page. */
   compact?: boolean;
+  /** The data comes from this device (not the network): never show the "offline" state. */
+  local?: boolean;
   className?: string;
 }
 
@@ -178,13 +180,14 @@ export function PageLoading({
   onRetry,
   lightPath,
   compact = false,
+  local = false,
   className = "",
 }: PageLoadingProps) {
   const online = useOnlineStatus();
   const elapsed = useElapsedMs();
   const ctxPath = useContext(LightPathContext);
   const light = lightPath === undefined ? ctxPath : lightPath;
-  const phase = loadPhase(elapsed, online);
+  const phase = loadPhase(elapsed, local ? true : online);
   const seconds = Math.floor(elapsed / 1000);
   const hint = connectionHint();
   const count = rows ?? (shape === "cards" ? 4 : shape === "table" ? 6 : shape === "form" ? 4 : 5);

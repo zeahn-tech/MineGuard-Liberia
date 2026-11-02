@@ -163,6 +163,16 @@ describe("PageLoading", () => {
     setOnline(true);
   });
 
+  test("a load from this device never claims 'you're offline' or 'nothing saved'", async () => {
+    setOnline(false);
+    const h = await mount(createElement(C.PageLoading, { label: "your draft", local: true }));
+    expect(h.text()).not.toContain("You're offline");
+    expect(h.text()).not.toContain("hasn't been opened on this device");
+    expect(h.text()).toContain("Loading your draft");
+    await h.unmount();
+    setOnline(true);
+  });
+
   test("slow: real elapsed seconds, still-retrying reassurance, and real progress when the caller has it", async () => {
     setOnline(true);
     const realNow = Date.now;

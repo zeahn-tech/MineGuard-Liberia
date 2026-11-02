@@ -12,6 +12,7 @@ import {
   type PositionDraft,
 } from "@/lib/site-position";
 import { useLatest } from "@/lib/use-latest";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // Leaflet is heavy and only needed once someone opens the map.
 const LocationPickerMap = lazy(() => import("./LocationPickerMap"));
@@ -195,7 +196,14 @@ export function SiteLocationPicker({
       </div>
 
       {showMap && (
-        <Suspense fallback={<p className="py-6 text-center text-xs text-muted-foreground">Loading map…</p>}>
+        <Suspense
+          fallback={
+            <div role="status" aria-busy="true">
+              <span className="sr-only">Loading map…</span>
+              <Skeleton className="h-64 w-full motion-reduce:animate-none" aria-hidden="true" />
+            </div>
+          }
+        >
           <LocationPickerMap position={point} onPick={picked} />
         </Suspense>
       )}

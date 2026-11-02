@@ -33,6 +33,7 @@ import {
   type RiskWeights,
 } from "@/lib/risk-config";
 import { PageLoading } from "@/components/PageLoading";
+import { toastError } from "@/lib/feedback";
 
 const fmt = (ms: number) => (ms <= 0 ? "since launch" : new Date(ms).toLocaleString());
 
@@ -174,7 +175,7 @@ function PublishForm({ latest, now }: { latest: RiskConfigVersion; now: number }
       setNote("");
       setEffective("");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message.replace(/^[A-Z_]+:\s*/, "") : "Could not publish");
+      toastError(e, { action: "publish the risk model" });
     } finally {
       setBusy(false);
     }

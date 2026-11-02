@@ -46,9 +46,24 @@ const ROWS: Row[] = [
     name: "mg.offline.store (entries: mg.offline.queue.v1, mg.offline.drafts.v1, mg.offline.refs.v1)",
     where: "IndexedDB (in some browsers or private modes the same entries are kept in localStorage instead)",
     purpose:
-      "Offline queue of inspections, incidents and observations you saved while offline, unfinished field drafts, and references that link them once sent.",
+      "Offline queue of inspections, incidents and observations you saved while offline, unfinished field drafts, references that link them once sent, and report forms you were still filling in (stored per account, as mg.formdrafts.v1 followed by your account id).",
     keeps:
-      "Until the items are sent or you discard them. Removed when you sign out, provided nothing is still waiting to be sent.",
+      "Until the items are sent or you discard them; unfinished report forms are dropped after 14 days. Removed when you sign out yourself, provided nothing is still waiting to be sent. If you are signed out for inactivity, nothing is removed, so you can pick up where you left off.",
+    kind: "Essential",
+  },
+  {
+    name: "mg.session.lastactive.v1",
+    where: "localStorage",
+    purpose:
+      "When you last used the app, so you can be signed out after 30 minutes of inactivity — including when the app is open in more than one tab.",
+    keeps: "Replaced each time you use the app.",
+    kind: "Essential",
+  },
+  {
+    name: "mg.session.signedoutnotice.v1",
+    where: "sessionStorage",
+    purpose: "Remembers that you were signed out for inactivity, so the sign-in screen can tell you why.",
+    keeps: "Deleted as soon as the message is shown, or when the browser tab closes.",
     kind: "Essential",
   },
   {
