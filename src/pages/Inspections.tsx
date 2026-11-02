@@ -49,6 +49,8 @@ import { PageLoading } from "@/components/PageLoading";
 import { PermissionNotice } from "@/components/PermissionNotice";
 import { toastError, toastSuccess } from "@/lib/feedback";
 import { describeGeolocationError } from "@/lib/site-position";
+import { FormField, invalidControlClass } from "@/components/FormField";
+import { chooseProblem, focusField } from "@/lib/validation";
 
 type TemplateDoc = Doc<"inspectionTemplates">;
 type SiteDoc = Doc<"sites">;
@@ -268,10 +270,20 @@ function NewInspectionDialog({
   const navigate = useNavigate();
   const [siteId, setSiteId] = useState("");
   const [templateId, setTemplateId] = useState<string>(templates[0]?._id ?? "");
+  const [siteError, setSiteError] = useState<string | undefined>();
+  const [templateError, setTemplateError] = useState<string | undefined>();
 
   const start = async () => {
-    if (!siteId || !templateId) {
-      toast.error("Choose a site and a template.");
+    const siteIssue = chooseProblem(siteId, "the site you are inspecting");
+    const templateIssue = templateId
+      ? undefined
+      : templates.length === 0
+        ? "No inspection template is available yet. An administrator needs to publish one first."
+        : "Choose the inspection template from the list.";
+    setSiteError(siteIssue);
+    setTemplateError(templateIssue);
+    if (siteIssue || templateIssue) {
+      focusField(siteIssue ? "new-insp-site" : "new-insp-template");
       return;
     }
     const site = sites.find((s) => s._id === siteId);
@@ -288,11 +300,7 @@ function NewInspectionDialog({
         updatedAt: Date.now(),
       });
     } catch (e) {
-      toast.error(
-        e instanceof Error
-          ? e.message
-          : "Draft was NOT saved on this device",
-      );
+      toastError(e, { action: "save the draft on this device" });
       return;
     }
     navigate(`/portal/inspections/local/${clientRef}`);
@@ -314,37 +322,45 @@ function NewInspectionDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="new-insp-site">Site</Label>
-            <select
-              id="new-insp-site"
-              className="w-full rounded-sm border border-input bg-card px-3 py-2 text-sm"
-              value={siteId}
-              onChange={(e) => setSiteId(e.target.value)}
-            >
-              <option value="">Select site…</option>
-              {sites.map((s) => (
-                <option key={s._id} value={s._id}>
-                  {s.code} — {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="new-insp-template">Template</Label>
-            <select
-              id="new-insp-template"
-              className="w-full rounded-sm border border-input bg-card px-3 py-2 text-sm"
-              value={templateId}
-              onChange={(e) => setTemplateId(e.target.value)}
-            >
-              {templates.map((t) => (
-                <option key={t._id} value={t._id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <FormField label="Site" required id="new-insp-site" error={siteError}>
+            {(a11y) => (
+              <select
+                {...a11y}
+                className={`w-full rounded-sm border border-input bg-card px-3 py-2 text-sm ${invalidControlClass}`}
+                value={siteId}
+                onChange={(e) => {
+                  setSiteId(e.target.value);
+                  if (siteError) setSiteError(chooseProblem(e.target.value, "the site you are inspecting"));
+                }}
+              >
+                <option value="">Select site…</option>
+                {sites.map((s) => (
+                  <option key={s._id} value={s._id}>
+                    {s.code} — {s.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </FormField>
+          <FormField label="Template" required id="new-insp-template" error={templateError}>
+            {(a11y) => (
+              <select
+                {...a11y}
+                className={`w-full rounded-sm border border-input bg-card px-3 py-2 text-sm ${invalidControlClass}`}
+                value={templateId}
+                onChange={(e) => {
+                  setTemplateId(e.target.value);
+                  if (templateError) setTemplateError(undefined);
+                }}
+              >
+                {templates.map((t) => (
+                  <option key={t._id} value={t._id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </FormField>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

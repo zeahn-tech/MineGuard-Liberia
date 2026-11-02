@@ -41,6 +41,9 @@ import { Link } from "react-router";
 import { toast } from "sonner";
 import { useNow } from "@/hooks/use-now";
 import { PageLoading } from "@/components/PageLoading";
+import { FieldError } from "@/components/ui/field";
+import { toastSuccess } from "@/lib/feedback";
+import { focusField } from "@/lib/validation";
 
 const DAY = 86_400_000;
 
@@ -66,6 +69,7 @@ export default function OperatorPortal() {
 
   const [respondingId, setRespondingId] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [noteError, setNoteError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
 
   const sites = sitesQ ?? [];
@@ -76,9 +80,11 @@ export default function OperatorPortal() {
 
   const submitResponse = async (caId: string) => {
     if (!note.trim()) {
-      toast.error("Describe the action taken before submitting.");
+      setNoteError("Describe what was done to address this action — for example, what was repaired or changed, and when.");
+      focusField(`ca-note-${caId}`);
       return;
     }
+    setNoteError(undefined);
     setBusy(true);
     try {
       // row_version gate (OFF-4) — same conflict detection as the dedicated
@@ -88,7 +94,10 @@ export default function OperatorPortal() {
         operatorNote: note.trim(),
         expectedRowVersion: obligations.find((o) => o._id === caId)?.rowVersion,
       });
-      toast.success("Response submitted for verification.");
+      toastSuccess({
+        title: "Response submitted.",
+        reassure: "It is now with the reviewing authority for verification — the status updates on this card.",
+      });
       setRespondingId(null);
       setNote("");
     } catch (err) {
@@ -223,6 +232,7 @@ export default function OperatorPortal() {
                     onClick={() => {
                       setRespondingId(o._id);
                       setNote("");
+                      setNoteError(undefined);
                     }}
                   >
                     <Send className="mr-1.5 size-3.5" strokeWidth={1.5} />
@@ -232,13 +242,20 @@ export default function OperatorPortal() {
                 {isOpen && respondingId === o._id && (
                   <div className="mt-2 space-y-2">
                     <Input
+                      id={`ca-note-${o._id}`}
                       value={note}
-                      onChange={(e) => setNote(e.target.value)}
+                      onChange={(e) => {
+                        setNote(e.target.value);
+                        if (noteError) setNoteError(e.target.value.trim() ? undefined : noteError);
+                      }}
                       placeholder="Describe the corrective action taken…"
+                      aria-invalid={noteError ? true : undefined}
+                      aria-describedby={noteError ? `ca-note-${o._id}-error` : undefined}
                       disabled={busy}
                     />
+                    {noteError && <FieldError id={`ca-note-${o._id}-error`}>{noteError}</FieldError>}
                     <div className="flex gap-2">
-                      <Button size="sm" disabled={busy || !note.trim()} onClick={() => void submitResponse(o._id)}>
+                      <Button size="sm" disabled={busy} onClick={() => void submitResponse(o._id)}>
                         {busy ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Send className="mr-1.5 size-3.5" strokeWidth={1.5} />}
                         Submit response
                       </Button>

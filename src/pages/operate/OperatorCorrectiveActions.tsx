@@ -30,6 +30,9 @@ import {
 } from "@/lib/offline-queue";
 import { useNow } from "@/hooks/use-now";
 import { PageLoading } from "@/components/PageLoading";
+import { FieldError } from "@/components/ui/field";
+import { toastSuccess } from "@/lib/feedback";
+import { focusField } from "@/lib/validation";
 
 const DAY = 86_400_000;
 
@@ -55,6 +58,7 @@ export default function OperatorCorrectiveActions() {
 
   const [respondingId, setRespondingId] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [noteError, setNoteError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
 
   const all = obligationsQ ?? [];
@@ -65,9 +69,11 @@ export default function OperatorCorrectiveActions() {
 
   const submitResponse = async (caId: string) => {
     if (!note.trim()) {
-      toast.error("Describe the action taken before submitting.");
+      setNoteError("Describe what was done to address this action — for example, what was repaired or changed, and when.");
+      focusField(`ca-note-${caId}`);
       return;
     }
+    setNoteError(undefined);
     const obligation = obligations.find((o) => o._id === caId);
     setBusy(true);
     try {
@@ -78,7 +84,10 @@ export default function OperatorCorrectiveActions() {
         operatorNote: note.trim(),
         expectedRowVersion: obligation?.rowVersion,
       });
-      toast.success("Response submitted for verification.");
+      toastSuccess({
+        title: "Response submitted.",
+        reassure: "It is now with the reviewing authority for verification — the status updates on this card.",
+      });
       setRespondingId(null);
       setNote("");
     } catch (err) {
@@ -263,6 +272,7 @@ export default function OperatorCorrectiveActions() {
                     onClick={() => {
                       setRespondingId(o._id);
                       setNote("");
+                      setNoteError(undefined);
                     }}
                   >
                     <Send className="mr-1.5 size-3.5" strokeWidth={1.5} />
@@ -272,13 +282,20 @@ export default function OperatorCorrectiveActions() {
                 {isOpen && respondingId === o._id && (
                   <div className="mt-2 space-y-2">
                     <Input
+                      id={`ca-note-${o._id}`}
                       value={note}
-                      onChange={(e) => setNote(e.target.value)}
+                      onChange={(e) => {
+                        setNote(e.target.value);
+                        if (noteError) setNoteError(e.target.value.trim() ? undefined : noteError);
+                      }}
                       placeholder="Describe the corrective action taken…"
+                      aria-invalid={noteError ? true : undefined}
+                      aria-describedby={noteError ? `ca-note-${o._id}-error` : undefined}
                       disabled={busy}
                     />
+                    {noteError && <FieldError id={`ca-note-${o._id}-error`}>{noteError}</FieldError>}
                     <div className="flex gap-2">
-                      <Button size="sm" disabled={busy || !note.trim()} onClick={() => void submitResponse(o._id)}>
+                      <Button size="sm" disabled={busy} onClick={() => void submitResponse(o._id)}>
                         {busy ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Send className="mr-1.5 size-3.5" strokeWidth={1.5} />}
                         Submit response
                       </Button>
