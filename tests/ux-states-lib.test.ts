@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { describeError, errorSentence } from "../src/lib/error-messages";
-import { closestWord, editDistance, normalizeSearch, suggestQuery, vocabularyOf } from "../src/lib/did-you-mean";
+import { closestWord, editDistance, normalizeSearch, suggestFromList, suggestQuery, vocabularyOf } from "../src/lib/did-you-mean";
 import {
   IDLE_LIMIT_MS,
   WARNING_MS,
@@ -216,6 +216,7 @@ describe("session expiry — idle countdown rules", () => {
 });
 
 import {
+  validateSite,
   COMMUNITY_FIELD_ORDER,
   missingMinusProblem,
   phoneProblem,
@@ -435,5 +436,27 @@ describe("camera permission reasons", () => {
   test("every non-denied reason has plain-language text with a next step or a clear cause", () => {
     for (const text of Object.values(CAMERA_REASON_TEXT)) expect(text.length).toBeGreaterThan(20);
     expect(CAMERA_REASON_TEXT.busy).toMatch(/Close that app/);
+  });
+});
+
+describe("list-based suggestions and site rules", () => {
+  const COUNTIES = ["Bomi", "Bong", "Grand Cape Mount", "Montserrado", "Nimba", "River Cess"];
+  test("points a county typo at the real county, in its own spelling", () => {
+    expect(suggestFromList("nimbaa", COUNTIES)).toBe("Nimba");
+    expect(suggestFromList("grand cpae mount", COUNTIES)).toBe("Grand Cape Mount");
+    expect(suggestFromList("Montserado", COUNTIES)).toBe("Montserrado");
+  });
+  test("no suggestion for an exact match (any case), empty input, or something unrelated", () => {
+    expect(suggestFromList("NIMBA", COUNTIES)).toBeNull();
+    expect(suggestFromList("river cess", COUNTIES)).toBeNull();
+    expect(suggestFromList("", COUNTIES)).toBeNull();
+    expect(suggestFromList("zzzzzz", COUNTIES)).toBeNull();
+  });
+  test("site form: each missing field is flagged with what to enter", () => {
+    const e = validateSite({ name: "", operatorName: "", county: "" });
+    expect(Object.keys(e).sort()).toEqual(["county", "name", "operatorName"]);
+    expect(e.name).toMatch(/Zorzor Corridor Operation/);
+    expect(e.operatorName).toMatch(/Choose the operating company/);
+    expect(hasErrors(validateSite({ name: "A", operatorName: "B", county: "Nimba" }))).toBe(false);
   });
 });

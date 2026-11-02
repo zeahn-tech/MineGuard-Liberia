@@ -112,3 +112,18 @@ export function vocabularyOf(labels: Iterable<string | null | undefined>): Set<s
   }
   return out;
 }
+
+/**
+ * The entry of a fixed list that `value` was most likely meant to be, in the
+ * list's own spelling ("grand cpae mount" -> "Grand Cape Mount"), or null when
+ * the value already matches an entry or nothing is close. Used for fields with
+ * a known set of values (counties) where a typo should be pointed out.
+ */
+export function suggestFromList(value: string, list: readonly string[]): string | null {
+  const typed = normalizeSearch(value);
+  if (!typed) return null;
+  if (list.some((l) => normalizeSearch(l) === typed)) return null;
+  const fixed = suggestQuery(typed, vocabularyOf(list));
+  if (!fixed) return null;
+  return list.find((l) => normalizeSearch(l) === fixed) ?? null;
+}

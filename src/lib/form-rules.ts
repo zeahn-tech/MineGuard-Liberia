@@ -178,3 +178,16 @@ export function validateCommunityReport(f: {
       missingMinusProblem(f.latitude, f.longitude),
   });
 }
+
+// ---- site registration ----------------------------------------------------
+
+export type SiteField = "name" | "operatorName" | "county";
+export const SITE_FIELD_ORDER: readonly SiteField[] = ["name", "operatorName", "county"];
+
+export function validateSite(f: { name: string; operatorName: string; county: string }): FieldErrors<SiteField> {
+  return compact<SiteField>({
+    name: requiredProblem(f.name, "the site's name", "Zorzor Corridor Operation"),
+    operatorName: chooseProblem(f.operatorName, "the operating company"),
+    county: requiredProblem(f.county, "the county", "Nimba"),
+  });
+}
