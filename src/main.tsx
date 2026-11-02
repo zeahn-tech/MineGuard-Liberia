@@ -27,6 +27,7 @@ const RegistryLayout = lazy(() => import("./pages/RegistryLayout.tsx"));
 const CompanyDetail = lazy(() => import("./pages/CompanyDetail.tsx"));
 const ProfileSettings = lazy(() => import("./pages/ProfileSettings.tsx"));
 const SiteRequests = lazy(() => import("./pages/SiteRequests.tsx"));
+const OperatorActivity = lazy(() => import("./pages/operate/OperatorActivity.tsx"));
 const OperatorCompany = lazy(() => import("./pages/operate/OperatorCompany.tsx"));
 const OperatorSiteRequests = lazy(() => import("./pages/operate/OperatorSiteRequests.tsx"));
 const Invitation = lazy(() => import("./pages/Invitation.tsx"));
@@ -161,6 +162,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="incidents" element={<OperatorIncidents />} />
               <Route path="team" element={<OperatorTeam />} />
               <Route path="company" element={<OperatorCompany />} />
+              <Route path="activity" element={<OperatorActivity />} />
               <Route path="site-requests" element={<OperatorSiteRequests />} />
               <Route path="profile" element={<ProfileSettings />} />
               <Route path="import" element={<OperatorImport />} />

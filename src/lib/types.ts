@@ -83,6 +83,18 @@ export interface Company {
   members: CompanyAdminMember[];
 }
 
+/** One line of a company's / site's activity history (migration 0038). Curated: no emails, ids or raw records. */
+export interface ActivityItem {
+  id: string;
+  /** The server's own timestamp text (microsecond precision) — the paging cursor travels as this. */
+  atRaw: string;
+  at: number;
+  who: string;
+  subject: string;
+  what: string;
+  detail?: string;
+}
+
 /** The company's own contact details (migration 0037). Name and status are Ministry-only. */
 export interface CompanyProfile {
   id: string;

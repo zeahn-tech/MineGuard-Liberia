@@ -36,7 +36,7 @@ afterEach(async () => {
     "0025_company_status_membership_invitations.sql",
     "0026_company_workforce.sql",
     "0027_site_scoped_access.sql",
-    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql",
+    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql",
   ]) {
     await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
   }
@@ -777,6 +777,8 @@ describe("GAP-0: function execute surface (0011)", () => {
     // 0037: company profile + site registration requests (each self-authorizes)
     "mg_cancel_site_request(uuid)",
     "mg_command_center_stats()",
+    // 0038: curated activity history for companies / site managers (self-authorizes)
+    "mg_company_activity(uuid, uuid, integer, timestamp with time zone, uuid)",
     // 0031 (registrar): the company directory (self-authorizes on organizations.write)
     "mg_company_directory()",
     "mg_company_workforce(uuid)",

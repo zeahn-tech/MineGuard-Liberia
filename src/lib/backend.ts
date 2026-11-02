@@ -96,6 +96,7 @@ import {
   type SiteBoundary,
   type UserProfile,
   type Company,
+  type ActivityItem,
   type CompanyProfile,
   type CompanySearchResult,
   type SiteRequest,
@@ -2226,6 +2227,38 @@ async function legacyCompanyList(): Promise<Company[]> {
 
 export const api = {
   // ----------------------------------------------------------------- users
+  /** Curated activity history for a company, or for one site (migration 0038). */
+  activity: {
+    PAGE: 25,
+    page: async (args: {
+      organizationId: string;
+      siteId?: string;
+      before?: { atRaw: string; id: string };
+    }): Promise<{ items: ActivityItem[]; next: { atRaw: string; id: string } | null }> => {
+      await requireAuthed();
+      const limit = 25;
+      const { data, error } = await supabase.rpc("mg_company_activity", {
+        p_org: args.organizationId,
+        p_site: args.siteId ?? null,
+        p_limit: limit,
+        p_before: args.before?.atRaw ?? null,
+        p_before_id: args.before?.id ?? null,
+      });
+      if (error) throw new Error("The history could not be loaded.");
+      const items = ((data ?? []) as AnyRow[]).map((r) => ({
+        id: r.id as string,
+        atRaw: r.at as string,
+        at: Date.parse(r.at as string),
+        who: r.who as string,
+        subject: r.subject as string,
+        what: r.what as string,
+        detail: (r.detail as string) ?? undefined,
+      }));
+      const last = items[items.length - 1];
+      return { items, next: items.length === limit && last ? { atRaw: last.atRaw, id: last.id } : null };
+    },
+  },
+
   /** A company's own contact details (migration 0037). */
   companyProfile: {
     get: (args: { organizationId: string }) =>
