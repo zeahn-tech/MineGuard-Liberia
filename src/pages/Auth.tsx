@@ -30,6 +30,8 @@ import {
 import { ArrowRight, KeyRound, Loader2, Mail, ShieldCheck, UserX } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
+import { FieldError } from "@/components/ui/field";
+import { confirmProblem, focusField, passwordProblem } from "@/lib/validation";
 
 interface AuthProps {
   redirectAfterAuth?: string;
@@ -68,6 +70,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Password problems are shown at the field they belong to, per form.
+  const [resetErrors, setResetErrors] = useState<{ password?: string; confirm?: string }>({});
+  const [signUpErrors, setSignUpErrors] = useState<{ password?: string; confirm?: string }>({});
   // Why the person is here again, when the app (not they) ended the session.
   // Read purely, cleared once shown, so a refresh does not repeat it.
   const [signedOut] = useState(peekSignedOutNotice);
@@ -212,16 +217,15 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     const fd = new FormData(event.currentTarget);
     const pw = String(fd.get("password") ?? "");
-    if (pw.length < 6) {
-      setError("Password must be at least 6 characters.");
+    const pwProblem = passwordProblem(pw);
+    const confirmIssue = pwProblem ? undefined : confirmProblem(pw, String(fd.get("confirm") ?? ""));
+    if (pwProblem || confirmIssue) {
+      setResetErrors({ password: pwProblem, confirm: confirmIssue });
+      focusField(pwProblem ? "np-password" : "np-confirm");
       setIsLoading(false);
       return;
     }
-    if (pw !== String(fd.get("confirm") ?? "")) {
-      setError("Passwords do not match.");
-      setIsLoading(false);
-      return;
-    }
+    setResetErrors({});
     try {
       await updatePassword(pw); // also releases the pending-recovery hold
       setSearchParams({}, { replace: true });
@@ -261,11 +265,15 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     const fd = new FormData(event.currentTarget);
     const password = String(fd.get("password") ?? "");
-    if (password !== String(fd.get("confirm") ?? "")) {
-      setError("Passwords do not match.");
+    const pwProblem = passwordProblem(password);
+    const confirmIssue = pwProblem ? undefined : confirmProblem(password, String(fd.get("confirm") ?? ""));
+    if (pwProblem || confirmIssue) {
+      setSignUpErrors({ password: pwProblem, confirm: confirmIssue });
+      focusField(pwProblem ? "su-password" : "su-confirm");
       setIsLoading(false);
       return;
     }
+    setSignUpErrors({});
     try {
       await signUpEmail(
         String(fd.get("email") ?? "").trim(),
@@ -318,25 +326,32 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <Input
+                    id="np-password"
                     name="password"
                     type="password"
                     placeholder="New password (min. 6 characters)"
                     aria-label="New password"
                     autoComplete="new-password"
-                    minLength={6}
+                    aria-invalid={resetErrors.password ? true : undefined}
+                    aria-describedby={resetErrors.password ? "np-password-error" : undefined}
                     disabled={isLoading}
                     required
                   />
+                  {resetErrors.password && <FieldError id="np-password-error">{resetErrors.password}</FieldError>}
                   <Input
+                    id="np-confirm"
                     name="confirm"
                     type="password"
                     placeholder="Confirm new password"
                     aria-label="Confirm new password"
                     autoComplete="new-password"
+                    aria-invalid={resetErrors.confirm ? true : undefined}
+                    aria-describedby={resetErrors.confirm ? "np-confirm-error" : undefined}
                     disabled={isLoading}
                     required
                   />
-                  {error && <p className="text-sm text-destructive">{error}</p>}
+                  {resetErrors.confirm && <FieldError id="np-confirm-error">{resetErrors.confirm}</FieldError>}
+                  {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
                 </CardContent>
                 <CardFooter className="flex-col gap-2">
                   <Button type="submit" className="w-full" disabled={isLoading}>
@@ -512,7 +527,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       required
                     />
                     {error && (
-                      <p className="text-sm text-destructive">{error}</p>
+                      <p role="alert" className="text-sm text-destructive">{error}</p>
                     )}
                   </CardContent>
                   <CardFooter className="flex-col gap-2">
@@ -576,26 +591,33 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       required
                     />
                     <Input
+                      id="su-password"
                       name="password"
                       placeholder="Password (min. 6 characters)"
                       type="password"
                       aria-label="Password"
                       autoComplete="new-password"
-                      minLength={6}
+                      aria-invalid={signUpErrors.password ? true : undefined}
+                      aria-describedby={signUpErrors.password ? "su-password-error" : undefined}
                       disabled={isLoading}
                       required
                     />
+                    {signUpErrors.password && <FieldError id="su-password-error">{signUpErrors.password}</FieldError>}
                     <Input
+                      id="su-confirm"
                       name="confirm"
                       placeholder="Confirm password"
                       aria-label="Confirm password"
                       type="password"
                       autoComplete="new-password"
+                      aria-invalid={signUpErrors.confirm ? true : undefined}
+                      aria-describedby={signUpErrors.confirm ? "su-confirm-error" : undefined}
                       disabled={isLoading}
                       required
                     />
+                    {signUpErrors.confirm && <FieldError id="su-confirm-error">{signUpErrors.confirm}</FieldError>}
                     {error && (
-                      <p className="text-sm text-destructive">{error}</p>
+                      <p role="alert" className="text-sm text-destructive">{error}</p>
                     )}
                     <p className="text-[11px] leading-relaxed text-muted-foreground">
                       New accounts start with no platform role. The first staff
