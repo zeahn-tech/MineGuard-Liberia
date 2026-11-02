@@ -32,6 +32,9 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useMfaState } from "@/hooks/use-mfa-state";
 import { PageLoading } from "@/components/PageLoading";
+import { FieldError } from "@/components/ui/field";
+import { toastSuccess } from "@/lib/feedback";
+import { confirmProblem, focusField, passwordProblem } from "@/lib/validation";
 
 function friendlyMfaError(err: unknown, fallback: string): string {
   const msg = err instanceof Error ? err.message : "";
@@ -54,6 +57,7 @@ export default function OperatorSecurityPage() {
   // Password change state
   const [pw, setPw] = useState("");
   const [pwConfirm, setPwConfirm] = useState("");
+  const [pwErrors, setPwErrors] = useState<{ password?: string; confirm?: string }>({});
 
   const beginEnroll = async () => {
     setBusy(true);
@@ -102,18 +106,20 @@ export default function OperatorSecurityPage() {
   };
 
   const changePassword = async () => {
-    if (pw.length < 6) {
-      toast.error("Password is too weak (use at least 6 characters).");
-      return;
-    }
-    if (pw !== pwConfirm) {
-      toast.error("Passwords do not match.");
+    const pwIssue = passwordProblem(pw);
+    const confirmIssue = pwIssue ? undefined : confirmProblem(pw, pwConfirm);
+    setPwErrors({ password: pwIssue, confirm: confirmIssue });
+    if (pwIssue || confirmIssue) {
+      focusField(pwIssue ? "sec-password" : "sec-confirm");
       return;
     }
     setBusy(true);
     try {
       await updatePassword(pw);
-      toast.success("Password updated.");
+      toastSuccess({
+        title: "Password updated.",
+        reassure: "Use it the next time you sign in. Your current session stays signed in.",
+      });
       setPw("");
       setPwConfirm("");
     } catch (err) {
@@ -263,25 +269,40 @@ export default function OperatorSecurityPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <Input
+            id="sec-password"
             type="password"
             value={pw}
-            onChange={(e) => setPw(e.target.value)}
+            onChange={(e) => {
+              setPw(e.target.value);
+              if (pwErrors.password) setPwErrors((x) => ({ ...x, password: passwordProblem(e.target.value) }));
+            }}
             placeholder="New password (min. 6 characters)"
+            aria-label="New password"
             autoComplete="new-password"
-            minLength={6}
+            aria-invalid={pwErrors.password ? true : undefined}
+            aria-describedby={pwErrors.password ? "sec-password-error" : undefined}
             disabled={busy}
           />
+          {pwErrors.password && <FieldError id="sec-password-error">{pwErrors.password}</FieldError>}
           <Input
+            id="sec-confirm"
             type="password"
             value={pwConfirm}
-            onChange={(e) => setPwConfirm(e.target.value)}
+            onChange={(e) => {
+              setPwConfirm(e.target.value);
+              if (pwErrors.confirm) setPwErrors((x) => ({ ...x, confirm: confirmProblem(pw, e.target.value) }));
+            }}
             placeholder="Confirm new password"
+            aria-label="Confirm new password"
             autoComplete="new-password"
+            aria-invalid={pwErrors.confirm ? true : undefined}
+            aria-describedby={pwErrors.confirm ? "sec-confirm-error" : undefined}
             disabled={busy}
           />
+          {pwErrors.confirm && <FieldError id="sec-confirm-error">{pwErrors.confirm}</FieldError>}
         </CardContent>
         <CardFooter>
-          <Button className="w-full" disabled={busy || !pw} onClick={() => void changePassword()}>
+          <Button className="w-full" disabled={busy} onClick={() => void changePassword()}>
             {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <KeyRound className="mr-2 h-4 w-4" strokeWidth={1.5} />}
             Update password
           </Button>
