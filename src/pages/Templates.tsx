@@ -62,6 +62,7 @@ import { toast } from "sonner";
 import { PageLoading } from "@/components/PageLoading";
 import { EmptyState } from "@/components/EmptyState";
 import { ClipboardList } from "lucide-react";
+import { toastSuccess } from "@/lib/feedback";
 
 function blankQuestion(): TemplateSection["questions"][number] {
   return { label: "", answerType: "boolean", required: true };
@@ -328,7 +329,16 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
         active,
         sections,
       });
-      toast.success(existing ? "Template saved." : "Template created.");
+      toastSuccess(
+        existing
+          ? { title: "Template saved.", reassure: "Your changes are saved." }
+          : {
+              title: "Template created.",
+              reassure: active
+                ? "It's published and offered for new inspection drafts."
+                : "It's saved but not published yet, so inspectors can't use it until you publish it from the list.",
+            },
+      );
       navigate(`/portal/templates`, { replace: existing ? undefined : true, state: { savedId: id } });
     } catch (err) {
       toast.error(friendlyError(err, "Could not save the template."));

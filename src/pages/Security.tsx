@@ -81,7 +81,7 @@ export default function SecurityPage() {
     setBusy(true);
     try {
       await mfaEnrollVerify(start.factorId, enrollCode);
-      toast.success("Two-factor authentication is now active.");
+      toastSuccess({ title: "Two-factor authentication is now active.", reassure: "From now on you'll be asked for a code from your authenticator app each time you sign in." });
       setEnrolling(false);
       setStart(null);
       setEnrollCode("");

@@ -74,7 +74,7 @@ import {
 } from "@/lib/offline-sync";
 import { QueueManagerButton } from "@/components/QueueManager";
 import { toast } from "sonner";
-import { toastError } from "@/lib/feedback";
+import { toastError, toastSuccess } from "@/lib/feedback";
 
 const NAV: { to: string; label: string; icon: typeof Map; adminOnly?: boolean }[] = [
   { to: "/portal", label: "Command Center", icon: LayoutDashboard },
@@ -270,7 +270,7 @@ export default function PortalLayout() {
         scope: (targetRole === "registrar" ? "national" : targetScope) as "national" | "county" | "site",
         county: targetCounty || undefined,
       });
-      toast.success(`Role assigned to ${targetEmail}`);
+      toastSuccess({ title: `Role assigned to ${targetEmail}.`, reassure: "The assignment is recorded in the audit log." });
       setShowProvision(false);
     } catch (e) {
       toastError(e, { action: "assign that role" });

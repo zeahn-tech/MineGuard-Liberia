@@ -20,6 +20,7 @@ import { Link, Navigate } from "react-router";
 import { PublicHeader } from "@/components/PublicHeader";
 import { toast } from "sonner";
 import { PageLoading } from "@/components/PageLoading";
+import { toastSuccess } from "@/lib/feedback";
 
 export default function Join() {
   const { isLoading, isAuthenticated, user } = useAuth();
@@ -54,7 +55,7 @@ export default function Join() {
     setError(null);
     try {
       await api.workforce.requestMembership({ organizationId: id });
-      toast.success(`Request sent to ${name}.`);
+      toastSuccess({ title: `Request sent to ${name}.`, reassure: "An administrator of that company will review it. Nothing is granted until they approve, and you can cancel the request until then." });
       setResults(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not send the request.");
