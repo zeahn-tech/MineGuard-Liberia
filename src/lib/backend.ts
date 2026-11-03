@@ -97,6 +97,8 @@ import {
   type UserProfile,
   type Company,
   type ActivityItem,
+  type AdminUserRow,
+  type CompanyOversightRow,
   type CompanyProfile,
   type CompanySearchResult,
   type SiteRequest,
@@ -2227,6 +2229,84 @@ async function legacyCompanyList(): Promise<Company[]> {
 
 export const api = {
   // ----------------------------------------------------------------- users
+  /** Ministry cross-company oversight (migration 0039): numbers are scoped by the database to the caller. */
+  oversight: {
+    list: () =>
+      live<CompanyOversightRow[]>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase.rpc("mg_company_oversight");
+          if (error) throw backendError(error);
+          return ((data ?? []) as AnyRow[]).map((r) => ({
+            organizationId: r.organization_id as string,
+            name: r.name as string,
+            status: ((r.status as CompanyStatus) ?? "approved") as CompanyStatus,
+            sites: Number(r.sites ?? 0),
+            openActions: Number(r.open_actions ?? 0),
+            overdueActions: Number(r.overdue_actions ?? 0),
+            incidents30d: Number(r.incidents_30d ?? 0),
+            lastInspection: r.last_inspection ? Date.parse(r.last_inspection as string) : undefined,
+          }));
+        },
+        ["organizations", "sites", "corrective_actions", "incidents", "inspections"],
+      ),
+  },
+
+  /** Administrators finding and removing people (migration 0039). Every call is re-checked by the database. */
+  adminUsers: {
+    search: async (args: { query: string; offset?: number }): Promise<AdminUserRow[]> => {
+      await requireAdminUser();
+      const { data, error } = await supabase.rpc("mg_admin_user_directory", {
+        p_query: args.query || null,
+        p_limit: 25,
+        p_offset: args.offset ?? 0,
+      });
+      if (error) throw new Error("People could not be loaded.");
+      return ((data ?? []) as AnyRow[]).map((r) => ({
+        userId: r.user_id as string,
+        email: (r.email as string) ?? null,
+        name: (r.name as string) ?? null,
+        role: (r.role as string) ?? undefined,
+        company: (r.company as string) ?? undefined,
+        orgRole: (r.org_role as string) ?? undefined,
+        memberId: (r.member_id as string) ?? undefined,
+        createdAt: Date.parse(r.created_at as string),
+        removed: Boolean(r.removed),
+      }));
+    },
+    blockers: async (args: { userId: string }): Promise<{ code: string; message: string }[]> => {
+      await requireAdminUser();
+      const { data, error } = await supabase.rpc("mg_admin_account_deletion_blockers", { p_target: args.userId });
+      if (error) throw new Error(error.message.replace(/^[A-Z_]+:\s*/, "") || "Could not check.");
+      return (data ?? []) as { code: string; message: string }[];
+    },
+    /** Ends the person's company membership only; the account stays. */
+    removeFromCompany: async (args: { memberId: string }) => {
+      await requireAdminUser();
+      const { error } = await supabase.rpc("mg_revoke_member", { p_member_id: args.memberId });
+      if (error) throw friendlyInviteError(error.message);
+    },
+    /** Re-checks the administrator's password on the server, then removes / anonymizes the account. */
+    deleteAccount: async (args: { userId: string; confirmEmail: string; password: string }): Promise<{ mode: "removed" | "anonymized" }> => {
+      await requireAdminUser();
+      const { data, error } = await supabase.functions.invoke("account-delete", {
+        body: { confirm: "DELETE", targetUserId: args.userId, confirmEmail: args.confirmEmail, password: args.password },
+      });
+      if (error) {
+        let message = "The account could not be removed. Nothing was changed.";
+        try {
+          const ctx = (error as { context?: Response }).context;
+          const parsed = ctx ? ((await ctx.json()) as { message?: string }) : null;
+          if (parsed?.message) message = parsed.message;
+        } catch {
+          /* not JSON */
+        }
+        throw new Error(message);
+      }
+      return { mode: (data as { mode: "removed" | "anonymized" }).mode };
+    },
+  },
+
   /** Curated activity history for a company, or for one site (migration 0038). */
   activity: {
     PAGE: 25,

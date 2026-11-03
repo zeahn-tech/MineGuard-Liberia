@@ -83,6 +83,31 @@ export interface Company {
   members: CompanyAdminMember[];
 }
 
+/** One row of the Ministry's cross-company oversight summary (migration 0039). */
+export interface CompanyOversightRow {
+  organizationId: string;
+  name: string;
+  status: CompanyStatus;
+  sites: number;
+  openActions: number;
+  overdueActions: number;
+  incidents30d: number;
+  lastInspection?: number;
+}
+
+/** A person as an administrator sees them when finding someone to remove (migration 0039). */
+export interface AdminUserRow {
+  userId: string;
+  email: string | null;
+  name: string | null;
+  role?: string;
+  company?: string;
+  orgRole?: string;
+  memberId?: string;
+  createdAt: number;
+  removed: boolean;
+}
+
 /** One line of a company's / site's activity history (migration 0038). Curated: no emails, ids or raw records. */
 export interface ActivityItem {
   id: string;

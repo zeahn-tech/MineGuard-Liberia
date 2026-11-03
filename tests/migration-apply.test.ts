@@ -36,7 +36,7 @@ afterEach(async () => {
     "0025_company_status_membership_invitations.sql",
     "0026_company_workforce.sql",
     "0027_site_scoped_access.sql",
-    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql",
+    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql",
   ]) {
     await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
   }
@@ -764,6 +764,10 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_accept_invitation(uuid)",
     // 0035 (profile settings, photo, deletion): each acts only on the caller
     "mg_account_deletion_blockers()",
+    // 0039: administrator removal of users + the Ministry oversight summary (each self-authorizes)
+    "mg_admin_account_deletion_blockers(uuid)",
+    "mg_admin_prepare_account_deletion(uuid, text)",
+    "mg_admin_user_directory(text, integer, integer)",
     "mg_any_profile_role()",
     // 0027 (Phase D): site-scoped personnel
     "mg_assign_member_site(uuid, uuid)",
@@ -781,6 +785,7 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_company_activity(uuid, uuid, integer, timestamp with time zone, uuid)",
     // 0031 (registrar): the company directory (self-authorizes on organizations.write)
     "mg_company_directory()",
+    "mg_company_oversight()",
     "mg_company_workforce(uuid)",
     // 0014's five scale surfaces — SECURITY INVOKER row sources 0011 must
     // keep granted when it re-runs (see 0011 header, bullet E).

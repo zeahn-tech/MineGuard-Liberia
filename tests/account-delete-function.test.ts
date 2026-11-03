@@ -3,7 +3,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { handleAccountDeletion, type AccountDeps } from "../supabase/functions/_shared/account/handler";
+import { handleAccountDeletion, handleAdminAccountRemoval, type AccountDeps } from "../supabase/functions/_shared/account/handler";
 import { getDb, getFixture, withRole, type Runner } from "./helpers/pglite-db";
 
 let f: Awaited<ReturnType<typeof getFixture>>;
@@ -14,7 +14,7 @@ const U2 = "aaaaaaaa-0000-4000-8000-0000000000d2";
 beforeAll(async () => {
   f = await getFixture();
   const db = await getDb();
-  for (const m of ["0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql"]) {
+  for (const m of ["0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql"]) {
     await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
   }
 });
@@ -23,9 +23,13 @@ function deps(run: Runner, over: Partial<{ password: boolean; deleteFails: boole
   const calls: string[] = [];
   const d: AccountDeps = {
     db: {
-      rpc: async (fn) => {
+      rpc: async (fn, args = {}) => {
         try {
-          const rows = await run(`select public.${fn}() as r`);
+          const keys = Object.keys(args);
+          const rows = await run(
+            `select public.${fn}(${keys.map((k, i) => `${k} => $${i + 1}`).join(", ")}) as r`,
+            keys.map((k) => args[k]),
+          );
           return { data: rows[0]?.r ?? null, error: null };
         } catch (e) {
           return { data: null, error: { message: (e as Error).message } };
@@ -140,5 +144,57 @@ describe("account-delete handler", () => {
     expect(h.indexOf("verifyPassword")).toBeLessThan(h.indexOf("mg_prepare_account_deletion"));
     expect(h.indexOf("mg_prepare_account_deletion")).toBeLessThan(h.indexOf("deps.admin.deleteUser"));
     expect(i).not.toMatch(/\bVITE_/);
+  });
+});
+
+describe("account-delete handler: an administrator removes someone else (migration 0039)", () => {
+  const TARGET = "aaaaaaaa-0000-4000-8000-0000000000e1";
+  const XA = "aaaaaaaa-0000-4000-8000-0000000000a1";
+  const ADMIN = { id: "", email: "admin@x.test" };
+
+  async function setup(run: Runner) {
+    await run(`insert into auth.users (id, email) values ('${TARGET}','target@x.test'), ('${XA}','xa@agrilib.test')`);
+    await run(`insert into auth.users (id, email) values ('aaaaaaaa-0000-4000-8000-0000000000e9','second.admin@x.test')`);
+    await run("update public.profiles set role = 'admin', scope = 'national', profile_complete = true where id = 'aaaaaaaa-0000-4000-8000-0000000000e9'");
+    await asCaller(run, f.admin);
+    return { ...ADMIN, id: f.admin };
+  }
+  const body = (over: Record<string, unknown> = {}) => ({ confirm: "DELETE", password: "pw", targetUserId: TARGET, confirmEmail: "target@x.test", ...over });
+
+  test("the administrator's own password and typed confirmations come first; nothing is touched without them", async () => {
+    await withRole("postgres", null, async (run) => {
+      const admin = await setup(run);
+      const { d, calls } = deps(run);
+      for (const bad of [{ confirm: "yes" }, { targetUserId: "nope" }, { confirmEmail: "" }, { password: "" }, { targetUserId: admin.id }]) {
+        expect((await handleAdminAccountRemoval(d, admin, body(bad))).status, JSON.stringify(bad)).toBe(400);
+      }
+      expect((await handleAdminAccountRemoval(deps(run, { password: false }).d, admin, body())).status).toBe(403);
+      expect(calls).toEqual([]);
+      expect((await run(`select deleted_at from public.profiles where id = '${TARGET}'`))[0].deleted_at).toBeNull();
+    });
+  });
+
+  test("no records: the target's login is deleted outright; the administrator's session is NOT signed out", async () => {
+    await withRole("postgres", null, async (run) => {
+      const admin = await setup(run);
+      const { d, calls } = deps(run);
+      const r = await handleAdminAccountRemoval(d, admin, body());
+      expect(r).toEqual({ status: 200, body: { removed: true, mode: "removed" } });
+      expect(calls).toEqual(["verify", `delete:${TARGET}`]); // no "signout": that would end the ADMINISTRATOR's own session
+    });
+  });
+
+  test("the database refuses and the login is never touched: wrong email, blocked, or not an administrator", async () => {
+    await withRole("postgres", null, async (run) => {
+      const admin = await setup(run);
+      const a = deps(run);
+      expect(await handleAdminAccountRemoval(a.d, admin, body({ confirmEmail: "other@x.test" }))).toMatchObject({ status: 400, body: { error: "CONFIRM_MISMATCH" } });
+      expect(await handleAdminAccountRemoval(a.d, admin, body({ targetUserId: "aaaaaaaa-0000-4000-8000-0000000000ff" }))).toMatchObject({ status: 404 });
+      expect(a.calls).toEqual(["verify", "verify"]); // password checked, then the database said no
+      await asCaller(run, f.county); // a staff member without users.manage
+      const b = deps(run);
+      expect(await handleAdminAccountRemoval(b.d, { id: f.county, email: "c@x.test" }, body())).toMatchObject({ status: 403, body: { error: "FORBIDDEN" } });
+      expect(b.calls).toEqual(["verify"]);
+    });
   });
 });
