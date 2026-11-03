@@ -19,6 +19,8 @@ import { useState } from "react";
 import { Link, Navigate } from "react-router";
 import { PublicHeader } from "@/components/PublicHeader";
 import { toast } from "sonner";
+import { PageLoading } from "@/components/PageLoading";
+import { toastSuccess } from "@/lib/feedback";
 
 export default function Join() {
   const { isLoading, isAuthenticated, user } = useAuth();
@@ -28,7 +30,7 @@ export default function Join() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (isLoading) return <p className="p-6 text-sm text-muted-foreground" role="status">Loading…</p>;
+  if (isLoading) return <PageLoading shape="form" label="company details" className="p-6" />;
   if (!isAuthenticated) return <Navigate to="/auth?returnTo=%2Fjoin" replace />;
   if (user?.role && !mine) {
     // Staff accounts and accounts that already have a workspace have nothing to join.
@@ -53,7 +55,7 @@ export default function Join() {
     setError(null);
     try {
       await api.workforce.requestMembership({ organizationId: id });
-      toast.success(`Request sent to ${name}.`);
+      toastSuccess({ title: `Request sent to ${name}.`, reassure: "An administrator of that company will review it. Nothing is granted until they approve, and you can cancel the request until then." });
       setResults(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not send the request.");

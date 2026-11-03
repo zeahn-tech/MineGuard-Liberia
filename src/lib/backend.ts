@@ -24,6 +24,7 @@ import {
   uploadWithProgress,
 } from "./supabase";
 import { clearRecovery } from "./recovery";
+import { markDeliberateSignOut, setSignedOutNotice } from "./session-expiry";
 import { validateTemplateSections } from "./template-schema";
 import {
   validateRiskSettings,
@@ -1839,17 +1840,41 @@ export async function signInGuest() {
 }
 
 export async function signOut() {
+  markDeliberateSignOut();
   clearRecovery(); // a deliberate sign-out also abandons a pending password reset
+  const leavingUserId = authUserId();
   await supabase.auth.signOut();
   profileCache = null;
   // Shared-device hygiene: remove cached offline data unless unsynced work is
   // still waiting (never destroy field data that has not reached the server).
+  // In-progress report forms follow the same rule as inspection drafts.
   try {
     const m = await import("./offline-queue");
-    await m.wipeOfflineDataIfSynced();
+    const wiped = await m.wipeOfflineDataIfSynced();
+    if (wiped && leavingUserId) {
+      const d = await import("./form-drafts");
+      await d.clearAllFormDrafts(leavingUserId);
+    }
   } catch {
     /* best effort — never block sign-out */
   }
+}
+
+/**
+ * Sign out because the person has been inactive (see session-expiry.ts).
+ *
+ * Unlike signOut(), this deliberately KEEPS everything on the device: the
+ * offline queue, inspection drafts and in-progress report forms. The whole
+ * point is that a timeout must never cost anyone their work; the sign-in
+ * screen says so, and the work is there when they sign back in. (An explicit
+ * "Sign out" still follows the shared-device rule above.)
+ */
+export async function signOutIdle() {
+  setSignedOutNotice("idle");
+  markDeliberateSignOut();
+  clearRecovery();
+  await supabase.auth.signOut();
+  profileCache = null;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { BrandMark } from "@/components/BrandMark";
+import { OfflineBanner } from "@/components/OfflineBanner";
 import { LEGAL_PRODUCT } from "@/lib/legal";
 
 // Content width of the page the banner sits above, so the brand and the action
@@ -39,6 +40,7 @@ export function PublicHeader({
         </Link>
         {children}
       </div>
+      <OfflineBanner variant="public" />
     </header>
   );
 }

@@ -45,6 +45,13 @@ import {
   type LocalDraft,
 } from "@/lib/offline-queue";
 import type { Doc } from "@/lib/entity-types";
+import { PageLoading } from "@/components/PageLoading";
+import { PermissionNotice } from "@/components/PermissionNotice";
+import { toastError, toastSuccess } from "@/lib/feedback";
+import { describeGeolocationError } from "@/lib/site-position";
+import { FormField, invalidControlClass } from "@/components/FormField";
+import { chooseProblem, focusField } from "@/lib/validation";
+import { EmptyState } from "@/components/EmptyState";
 
 type TemplateDoc = Doc<"inspectionTemplates">;
 type SiteDoc = Doc<"sites">;
@@ -188,11 +195,26 @@ export default function Inspections() {
       <section>
         <h2 className="display border-b border-border pb-2 text-lg">All inspections</h2>
         {!inspections ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+          <PageLoading shape="list" label="inspections" compact />
         ) : inspections.length === 0 ? (
-          <p className="py-8 text-sm text-muted-foreground">
-            No inspections yet. Start one above.
-          </p>
+          <EmptyState
+            icon={FilePlus2}
+            title="No inspections yet"
+            why={
+              !isStaff
+                ? "Inspections appear here once an inspector submits one for a site in your area."
+                : templates && templates.length > 0
+                  ? "Each inspection starts as a draft saved on this device and is submitted when you're ready, so it works without a connection."
+                  : "Inspections are built from published templates, and none is published yet. An administrator publishes one first."
+            }
+            action={
+              !isStaff
+                ? undefined
+                : templates && templates.length > 0
+                  ? { label: "Start an inspection", onClick: () => setOpen(true) }
+                  : { label: "Go to Templates", to: "/portal/templates" }
+            }
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="mt-1 w-full text-sm">
@@ -264,10 +286,20 @@ function NewInspectionDialog({
   const navigate = useNavigate();
   const [siteId, setSiteId] = useState("");
   const [templateId, setTemplateId] = useState<string>(templates[0]?._id ?? "");
+  const [siteError, setSiteError] = useState<string | undefined>();
+  const [templateError, setTemplateError] = useState<string | undefined>();
 
   const start = async () => {
-    if (!siteId || !templateId) {
-      toast.error("Choose a site and a template.");
+    const siteIssue = chooseProblem(siteId, "the site you are inspecting");
+    const templateIssue = templateId
+      ? undefined
+      : templates.length === 0
+        ? "No inspection template is available yet. An administrator needs to publish one first."
+        : "Choose the inspection template from the list.";
+    setSiteError(siteIssue);
+    setTemplateError(templateIssue);
+    if (siteIssue || templateIssue) {
+      focusField(siteIssue ? "new-insp-site" : "new-insp-template");
       return;
     }
     const site = sites.find((s) => s._id === siteId);
@@ -284,11 +316,7 @@ function NewInspectionDialog({
         updatedAt: Date.now(),
       });
     } catch (e) {
-      toast.error(
-        e instanceof Error
-          ? e.message
-          : "Draft was NOT saved on this device",
-      );
+      toastError(e, { action: "save the draft on this device" });
       return;
     }
     navigate(`/portal/inspections/local/${clientRef}`);
@@ -310,37 +338,45 @@ function NewInspectionDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="new-insp-site">Site</Label>
-            <select
-              id="new-insp-site"
-              className="w-full rounded-sm border border-input bg-card px-3 py-2 text-sm"
-              value={siteId}
-              onChange={(e) => setSiteId(e.target.value)}
-            >
-              <option value="">Select site…</option>
-              {sites.map((s) => (
-                <option key={s._id} value={s._id}>
-                  {s.code} — {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="new-insp-template">Template</Label>
-            <select
-              id="new-insp-template"
-              className="w-full rounded-sm border border-input bg-card px-3 py-2 text-sm"
-              value={templateId}
-              onChange={(e) => setTemplateId(e.target.value)}
-            >
-              {templates.map((t) => (
-                <option key={t._id} value={t._id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <FormField label="Site" required id="new-insp-site" error={siteError}>
+            {(a11y) => (
+              <select
+                {...a11y}
+                className={`w-full rounded-sm border border-input bg-card px-3 py-2 text-sm ${invalidControlClass}`}
+                value={siteId}
+                onChange={(e) => {
+                  setSiteId(e.target.value);
+                  if (siteError) setSiteError(chooseProblem(e.target.value, "the site you are inspecting"));
+                }}
+              >
+                <option value="">Select site…</option>
+                {sites.map((s) => (
+                  <option key={s._id} value={s._id}>
+                    {s.code} — {s.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </FormField>
+          <FormField label="Template" required id="new-insp-template" error={templateError}>
+            {(a11y) => (
+              <select
+                {...a11y}
+                className={`w-full rounded-sm border border-input bg-card px-3 py-2 text-sm ${invalidControlClass}`}
+                value={templateId}
+                onChange={(e) => {
+                  setTemplateId(e.target.value);
+                  if (templateError) setTemplateError(undefined);
+                }}
+              >
+                {templates.map((t) => (
+                  <option key={t._id} value={t._id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </FormField>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -368,6 +404,8 @@ export function LocalInspectionForm() {
   const [draftLoading, setDraftLoading] = useState(true);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [gps, setGps] = useState<{ lat: number; lng: number; acc: number } | null>(null);
+  // Why GPS capture failed, so the screen can explain and offer a way on.
+  const [gpsProblem, setGpsProblem] = useState<{ denied: boolean; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
   // The draft lives in IndexedDB now (OFF-1) — load it after the durable
@@ -409,13 +447,13 @@ export function LocalInspectionForm() {
       .catch((e) => {
         const msg = e instanceof Error ? e.message : "storage unavailable";
         setSaveError(msg);
-        toast.error(`Not saved on this device — ${msg}`);
+        toastError(e, { action: "keep this draft on the device" });
       });
   };
 
   const captureGps = () => {
     if (!navigator.geolocation) {
-      toast.error("Geolocation unavailable on this device.");
+      setGpsProblem({ denied: false, text: "This device or browser can't provide a location." });
       return;
     }
     navigator.geolocation.getCurrentPosition(
@@ -426,10 +464,11 @@ export function LocalInspectionForm() {
           acc: pos.coords.accuracy,
         };
         setGps(g);
+        setGpsProblem(null);
         saveDraft({ latitude: g.lat, longitude: g.lng, gpsAccuracyM: g.acc });
         toast.success("GPS captured");
       },
-      (err) => toast.error(`GPS error: ${err.message}`),
+      (err) => setGpsProblem({ denied: err.code === 1, text: describeGeolocationError(err.code) }),
       { enableHighAccuracy: true, timeout: 15000 },
     );
   };
@@ -454,13 +493,22 @@ export function LocalInspectionForm() {
       });
       // 2. Try immediate sync; if offline it stays queued and syncs on reconnect.
       const { syncQueue } = await import("@/lib/offline-queue");
-      await syncQueue({
+      const result = await syncQueue({
         createDraft: (args) => syncCreateDraft(args as never) as unknown as Promise<string>,
         updateDraft: (args) => syncUpdateDraft(args as never) as unknown as Promise<void>,
         submit: (args) => syncSubmit(args as never) as unknown as Promise<void>,
-      });      toast.success(
-        draft.latitude != null ? "Submitted with GPS captured" : "Submitted",
-      );
+      });
+      if (result.synced > 0) {
+        toastSuccess({
+          title: draft.latitude != null ? "Inspection submitted, with GPS." : "Inspection submitted.",
+          reassure: "It's saved with your findings and is ready for review.",
+        });
+      } else {
+        toastSuccess({
+          title: "Saved on this device.",
+          reassure: "You're offline, so it will be submitted automatically when you reconnect — nothing is lost.",
+        });
+      }
       navigate("/portal/inspections");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
@@ -483,9 +531,7 @@ export function LocalInspectionForm() {
 
   if (draftLoading) {
     return (
-      <p className="py-16 text-center text-sm text-muted-foreground">
-        Loading draft from this device…
-      </p>
+      <PageLoading shape="form" label="your draft" local compact />
     );
   }
 
@@ -523,6 +569,30 @@ export function LocalInspectionForm() {
           )}
         </div>
       </header>
+
+      {gpsProblem && (
+        <PermissionNotice
+          title={gpsProblem.denied ? "Location access is blocked" : "Couldn't get your location"}
+          why="GPS records where the inspection was carried out. Your position is read once, when you press Capture GPS — it isn't tracked."
+          howToAllow={
+            gpsProblem.denied
+              ? "Allow location for this site in your browser's settings, then press Capture GPS again."
+              : gpsProblem.text
+          }
+        >
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={captureGps}>
+              Try again
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setGpsProblem(null)}>
+              Continue without GPS
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Without it, the inspection is still saved and submitted — just without a location.
+          </p>
+        </PermissionNotice>
+      )}
 
       {/* OFF-2: a failed on-device write blocks any "saved" impression —
           the banner stays until the next successful persist. */}

@@ -20,6 +20,8 @@
 import { Button } from "@/components/ui/button";
 import { Camera, CameraOff, RefreshCw, SwitchCamera, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { PermissionNotice } from "@/components/PermissionNotice";
+import { CAMERA_REASON_TEXT, cameraReason, type CameraReason } from "@/lib/camera-reason";
 
 export type CameraCaptureResult = {
   blob: Blob;
@@ -46,6 +48,8 @@ export default function CameraCapture({
   const [phase, setPhase] = useState<"starting" | "live" | "error" | "fallback">(() =>
     cameraSupported() ? "starting" : "fallback",
   );
+  // Why the camera isn't available, so the fallback can explain it.
+  const [reason, setReason] = useState<CameraReason | null>(() => (cameraSupported() ? null : "unsupported"));
   const [facing, setFacing] = useState<"environment" | "user">("environment");
   const [preview, setPreview] = useState<string | null>(null);
   const [lastBlob, setLastBlob] = useState<Blob | null>(null);
@@ -87,6 +91,7 @@ export default function CameraCapture({
       } catch (e) {
         if (cancelled) return;
         console.warn("Camera unavailable, falling back to file input:", e);
+        setReason(cameraReason(e));
         setPhase("fallback");
       }
     };
@@ -155,7 +160,20 @@ export default function CameraCapture({
             <X className="size-3.5" />
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground">
+        {reason === "denied" ? (
+          <PermissionNotice
+            title="Camera access is blocked"
+            why="To photograph evidence for this record. The camera is on only while this panel is open, and a photo is taken only when you press the button."
+            howToAllow="Allow the camera for this site in your browser's settings, then reopen this panel."
+          >
+            <p className="text-xs text-muted-foreground">
+              Or choose a photo below — it goes into the same queue with the same guarantees.
+            </p>
+          </PermissionNotice>
+        ) : (
+          reason && <p className="text-xs text-muted-foreground">{CAMERA_REASON_TEXT[reason]}</p>
+        )}
+        <p className={`text-xs text-muted-foreground ${reason === "denied" ? "sr-only" : ""}`}>
           Use the device camera app instead — the photo lands in the same
           queue with the same guarantees.
         </p>

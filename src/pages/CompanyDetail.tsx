@@ -14,6 +14,7 @@ import { useQuery } from "@/lib/backend-react";
 import { ChevronLeft, MapPin, ShieldAlert } from "lucide-react";
 import { Link, useParams } from "react-router";
 import { CompanyCard } from "./Companies";
+import { PageLoading } from "@/components/PageLoading";
 
 export default function CompanyDetail() {
   const { companyId } = useParams();
@@ -31,7 +32,7 @@ export default function CompanyDetail() {
     );
   }
   if (companies === undefined || sites === undefined) {
-    return <p className="text-sm text-muted-foreground" role="status">Loading company…</p>;
+    return <PageLoading shape="detail" label="company" />;
   }
   const company = companies.find((c) => c.id === companyId);
   if (!company) {

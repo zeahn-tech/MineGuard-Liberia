@@ -59,6 +59,10 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
+import { PageLoading } from "@/components/PageLoading";
+import { EmptyState } from "@/components/EmptyState";
+import { ClipboardList } from "lucide-react";
+import { toastSuccess } from "@/lib/feedback";
 
 function blankQuestion(): TemplateSection["questions"][number] {
   return { label: "", answerType: "boolean", required: true };
@@ -141,14 +145,15 @@ export function TemplateList() {
       </div>
 
       {templatesQ === undefined && (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Loading…
-        </p>
+        <PageLoading shape="list" label="templates" />
       )}
       {templatesQ !== undefined && templates.length === 0 && (
-        <p className="text-sm text-muted-foreground">
-          No templates yet — create the first one.
-        </p>
+        <EmptyState
+          icon={ClipboardList}
+          title="No inspection templates yet"
+          why="Inspectors can only start an inspection from a published template, so none can be carried out until one exists."
+          action={{ label: "Create the first template", to: "/portal/templates/new" }}
+        />
       )}
 
       <div className="space-y-3">
@@ -324,7 +329,16 @@ function TemplateEditorForm({ existing }: { existing?: InspectionTemplate }) {
         active,
         sections,
       });
-      toast.success(existing ? "Template saved." : "Template created.");
+      toastSuccess(
+        existing
+          ? { title: "Template saved.", reassure: "Your changes are saved." }
+          : {
+              title: "Template created.",
+              reassure: active
+                ? "It's published and offered for new inspection drafts."
+                : "It's saved but not published yet, so inspectors can't use it until you publish it from the list.",
+            },
+      );
       navigate(`/portal/templates`, { replace: existing ? undefined : true, state: { savedId: id } });
     } catch (err) {
       toast.error(friendlyError(err, "Could not save the template."));
@@ -618,9 +632,7 @@ export function TemplateEditor() {
 
   if (templatesQ === undefined) {
     return (
-      <p className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" /> Loading…
-      </p>
+      <PageLoading shape="form" label="template" />
     );
   }
 

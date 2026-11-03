@@ -32,6 +32,8 @@ import {
   type RiskConfigVersion,
   type RiskWeights,
 } from "@/lib/risk-config";
+import { PageLoading } from "@/components/PageLoading";
+import { toastError } from "@/lib/feedback";
 
 const fmt = (ms: number) => (ms <= 0 ? "since launch" : new Date(ms).toLocaleString());
 
@@ -54,7 +56,7 @@ export default function RiskConfig() {
         </header>
 
         {versions === undefined ? (
-          <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>
+          <PageLoading shape="table" label="risk model versions" />
         ) : versions.length === 0 ? (
           <div className="paper p-6 text-sm text-muted-foreground">
             No risk configuration is published in this deployment yet (migration 0019 not applied).
@@ -173,7 +175,7 @@ function PublishForm({ latest, now }: { latest: RiskConfigVersion; now: number }
       setNote("");
       setEffective("");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message.replace(/^[A-Z_]+:\s*/, "") : "Could not publish");
+      toastError(e, { action: "publish the risk model" });
     } finally {
       setBusy(false);
     }

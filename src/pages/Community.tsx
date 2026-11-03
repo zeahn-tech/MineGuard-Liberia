@@ -8,6 +8,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { ShieldAlert } from "lucide-react";
 import EvidenceSection from "@/components/EvidenceSection";
+import { PageLoading } from "@/components/PageLoading";
+import { toastError } from "@/lib/feedback";
+import { EmptyState } from "@/components/EmptyState";
+import { CheckCheck, Inbox } from "lucide-react";
 
 export default function Community() {
   const reports = useQuery(api.records.listCommunityReports);
@@ -21,7 +25,7 @@ export default function Community() {
       await fn();
       toast.success(ok);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Action failed");
+      toastError(e, { action: "complete that action" });
     }
   };
 
@@ -50,9 +54,14 @@ export default function Community() {
           Awaiting triage ({pending.length})
         </h2>
         {!reports ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+          <PageLoading shape="list" label="community reports" compact />
         ) : pending.length === 0 ? (
-          <p className="py-6 text-sm text-muted-foreground">Queue is clear.</p>
+          <EmptyState
+            icon={Inbox}
+            title="The queue is clear"
+            why="No community reports are waiting for review. New ones from the public appear here the moment they are submitted."
+            action={{ label: "Open the public report form", to: "/report" }}
+          />
         ) : (
           <ul className="divide-y divide-border">
             {pending.map((r) => (
@@ -158,7 +167,11 @@ export default function Community() {
           Decided ({decided.length})
         </h2>
         {decided.length === 0 ? (
-          <p className="py-6 text-sm text-muted-foreground">No decided reports yet.</p>
+          <EmptyState
+            icon={CheckCheck}
+            title="No decided reports yet"
+            why="Reports you accept or reject move here, with the decision and who made it recorded."
+          />
         ) : (
           <ul className="divide-y divide-border">
             {decided.map((r) => (
