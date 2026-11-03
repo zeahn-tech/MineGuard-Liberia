@@ -104,6 +104,15 @@ describe("1 · errors say what, whose side, and how to fix", () => {
     expect(SRC.filter((f) => rx.test(code(f)))).toEqual([]);
   });
 
+  test("no inline error shows a raw exception message either (setError(e.message))", () => {
+    // The first guard covers toasts; this one covers inline error text, which is
+    // how "Database error querying schema" once reached the invitation page.
+    const rx = /set\w*Error\(\s*(?:\w+ instanceof Error \? \w+\.message|\w+\.message)\b/;
+    // Pages that show a message the backend wrote on purpose, then pass it
+    // through errorSentence, are fine; a bare .message is not.
+    expect(PAGES.filter((f) => rx.test(code(f)))).toEqual([]);
+  });
+
   test("the crash screen names the fault, whose it is, and how to continue — without a stack in production", () => {
     const src = read("src/components/RootErrorBoundary.tsx");
     expect(src).toContain("This is on us");

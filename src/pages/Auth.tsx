@@ -32,6 +32,7 @@ import { Suspense, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { FieldError } from "@/components/ui/field";
 import { confirmProblem, focusField, passwordProblem } from "@/lib/validation";
+import { authFailure } from "@/lib/auth-errors";
 
 interface AuthProps {
   redirectAfterAuth?: string;
@@ -70,6 +71,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Controlled so a sign-in failure can offer a one-tap switch to "Create account".
+  const [tab, setTab] = useState<"signin" | "signup">("signin");
+  const [offerSignUp, setOfferSignUp] = useState(false);
   // Password problems are shown at the field they belong to, per form.
   const [resetErrors, setResetErrors] = useState<{ password?: string; confirm?: string }>({});
   const [signUpErrors, setSignUpErrors] = useState<{ password?: string; confirm?: string }>({});
@@ -111,6 +115,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   // (src/lib/backend.ts authErrorMessage) — match on message text.
   const authMessage = (err: unknown, fallback: string) => {
     const msg = err instanceof Error ? err.message : "";
+    // Credentials / closed account / sign-in service failure: shared, tested copy.
+    const failure = authFailure(msg);
+    if (failure) return failure.message;
     if (msg.includes("RECOVERY_EXPIRED"))
       return "Your reset link has expired. Request a new one to continue.";
     if (msg.includes("SAME_PASSWORD"))
@@ -127,14 +134,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       return "The email service has reached its sending limit. Wait an hour and try again, or ask the administrator to confirm your account.";
     if (msg.includes("TOO_MANY_ATTEMPTS"))
       return "Too many attempts — please wait a moment and try again.";
-    if (
-      msg.includes("INCORRECT_CREDENTIALS") ||
-      msg.includes("Incorrect email or password") ||
-      msg.includes("invalid login credentials")
-    )
-      return "Incorrect email or password.";
-    if (msg.includes("No account with that email"))
-      return "No account with that email.";
     if (msg.includes("already exists"))
       return "An account already exists with that email — sign in instead.";
     if (msg.includes("too weak"))
@@ -154,6 +153,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     event.preventDefault();
     setIsLoading(true);
     setError(null);
+    setOfferSignUp(false);
     const fd = new FormData(event.currentTarget);
     try {
       const { mfaRequired: needsMfa } = await signInEmailMfaAware(
@@ -169,6 +169,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     } catch (err) {
       console.error("Sign-in error:", err);
       setError(authMessage(err, "Failed to sign in. Please try again."));
+      setOfferSignUp(Boolean(authFailure(err instanceof Error ? err.message : "")?.offerSignUp));
       setIsLoading(false);
     }
   };
@@ -476,7 +477,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 )}
               </div>
             ) : (
-            <Tabs defaultValue="signin">
+            <Tabs value={tab} onValueChange={(v) => { setTab(v as "signin" | "signup"); setError(null); setOfferSignUp(false); }}>
               <CardHeader className="pb-2 text-center">
                 <p className="kicker">Authorized personnel</p>
                 <CardTitle role="heading" aria-level={1} className="display mt-1 text-2xl">
@@ -528,6 +529,20 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     />
                     {error && (
                       <p role="alert" className="text-sm text-destructive">{error}</p>
+                    )}
+                    {error && offerSignUp && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => {
+                          setTab("signup");
+                          setError(null);
+                          setOfferSignUp(false);
+                        }}
+                      >
+                        Create an account
+                      </Button>
                     )}
                   </CardContent>
                   <CardFooter className="flex-col gap-2">
