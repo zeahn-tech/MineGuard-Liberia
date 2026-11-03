@@ -1682,8 +1682,8 @@ function liveDoc<T>(
 // ---------------------------------------------------------------------------
 
 /** Map Supabase auth errors to the stable message tokens Auth.tsx renders. */
-function authErrorMessage(
-  err: { message?: string } | null | undefined,
+export function authErrorMessage(
+  err: { message?: string; status?: number; code?: string } | null | undefined,
 ): string {
   const m = (err?.message ?? "").toLowerCase();
   if (m.includes("invalid login credentials")) return "INCORRECT_CREDENTIALS";
@@ -1705,6 +1705,17 @@ function authErrorMessage(
   if (m.includes("different from the old password") || m.includes("same_password"))
     return "SAME_PASSWORD";
   if (m.includes("aal2") || m.includes("insufficient_aal")) return "MFA_REQUIRED";
+  // A login that exists but has been closed (account deletion with records kept).
+  if (m.includes("banned") || err?.code === "user_banned") return "ACCOUNT_DISABLED";
+  // The auth service itself failed (e.g. "Database error querying schema"): never
+  // pass its internals on to the screen.
+  if (
+    m.includes("database error") ||
+    m.includes("querying schema") ||
+    err?.code === "unexpected_failure" ||
+    (typeof err?.status === "number" && err.status >= 500)
+  )
+    return "AUTH_SERVICE_ERROR";
   return err?.message ?? "AUTH_FAILED";
 }
 

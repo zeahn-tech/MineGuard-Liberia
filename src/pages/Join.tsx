@@ -21,6 +21,7 @@ import { PublicHeader } from "@/components/PublicHeader";
 import { toast } from "sonner";
 import { PageLoading } from "@/components/PageLoading";
 import { toastSuccess } from "@/lib/feedback";
+import { errorSentence } from "@/lib/error-messages";
 
 export default function Join() {
   const { isLoading, isAuthenticated, user } = useAuth();
@@ -44,7 +45,7 @@ export default function Join() {
     try {
       setResults(await api.workforce.searchCompanies({ query: q.trim() }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Search failed.");
+      setError(errorSentence(e, { action: "search for the company" }));
     } finally {
       setBusy(false);
     }
@@ -58,7 +59,7 @@ export default function Join() {
       toastSuccess({ title: `Request sent to ${name}.`, reassure: "An administrator of that company will review it. Nothing is granted until they approve, and you can cancel the request until then." });
       setResults(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not send the request.");
+      setError(errorSentence(e, { action: "send the request" }));
     } finally {
       setBusy(false);
     }
@@ -71,7 +72,7 @@ export default function Join() {
       await api.workforce.cancelRequest();
       toast.success("Request cancelled.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not cancel.");
+      setError(errorSentence(e, { action: "cancel the request" }));
     } finally {
       setBusy(false);
     }

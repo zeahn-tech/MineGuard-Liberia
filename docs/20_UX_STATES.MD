@@ -63,3 +63,46 @@ screen or a dead end.**
 * `tests/ux-states-contract.test.ts` — source guards: no bare "Loading…", no raw
   `e.message` toasts, no validate-by-toast, every shell keeps its guard and
   banner, queued saves never say "submitted".
+
+## Runbook: "Database error querying schema" at sign-in
+
+**What people see now:** never that text. The app translates the sign-in
+service's failure into "We couldn't sign you in just now. If you don't have an
+account yet, or yours was deleted, create a new one. Otherwise, try again in a
+moment." (`lib/auth-errors.ts`), with a **Create an account** button.
+
+**What it means:** that sentence is Supabase Auth (GoTrue) reporting that *its
+own* query failed. It is not an application error and the repo cannot cause or
+cure it directly. A deleted account should answer with the ordinary
+"Invalid login credentials" instead: account deletion either removes the login
+or renames it to `deleted-<id>@deleted.invalid` and bans it
+(`supabase/functions/account-delete`), so the original email is free either way.
+If a deleted account's email returns a database error, treat it as a **server
+fault to investigate**, not as normal behaviour.
+
+**Where to look (Supabase dashboard → SQL editor / Logs → Auth):**
+
+1. Auth logs around the failed attempt: the failing query is named there.
+2. Login rows with NULL in columns GoTrue expects to be strings, a known cause
+   after rows are created or edited with SQL:
+   ```sql
+   select id, email
+   from auth.users
+   where confirmation_token is null
+      or recovery_token is null
+      or email_change is null
+      or email_change_token_new is null
+      or email_change_token_current is null
+      or reauthentication_token is null;
+   ```
+   Repair with `update auth.users set <column> = '' where <column> is null;`
+   for each column returned (take a backup first).
+3. Any trigger or hook attached to `auth.users`:
+   ```sql
+   select tgname, tgenabled, pg_get_triggerdef(oid)
+   from pg_trigger
+   where tgrelid = 'auth.users'::regclass and not tgisinternal;
+   ```
+4. Whether the failure is for *every* email or only certain ones: if every
+   sign-in fails, it is a platform fault (check the Supabase status page); if
+   only specific rows do, step 2 is the likely cause.
