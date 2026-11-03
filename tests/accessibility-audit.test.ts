@@ -160,11 +160,16 @@ describe("labels and screen-reader announcements (defects A5, A6 fixed)", () => 
   });
 
   test("new-inspection dialog labels are programmatically associated", () => {
+    // The association is made by FormField: it renders <Label htmlFor={id}> and
+    // hands the same id to the control. The dialog must give both fields an id,
+    // and FormField must keep wiring label -> control (and the error text).
     const src = read("src/pages/Inspections.tsx");
-    expect(src).toContain('htmlFor="new-insp-site"');
     expect(src).toContain('id="new-insp-site"');
-    expect(src).toContain('htmlFor="new-insp-template"');
     expect(src).toContain('id="new-insp-template"');
+    const field = read("src/components/FormField.tsx");
+    expect(field).toContain("htmlFor={id}");
+    expect(field).toContain('"aria-describedby"');
+    expect(field).toContain('"aria-invalid"');
   });
 
   test("draft-form question controls are label-associated by answer key", () => {

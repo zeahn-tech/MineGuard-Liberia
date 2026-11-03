@@ -15,6 +15,7 @@ import {
   markRecoveryPending,
   markRecoveryReady,
 } from "./recovery";
+import { consumeDeliberateSignOut, markDeliberateSignOut, setSignedOutNotice } from "./session-expiry";
 
 export const SUPABASE_URL = "https://ewukneoblhogtreeekqc.supabase.co";
 export const SUPABASE_ANON_KEY = "sb_publishable_g_SOzhE21n76m1-FAx-c5Q_CzUi7VMi";
@@ -77,7 +78,13 @@ supabase.auth.onAuthStateChange((event, session: Session | null) => {
   // A recovery link signs the person in; remember WHY so the app asks for a new
   // password instead of treating it as a normal sign-in.
   if (event === "PASSWORD_RECOVERY") markRecoveryPending();
-  if (event === "SIGNED_OUT") clearRecovery();
+  if (event === "SIGNED_OUT") {
+    clearRecovery();
+    // A sign-out nobody asked for (sign-in expired or revoked, or ended in
+    // another tab) must not be silent: leave a note for the sign-in screen.
+    const deliberate = consumeDeliberateSignOut();
+    if (!deliberate && currentUserId !== null) setSignedOutNotice("ended");
+  }
   setUserId(session?.user?.id ?? null);
 });
 
@@ -402,6 +409,7 @@ export function backendError(err: unknown): Error {
  *  network call, so it works exactly when the connection does not. Offline
  *  queue and drafts live under other keys and are left untouched. */
 export async function resetLocalSession(): Promise<void> {
+  markDeliberateSignOut(); // the person chose this: no "you were signed out" notice
   try {
     await Promise.race([
       supabase.auth.signOut({ scope: "local" }),

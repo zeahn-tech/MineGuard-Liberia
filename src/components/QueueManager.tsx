@@ -71,6 +71,7 @@ import {
 import { storeBackend, subscribeStore, type StoreBackend } from "@/lib/offline-store";
 import { syncQueue } from "@/lib/offline-queue";
 import { CONFLICT_PREFIX } from "@/lib/offline-retry";
+import { toastError } from "@/lib/feedback";
 
 const KIND_LABEL: Record<QueueKind, string> = {
   inspectionDraft: "Inspection draft",
@@ -195,7 +196,7 @@ export default function QueueManager({
       else if (parked > 0) toast.info("Nothing synced — some items need review");
       else toast.info("Nothing to sync right now");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Sync failed");
+      toastError(err, { action: "sync your saved work" });
     } finally {
       setBusy(false);
       await refresh();
@@ -220,7 +221,7 @@ export default function QueueManager({
     } catch (err) {
       // NotSavedError — the discard did not persist; say so instead of
       // pretending the item is gone.
-      toast.error(err instanceof Error ? err.message : "Could not discard");
+      toastError(err, { action: "discard that item" });
     } finally {
       setConfirm(null);
       await refresh();
@@ -264,7 +265,7 @@ export default function QueueManager({
       URL.revokeObjectURL(url);
       toast.success("Queue exported as JSON");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Export failed");
+      toastError(err, { action: "export the data" });
     }
   };
 

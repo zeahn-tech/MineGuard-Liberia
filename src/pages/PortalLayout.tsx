@@ -9,6 +9,9 @@ import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { sectionJump } from "@/lib/utils";
 import NotificationBell from "@/components/NotificationBell";
+import { OfflineBanner } from "@/components/OfflineBanner";
+import { LightPathProvider } from "@/components/PageLoading";
+import { SessionGuard } from "@/components/SessionGuard";
 import {
   Dialog,
   DialogContent,
@@ -74,6 +77,7 @@ import {
 } from "@/lib/offline-sync";
 import { QueueManagerButton } from "@/components/QueueManager";
 import { toast } from "sonner";
+import { toastError, toastSuccess } from "@/lib/feedback";
 
 const NAV: { to: string; label: string; icon: typeof Map; adminOnly?: boolean }[] = [
   { to: "/portal", label: "Command Center", icon: LayoutDashboard },
@@ -201,7 +205,7 @@ export default function PortalLayout() {
         refresh();
       },
       onError: (e) =>
-        toast.error(e instanceof Error ? e.message : "Background sync failed"),
+        toastError(e, { action: "sync your saved work in the background" }),
     });
     schedulerRef.current = scheduler;
     return () => {
@@ -256,7 +260,7 @@ export default function PortalLayout() {
       if (result?.seeded) toast.success("Demo data seeded (synthetic records)");
       else toast.info("Database already contains data — seed skipped");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Seed failed");
+      toastError(e, { action: "load the demo data" });
     }
   };
 
@@ -272,10 +276,10 @@ export default function PortalLayout() {
         scope: (targetRole === "registrar" ? "national" : targetScope) as "national" | "county" | "site",
         county: targetCounty || undefined,
       });
-      toast.success(`Role assigned to ${targetEmail}`);
+      toastSuccess({ title: `Role assigned to ${targetEmail}.`, reassure: "The assignment is recorded in the audit log." });
       setShowProvision(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to assign role");
+      toastError(e, { action: "assign that role" });
     }
   };
 
@@ -283,6 +287,7 @@ export default function PortalLayout() {
 
   return (
     <div className="min-h-screen bg-background">
+      <SessionGuard />
       {/* Accessibility: keyboard users skip the sidebar straight to content */}
       <a
         href="#main-content"
@@ -402,9 +407,21 @@ export default function PortalLayout() {
                 )}
               </div>
             </div>
+            <OfflineBanner variant="app" pending={pendingItems.length} />
           </header>
           <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">
-            <Outlet />
+            {/* The light path a loading screen offers on a poor connection:
+                incident reports are saved on the device first, so they work
+                however weak the signal is. */}
+            <LightPathProvider
+              value={{
+                label: "Report an incident",
+                to: "/portal/incidents",
+                hint: "Reports are saved on this device first and sent when your connection allows.",
+              }}
+            >
+              <Outlet />
+            </LightPathProvider>
           </main>
 
           <footer className="border-t border-border px-4 py-4 text-[11px] text-muted-foreground md:px-8">

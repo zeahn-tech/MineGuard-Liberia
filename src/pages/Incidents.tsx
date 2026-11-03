@@ -17,9 +17,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { toast } from "sonner";
-import { CloudOff, Plus } from "lucide-react";
+import { CloudOff, HeartPulse, Plus } from "lucide-react";
 import { enqueueIncidentReport, newClientRef, syncQueue } from "@/lib/offline-queue";
+import { PageLoading } from "@/components/PageLoading";
+import { EmptyState } from "@/components/EmptyState";
+import { FormField, invalidControlClass } from "@/components/FormField";
+import { useFormDraft } from "@/hooks/use-form-draft";
+import { toastError, toastSuccess } from "@/lib/feedback";
+import { INCIDENT_FIELD_ORDER, localDateString, validateIncident, type IncidentField } from "@/lib/form-rules";
+import { firstInvalid, focusField, hasErrors, type FieldErrors } from "@/lib/validation";
 
 const TYPES = [
   { value: "fatality", label: "Fatality" },
@@ -47,6 +53,7 @@ export default function Incidents() {
     1,
   );
   const incidents = feed.rows;
+  const [reportOpen, setReportOpen] = useState(false);
   const sites = useQuery(api.sites.list);
   const setStatus = useMutation(api.records.setIncidentStatus);
   const { user } = useAuth();
@@ -56,9 +63,9 @@ export default function Incidents() {
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     try {
       await fn();
-      toast.success(ok);
+      toastSuccess({ title: ok });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Action failed");
+      toastError(e, { action: "update the incident" });
     }
   };
 
@@ -73,15 +80,28 @@ export default function Incidents() {
             attributable and time-stamped.
           </p>
         </div>
-        {sites && sites.length > 0 && <ReportDialog />}
+        {sites && sites.length > 0 && <ReportDialog open={reportOpen} onOpenChange={setReportOpen} />}
       </header>
 
       {incidents.length === 0 && feed.loading ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>
+        <PageLoading shape="list" label="incidents" />
       ) : incidents.length === 0 ? (
-        <div className="paper p-10 text-center text-sm text-muted-foreground">
-          No incidents recorded in your scope.
-        </div>
+        <EmptyState
+          icon={HeartPulse}
+          title="No incidents recorded yet"
+          why={
+            sites && sites.length === 0
+              ? "Incidents are reported against a registered site, and none are registered in your area yet. An administrator registers sites."
+              : "Nothing has been reported for the sites in your area. Reports appear here as soon as they are submitted, including ones sent from the field."
+          }
+          action={
+            sites && sites.length === 0
+              ? { label: "Go to Sites", to: "/portal/sites" }
+              : sites
+                ? { label: "Report an incident", onClick: () => setReportOpen(true) }
+                : undefined
+          }
+        />
       ) : (
         <div className="scrollbar-hide overflow-x-auto rounded-sm border border-border">
           <table className="w-full text-sm">
@@ -163,28 +183,68 @@ export default function Incidents() {
   );
 }
 
-function ReportDialog() {
-  const sites = useQuery(api.sites.list);
-  const report = useMutation(api.records.reportIncident);
-  const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
+function blankIncident() {
+  return {
     siteId: "",
     type: "injury",
     severity: "medium",
     description: "",
-    occurredAt: new Date().toISOString().slice(0, 10),
+    occurredAt: localDateString(),
     fatalities: "",
     injured: "",
-  });
+  };
+}
+
+const FIELD_IDS: Record<IncidentField, string> = {
+  siteId: "incident-site",
+  description: "incident-description",
+  occurredAt: "incident-date",
+  fatalities: "incident-fatalities",
+  injured: "incident-injured",
+};
+
+function ReportDialog({
+  open: openProp,
+  onOpenChange,
+}: {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const sites = useQuery(api.sites.list);
+  const report = useMutation(api.records.reportIncident);
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = onOpenChange ?? setOpenState;
+  const [saving, setSaving] = useState(false);
+  // The form is kept safe on the device as it is filled in, so a timeout,
+  // a dropped connection or a closed tab never costs the person their account.
+  const { form, setForm, restoredAt, hasDraft, saveFailed, clearDraft, discardDraft } = useFormDraft(
+    "incident-report",
+    blankIncident(),
+  );
+  const [errors, setErrors] = useState<FieldErrors<IncidentField>>({});
+  const [attempted, setAttempted] = useState(false);
+
+  // Edit a field: store it, and re-check just that form live once the person
+  // has tried to submit (so a fixed field clears its own message straight away).
+  const change = (patch: Partial<typeof form>) => {
+    const next = { ...form, ...patch };
+    setForm(next);
+    if (attempted) setErrors(validateIncident(next));
+  };
 
   const submit = async () => {
     if (saving) return;
-    if (!form.siteId || !form.description.trim()) {
-      toast.error("Site and description are required.");
+    const found = validateIncident(form);
+    setErrors(found);
+    setAttempted(true);
+    if (hasErrors(found)) {
+      const first = firstInvalid(found, INCIDENT_FIELD_ORDER);
+      if (first) focusField(FIELD_IDS[first]);
       return;
     }
     setSaving(true);
+    let queued = false;
     try {
       // Offline-first: enqueue BEFORE any network attempt. If online the item
       // syncs immediately; if offline it stays queued and syncs on reconnect
@@ -203,23 +263,51 @@ function ReportDialog() {
         fatalities: form.fatalities ? Number(form.fatalities) : undefined,
         injured: form.injured ? Number(form.injured) : undefined,
       });
+      queued = true;
+      const siteId = form.siteId;
       const result = await syncQueue({ reportIncident: report });
-      if (result.synced > 0) toast.success("Incident recorded");
-      else toast.info("Saved and queued — will sync when online.");
+      if (result.synced > 0) {
+        toastSuccess({
+          title: "Incident reported.",
+          reassure: "It's saved and now visible to everyone responsible for this site.",
+          next: { label: "View site", to: `/portal/sites/${siteId}` },
+        });
+      } else {
+        toastSuccess({
+          title: "Saved on this device.",
+          reassure: "It will be sent automatically as soon as you're back online — nothing is lost, and you can keep working.",
+        });
+      }
       setOpen(false);
-      setForm({ ...form, siteId: "", description: "", fatalities: "", injured: "" });
+      setForm(blankIncident());
+      clearDraft();
+      setErrors({});
+      setAttempted(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to record incident");
+      if (queued) {
+        // The report is already safe on the device; only the send failed.
+        toastSuccess({
+          title: "Saved on this device.",
+          reassure: "We couldn't send it just now, so it will be retried automatically. Nothing is lost.",
+        });
+        setOpen(false);
+        setForm(blankIncident());
+        clearDraft();
+      } else {
+        toastError(e, { action: "save the incident report" });
+      }
     } finally {
       setSaving(false);
     }
   };
 
+  const failing = Object.values(errors).filter(Boolean).length;
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button>
-          <Plus className="size-4" /> Report incident
+          <Plus className="size-4" /> {hasDraft ? "Resume draft" : "Report incident"}
         </Button>
       </DialogTrigger>
       <DialogContent className="paper max-h-[85vh] overflow-y-auto">
@@ -230,26 +318,40 @@ function ReportDialog() {
             but must be accurate.
           </DialogDescription>
         </DialogHeader>
+        {restoredAt && (
+          <p role="status" className="flex flex-wrap items-center gap-x-2 rounded-sm border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+            <span>
+              Restored your unsaved draft from{" "}
+              {new Date(restoredAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.
+            </span>
+            <button type="button" className="font-medium text-foreground underline underline-offset-2" onClick={discardDraft}>
+              Start over
+            </button>
+          </p>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label>Site *</Label>
-            <select
-              className="w-full rounded-sm border border-input bg-card px-3 py-2 text-sm"
-              value={form.siteId}
-              onChange={(e) => setForm({ ...form, siteId: e.target.value })}
-            >
-              <option value="">Select site…</option>
-              {(sites ?? []).map((s) => (
-                <option key={s._id} value={s._id}>{s.code} — {s.name}</option>
-              ))}
-            </select>
-          </div>
+          <FormField label="Site" required id={FIELD_IDS.siteId} error={errors.siteId} className="sm:col-span-2">
+            {(a11y) => (
+              <select
+                {...a11y}
+                className={`w-full rounded-sm border border-input bg-card px-3 py-2 text-sm ${invalidControlClass}`}
+                value={form.siteId}
+                onChange={(e) => change({ siteId: e.target.value })}
+              >
+                <option value="">Select site...</option>
+                {(sites ?? []).map((s) => (
+                  <option key={s._id} value={s._id}>{s.code} — {s.name}</option>
+                ))}
+              </select>
+            )}
+          </FormField>
           <div className="space-y-1.5">
-            <Label>Type</Label>
+            <Label htmlFor="incident-type">Type</Label>
             <select
+              id="incident-type"
               className="w-full rounded-sm border border-input bg-card px-3 py-2 text-sm"
               value={form.type}
-              onChange={(e) => setForm({ ...form, type: e.target.value })}
+              onChange={(e) => change({ type: e.target.value })}
             >
               {TYPES.map((t) => (
                 <option key={t.value} value={t.value}>{t.label}</option>
@@ -257,55 +359,76 @@ function ReportDialog() {
             </select>
           </div>
           <div className="space-y-1.5">
-            <Label>Severity</Label>
+            <Label htmlFor="incident-severity">Severity</Label>
             <select
+              id="incident-severity"
               className="w-full rounded-sm border border-input bg-card px-3 py-2 text-sm"
               value={form.severity}
-              onChange={(e) => setForm({ ...form, severity: e.target.value })}
+              onChange={(e) => change({ severity: e.target.value })}
             >
               {SEVERITIES.map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
           </div>
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label>What happened? *</Label>
-            <Textarea
-              rows={4}
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="Factual account of the event…"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Date occurred</Label>
-            <Input
-              type="date"
-              value={form.occurredAt}
-              onChange={(e) => setForm({ ...form, occurredAt: e.target.value })}
-            />
-          </div>
+          <FormField label="What happened?" required id={FIELD_IDS.description} error={errors.description} className="sm:col-span-2">
+            {(a11y) => (
+              <Textarea
+                {...a11y}
+                rows={4}
+                value={form.description}
+                onChange={(e) => change({ description: e.target.value })}
+                placeholder="Factual account of the event..."
+              />
+            )}
+          </FormField>
+          <FormField label="Date occurred" required id={FIELD_IDS.occurredAt} error={errors.occurredAt}>
+            {(a11y) => (
+              <Input
+                {...a11y}
+                type="date"
+                max={localDateString()}
+                value={form.occurredAt}
+                onChange={(e) => change({ occurredAt: e.target.value })}
+              />
+            )}
+          </FormField>
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Fatalities</Label>
-              <Input
-                type="number"
-                min={0}
-                value={form.fatalities}
-                onChange={(e) => setForm({ ...form, fatalities: e.target.value })}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Injured</Label>
-              <Input
-                type="number"
-                min={0}
-                value={form.injured}
-                onChange={(e) => setForm({ ...form, injured: e.target.value })}
-              />
-            </div>
+            <FormField label="Fatalities" id={FIELD_IDS.fatalities} error={errors.fatalities}>
+              {(a11y) => (
+                <Input
+                  {...a11y}
+                  type="number"
+                  min={0}
+                  value={form.fatalities}
+                  onChange={(e) => change({ fatalities: e.target.value })}
+                />
+              )}
+            </FormField>
+            <FormField label="Injured" id={FIELD_IDS.injured} error={errors.injured}>
+              {(a11y) => (
+                <Input
+                  {...a11y}
+                  type="number"
+                  min={0}
+                  value={form.injured}
+                  onChange={(e) => change({ injured: e.target.value })}
+                />
+              )}
+            </FormField>
           </div>
         </div>
+        {attempted && failing > 0 && (
+          <p role="alert" className="text-sm text-destructive">
+            {failing === 1 ? "One field needs attention" : `${failing} fields need attention`} — marked above.
+          </p>
+        )}
+        {saveFailed && (
+          <p role="status" className="text-xs text-muted-foreground">
+            This device couldn't keep a draft of this form (its storage may be full or blocked). Finish and submit
+            it now so nothing is lost.
+          </p>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
           <Button onClick={submit} disabled={saving}>
@@ -314,7 +437,7 @@ function ReportDialog() {
                 <CloudOff className="size-4" /> Queue for sync
               </>
             ) : saving ? (
-              "Recording…"
+              "Recording..."
             ) : (
               "Record incident"
             )}

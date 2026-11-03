@@ -24,6 +24,10 @@ import { draftFromSite, parsePositionInput, type PositionDraft, EMPTY_POSITION_D
 import type { Id } from "@/lib/entity-types";
 import { RiskAiPanel } from "../components/RiskAiPanel";
 import { useNow } from "@/hooks/use-now";
+import { PageLoading } from "@/components/PageLoading";
+import { FieldError } from "@/components/ui/field";
+import { toastError, toastSuccess } from "@/lib/feedback";
+import { focusField } from "@/lib/validation";
 
 export default function SiteDetail() {
   const now = useNow();
@@ -51,11 +55,13 @@ export default function SiteDetail() {
   const [locDraft, setLocDraft] = useState<PositionDraft>(EMPTY_POSITION_DRAFT);
   const [verifyOn, setVerifyOn] = useState(false);
   const [verifySource, setVerifySource] = useState("");
+  const [locError, setLocError] = useState<string | undefined>();
+  const [verifyError, setVerifyError] = useState<string | undefined>();
   const [savingLoc, setSavingLoc] = useState(false);
 
   if (!siteId) return <p className="text-sm text-muted-foreground">No site selected.</p>;
   if (site === undefined)
-    return <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>;
+    return <PageLoading shape="detail" label="site" />;
   if (site === null)
     return <p className="py-16 text-center text-sm text-muted-foreground">Site not found or access denied.</p>;
 
@@ -70,7 +76,7 @@ export default function SiteDetail() {
       toast.success(`Status set to ${newStatus.replace(/_/g, " ")}`);
       setStatusOpen(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed");
+      toastError(e, { action: "save that change" });
     }
   };
 
@@ -84,12 +90,20 @@ export default function SiteDetail() {
   const saveLocation = async () => {
     if (savingLoc) return;
     const pos = parsePositionInput(locDraft.latitude, locDraft.longitude);
-    if (pos.kind !== "ok") {
-      toast.error(pos.kind === "error" ? pos.error : "Set a position first: use your location, pick it on the map, or type it.");
-      return;
-    }
-    if (verifyOn && !verifySource.trim()) {
-      toast.error("Say what the position was verified against (for example: surveyed with a GPS receiver).");
+    const posIssue =
+      pos.kind === "ok"
+        ? undefined
+        : pos.kind === "error"
+          ? pos.error
+          : "Set a position first: use your location, pick it on the map, or type it.";
+    const verifyIssue =
+      verifyOn && !verifySource.trim()
+        ? "Say what the position was verified against, for example: surveyed with a GPS receiver."
+        : undefined;
+    setLocError(posIssue);
+    setVerifyError(verifyIssue);
+    if (pos.kind !== "ok" || verifyIssue) {
+      if (!posIssue && verifyIssue) focusField("verify-source");
       return;
     }
     setSavingLoc(true);
@@ -109,10 +123,15 @@ export default function SiteDetail() {
           accuracyM: locDraft.accuracyM,
         });
       }
-      toast.success(verifyOn ? "Position saved and verified" : "Position saved — it is now on the map");
+      toastSuccess({
+        title: verifyOn ? "Position saved and verified." : "Position saved.",
+        reassure: verifyOn
+          ? "It is on the map as a verified position, with your source recorded."
+          : "It is on the map, shown as unverified until someone checks it.",
+      });
       setLocOpen(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message.replace(/^[A-Z_]+:\s*/, "") : "Failed to save position");
+      toastError(e, { action: "save the position" });
     } finally {
       setSavingLoc(false);
     }
@@ -231,7 +250,7 @@ export default function SiteDetail() {
 
         <RecordSection title="Corrective actions">
           {cas === undefined ? (
-            <Empty text="Loading…" />
+            <PageLoading shape="list" label="corrective actions" rows={2} compact />
           ) : cas.length === 0 ? (
             <Empty text="No corrective actions for this site." />
           ) : (
@@ -300,7 +319,8 @@ export default function SiteDetail() {
               {site.geoVerified && " Moving a verified position removes its verification."}
             </DialogDescription>
           </DialogHeader>
-          <SiteLocationPicker value={locDraft} onChange={setLocDraft} disabled={savingLoc} />
+          <SiteLocationPicker value={locDraft} onChange={(d) => { setLocDraft(d); setLocError(undefined); }} disabled={savingLoc} />
+          {locError && <FieldError>{locError}</FieldError>}
           <div className="space-y-2 border-t border-border pt-3">
             <div className="flex items-start gap-2">
               <Checkbox
@@ -314,13 +334,22 @@ export default function SiteDetail() {
               </Label>
             </div>
             {verifyOn && (
-              <Input
-                value={verifySource}
-                onChange={(e) => setVerifySource(e.target.value)}
-                placeholder="Verified against… e.g. surveyed with a GPS receiver, 2026-10"
-                disabled={savingLoc}
-                aria-label="What the position was verified against"
-              />
+              <>
+                <Input
+                  id="verify-source"
+                  value={verifySource}
+                  onChange={(e) => {
+                    setVerifySource(e.target.value);
+                    if (verifyError) setVerifyError(e.target.value.trim() ? undefined : verifyError);
+                  }}
+                  placeholder="Verified against… e.g. surveyed with a GPS receiver, 2026-10"
+                  disabled={savingLoc}
+                  aria-label="What the position was verified against"
+                  aria-invalid={verifyError ? true : undefined}
+                  aria-describedby={verifyError ? "verify-source-error" : undefined}
+                />
+                {verifyError && <FieldError id="verify-source-error">{verifyError}</FieldError>}
+              </>
             )}
             <p className="text-[11px] text-muted-foreground">
               Leave unticked unless someone has checked it: a GPS fix or a map click is recorded as an

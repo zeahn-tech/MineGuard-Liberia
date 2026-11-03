@@ -27,6 +27,8 @@ import { Camera, Loader2, ShieldAlert, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
+import { FormField } from "@/components/FormField";
+import { errorSentence } from "@/lib/error-messages";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Administrator",
@@ -62,6 +64,9 @@ export default function ProfileSettings() {
   const nameValue = name ?? user.name ?? "";
   const titleValue = title ?? user.jobTitle ?? "";
   const dirty = nameValue.trim() !== (user.name ?? "") || titleValue.trim() !== (user.jobTitle ?? "");
+  // Say WHY Save is unavailable, at the field, instead of just greying it out.
+  const nameProblem =
+    dirty && nameValue.trim().length < 2 ? "Enter your full name — at least 2 characters." : undefined;
 
   async function save() {
     setSaving(true);
@@ -72,7 +77,7 @@ export default function ProfileSettings() {
       setTitle(null);
       toast.success("Profile saved.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save.");
+      setError(errorSentence(e, { action: "save your profile" }));
     } finally {
       setSaving(false);
     }
@@ -90,7 +95,7 @@ export default function ProfileSettings() {
       await api.account.uploadAvatar(small);
       toast.success("Photo updated.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "The photo could not be updated.");
+      setError(errorSentence(e, { action: "update your photo" }));
     } finally {
       setPhotoBusy(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -105,7 +110,7 @@ export default function ProfileSettings() {
       await api.account.removeAvatar();
       toast.success("Photo removed.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "The photo could not be removed.");
+      setError(errorSentence(e, { action: "remove your photo" }));
     } finally {
       setPhotoBusy(false);
     }
@@ -122,7 +127,7 @@ export default function ProfileSettings() {
         setConfirmOpen(true);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not check whether the account can be deleted.");
+      setError(errorSentence(e, { action: "check whether your account can be deleted" }));
     }
   }
 
@@ -135,7 +140,7 @@ export default function ProfileSettings() {
       toast.success("Your account has been deleted.");
       navigate("/", { replace: true });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "The account could not be deleted.");
+      setError(errorSentence(e, { action: "delete your account" }));
     } finally {
       setDeleting(false);
     }
@@ -181,10 +186,11 @@ export default function ProfileSettings() {
       <Card>
         <CardHeader><CardTitle className="text-base">Your details</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-1">
-            <Label htmlFor="pf-name">Full name</Label>
-            <Input id="pf-name" value={nameValue} maxLength={120} autoComplete="name" onChange={(e) => setName(e.target.value)} />
-          </div>
+          <FormField label="Full name" id="pf-name" error={nameProblem} className="space-y-1">
+            {(a11y) => (
+              <Input {...a11y} value={nameValue} maxLength={120} autoComplete="name" onChange={(e) => setName(e.target.value)} />
+            )}
+          </FormField>
           <div className="space-y-1">
             <Label htmlFor="pf-title">Job title</Label>
             <Input id="pf-title" value={titleValue} maxLength={120} autoComplete="organization-title" onChange={(e) => setTitle(e.target.value)} />

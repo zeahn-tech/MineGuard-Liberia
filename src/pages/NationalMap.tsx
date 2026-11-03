@@ -44,6 +44,8 @@ import {
   sameCountyName,
 } from "@/lib/gis";
 import { ConsentTileLayer, MapTilesNotice } from "@/components/ConsentTileLayer";
+import { NoResults } from "@/components/NoResults";
+import { suggestQuery, vocabularyOf } from "@/lib/did-you-mean";
 
 const LEVELS: GeoVerificationLevel[] = ["verified", "unverified", "reported"];
 
@@ -226,6 +228,20 @@ export default function NationalMap() {
     const rank = (f: MapFeature) => (f.verification === "verified" ? 1 : 0);
     return [...visibleFeatures].sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label));
   }, [visibleFeatures]);
+
+  // "Did you mean": words from every loaded feature label, and a corrected search
+  // only when it would really return something under the current layers/filters.
+  const searchVocabulary = useMemo(() => vocabularyOf(features.map((f) => f.label)), [features]);
+  const textSuggestion = useMemo(() => {
+    if (!filters.text.trim() || searchResults.length > 0) return null;
+    const fixed = suggestQuery(filters.text, searchVocabulary);
+    if (!fixed) return null;
+    const hits = applyFilters(
+      features.filter((f) => visibleLayers[f.layer]),
+      { ...filters, text: fixed },
+    );
+    return hits.length > 0 ? fixed : null;
+  }, [filters, searchResults.length, searchVocabulary, features, visibleLayers]);
 
   const toggleCounty = (c: string) =>
     setFilters((p) => ({
@@ -478,7 +494,18 @@ export default function NationalMap() {
             />
           </div>
           <ul className="max-h-[45vh] divide-y divide-border overflow-y-auto">
-            {searchResults.length === 0 && (
+            {searchResults.length === 0 && filters.text.trim() !== "" && !loading && (
+              <li className="p-2">
+                <NoResults
+                  query={filters.text.trim()}
+                  suggestion={textSuggestion}
+                  onUseSuggestion={(t) => setFilters((p) => ({ ...p, text: t }))}
+                  onClear={() => setFilters((p) => ({ ...p, text: "" }))}
+                  hint="No feature name contains those words. Check the spelling, or clear the search — your layers and filters may also be hiding it."
+                />
+              </li>
+            )}
+            {searchResults.length === 0 && (filters.text.trim() === "" || loading) && (
               <li className="px-3 py-6 text-center text-xs text-muted-foreground" role="status">
                 {loading
                   ? "Loading map features…"

@@ -21,12 +21,13 @@ import {
   CheckCircle2,
   ClipboardList,
   FileCheck2,
-  Loader2,
   Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router";
 import { useNow } from "@/hooks/use-now";
+import { PageLoading } from "@/components/PageLoading";
+import { EmptyState } from "@/components/EmptyState";
 
 const DAY = 86_400_000;
 
@@ -140,9 +141,7 @@ export default function OperatorOverview() {
         </CardHeader>
         <CardContent className="space-y-2">
           {obligationsQ === undefined && (
-            <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" /> Loading…
-            </p>
+            <PageLoading shape="list" label="corrective actions" rows={2} compact />
           )}
           {obligationsQ !== undefined && openCAs.length === 0 && (
             <p className="text-sm text-muted-foreground">
@@ -194,14 +193,14 @@ export default function OperatorOverview() {
         </CardHeader>
         <CardContent>
           {sitesQ === undefined && (
-            <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" /> Loading…
-            </p>
+            <PageLoading shape="list" label="sites" rows={2} compact />
           )}
           {sitesQ !== undefined && (sitesQ ?? []).length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              No sites are registered to your company yet.
-            </p>
+            <EmptyState
+              icon={Building2}
+              title="No sites registered to your company yet"
+              why="The Ministry registers each site once it is authorized, so there is nothing to inspect or respond to yet. Ask the oversight administrator to register your sites."
+            />
           )}
           <div className="grid gap-3 sm:grid-cols-2">
             {(sitesQ ?? []).map((s) => (

@@ -20,6 +20,9 @@ import { Building2, FileCheck2, Loader2, MapPin } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
+import { PageLoading } from "@/components/PageLoading";
+import { toastError } from "@/lib/feedback";
+import { EmptyState } from "@/components/EmptyState";
 
 export function OperatorSites() {
   const sitesQ = useQuery(api.sites.list);
@@ -37,14 +40,14 @@ export function OperatorSites() {
       </div>
 
       {sitesQ === undefined && (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Loading…
-        </p>
+        <PageLoading shape="list" label="sites" />
       )}
       {sitesQ !== undefined && (sitesQ ?? []).length === 0 && (
-        <p className="text-sm text-muted-foreground">
-          No sites are registered to your company yet.
-        </p>
+        <EmptyState
+          icon={Building2}
+          title="No sites registered to your company yet"
+          why="The Ministry registers each site once it is authorized. Until then there is nothing to inspect, report on or respond to — ask the oversight administrator to register your sites."
+        />
       )}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -99,7 +102,7 @@ function SiteTeam({ siteId }: { siteId: string }) {
       else await api.workforce.assignSite({ memberId, siteId });
       toast.success(assigned ? "Removed from this site." : "Assigned to this site.");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not update the assignment.");
+      toastError(e, { action: "update the assignment" });
     } finally {
       setBusy(null);
     }
@@ -183,9 +186,7 @@ export function OperatorSiteDetail() {
       </Link>
 
       {siteQ === undefined && (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Loading…
-        </p>
+        <PageLoading shape="detail" label="site" />
       )}
       {siteQ === null && (
         <Card className="paper rounded-none border-border shadow-none">

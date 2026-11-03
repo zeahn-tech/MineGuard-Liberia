@@ -24,6 +24,7 @@ import {
   uploadWithProgress,
 } from "./supabase";
 import { clearRecovery } from "./recovery";
+import { markDeliberateSignOut, setSignedOutNotice } from "./session-expiry";
 import { validateTemplateSections } from "./template-schema";
 import {
   validateRiskSettings,
@@ -1686,8 +1687,8 @@ function liveDoc<T>(
 // ---------------------------------------------------------------------------
 
 /** Map Supabase auth errors to the stable message tokens Auth.tsx renders. */
-function authErrorMessage(
-  err: { message?: string } | null | undefined,
+export function authErrorMessage(
+  err: { message?: string; status?: number; code?: string } | null | undefined,
 ): string {
   const m = (err?.message ?? "").toLowerCase();
   if (m.includes("invalid login credentials")) return "INCORRECT_CREDENTIALS";
@@ -1709,6 +1710,17 @@ function authErrorMessage(
   if (m.includes("different from the old password") || m.includes("same_password"))
     return "SAME_PASSWORD";
   if (m.includes("aal2") || m.includes("insufficient_aal")) return "MFA_REQUIRED";
+  // A login that exists but has been closed (account deletion with records kept).
+  if (m.includes("banned") || err?.code === "user_banned") return "ACCOUNT_DISABLED";
+  // The auth service itself failed (e.g. "Database error querying schema"): never
+  // pass its internals on to the screen.
+  if (
+    m.includes("database error") ||
+    m.includes("querying schema") ||
+    err?.code === "unexpected_failure" ||
+    (typeof err?.status === "number" && err.status >= 500)
+  )
+    return "AUTH_SERVICE_ERROR";
   return err?.message ?? "AUTH_FAILED";
 }
 
@@ -1844,17 +1856,41 @@ export async function signInGuest() {
 }
 
 export async function signOut() {
+  markDeliberateSignOut();
   clearRecovery(); // a deliberate sign-out also abandons a pending password reset
+  const leavingUserId = authUserId();
   await supabase.auth.signOut();
   profileCache = null;
   // Shared-device hygiene: remove cached offline data unless unsynced work is
   // still waiting (never destroy field data that has not reached the server).
+  // In-progress report forms follow the same rule as inspection drafts.
   try {
     const m = await import("./offline-queue");
-    await m.wipeOfflineDataIfSynced();
+    const wiped = await m.wipeOfflineDataIfSynced();
+    if (wiped && leavingUserId) {
+      const d = await import("./form-drafts");
+      await d.clearAllFormDrafts(leavingUserId);
+    }
   } catch {
     /* best effort — never block sign-out */
   }
+}
+
+/**
+ * Sign out because the person has been inactive (see session-expiry.ts).
+ *
+ * Unlike signOut(), this deliberately KEEPS everything on the device: the
+ * offline queue, inspection drafts and in-progress report forms. The whole
+ * point is that a timeout must never cost anyone their work; the sign-in
+ * screen says so, and the work is there when they sign back in. (An explicit
+ * "Sign out" still follows the shared-device rule above.)
+ */
+export async function signOutIdle() {
+  setSignedOutNotice("idle");
+  markDeliberateSignOut();
+  clearRecovery();
+  await supabase.auth.signOut();
+  profileCache = null;
 }
 
 // ---------------------------------------------------------------------------

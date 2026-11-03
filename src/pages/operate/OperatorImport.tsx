@@ -21,7 +21,8 @@ import {
 import type { ImportOutcome, ImportStatus } from "@/lib/types";
 import { Download, FileUp, Loader2, MailCheck, ShieldAlert } from "lucide-react";
 import { useRef, useState } from "react";
-import { toast } from "sonner";
+import { PageLoading } from "@/components/PageLoading";
+import { toastSuccess } from "@/lib/feedback";
 
 type Stage = "choose" | "checking" | "preview" | "importing" | "done";
 
@@ -64,7 +65,7 @@ export default function OperatorImport() {
   const [sending, setSending] = useState(false);
   const [key] = useState(() => crypto.randomUUID());
 
-  if (me === undefined) return <p className="p-4 text-sm text-muted-foreground md:p-6" role="status">Loading…</p>;
+  if (me === undefined) return <div className="p-4 md:p-6"><PageLoading shape="form" label="import" /></div>;
   const allowed = me?.memberStatus === "active" && (me.orgRole === "company_admin" || me.orgRole === "onboarding_officer");
   if (!me || !allowed) {
     return (
@@ -164,7 +165,12 @@ export default function OperatorImport() {
           break;
         }
       }
-      if (totalSent > 0) toast.success(`${totalSent} invitation email${totalSent === 1 ? "" : "s"} sent.`);
+      if (totalSent > 0)
+        toastSuccess({
+          title: `${totalSent} invitation email${totalSent === 1 ? "" : "s"} sent.`,
+          reassure: "Each person joins only after they accept the email link, which is valid for 7 days. You can track and revoke invitations on the Team page.",
+          next: { label: "View team", to: "/operate/team" },
+        });
     } catch (e) {
       setError(errMsg(e));
     } finally {

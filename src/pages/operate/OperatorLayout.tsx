@@ -23,6 +23,9 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import NotificationBell from "@/components/NotificationBell";
+import { OfflineBanner } from "@/components/OfflineBanner";
+import { LightPathProvider } from "@/components/PageLoading";
+import { SessionGuard } from "@/components/SessionGuard";
 import { RequireOperator } from "@/components/RequireAuth";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -62,6 +65,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { toast } from "sonner";
+import { toastError } from "@/lib/feedback";
 
 const OPERATOR_NAV = [
   { to: "/operate", label: "Overview", icon: ClipboardList, end: true },
@@ -178,7 +182,7 @@ export default function OperatorLayout() {
         refresh();
       },
       onError: (e) =>
-        toast.error(e instanceof Error ? e.message : "Background sync failed"),
+        toastError(e, { action: "sync your saved work in the background" }),
     });
     schedulerRef.current = scheduler;
     return () => {
@@ -226,6 +230,7 @@ export default function OperatorLayout() {
   return (
     <RequireOperator>
       <div className="min-h-dvh bg-background">
+        <SessionGuard />
         {/* Accessibility: keyboard users skip the sidebar straight to content */}
         <a
           href="#main-content"
@@ -332,6 +337,7 @@ export default function OperatorLayout() {
                   )}
                 </div>
               </div>
+              <OfflineBanner variant="app" pending={pendingCount} />
             </header>
 
             <main id="main-content" tabIndex={-1} className="min-w-0 flex-1">
@@ -341,7 +347,17 @@ export default function OperatorLayout() {
                   Access to company records is paused by the Ministry; nothing has been deleted.
                 </p>
               )}
-              <Outlet />
+              {/* Light path on a poor connection: reports are saved on the device
+                  first and sent when the signal allows. */}
+              <LightPathProvider
+                value={{
+                  label: "Report an incident",
+                  to: "/operate/incidents",
+                  hint: "Reports are saved on this device first and sent when your connection allows.",
+                }}
+              >
+                <Outlet />
+              </LightPathProvider>
             </main>
 
             <footer className="border-t border-border px-6 py-3 text-center text-[11px] text-muted-foreground print:hidden">
