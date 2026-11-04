@@ -1,4 +1,3 @@
-
 name: Deploy Supabase Account Delete Function
 
 on:
@@ -44,8 +43,9 @@ jobs:
           version: latest
 
       - name: Deploy account-delete
+        shell: bash
         run: |
           supabase functions deploy account-delete \
-            --project-ref "$SUPABASE_PROJECT_ID" \
+            --remote="$SUPABASE_PROJECT_ID" \
             --use-api \
             --yes
