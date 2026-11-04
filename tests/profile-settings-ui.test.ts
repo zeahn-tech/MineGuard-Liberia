@@ -58,7 +58,9 @@ describe("profile page contracts", () => {
   });
   test("every shell has a route and a link to it", () => {
     const m = read("src/main.tsx");
-    expect((m.match(/path="profile" element=\{<ProfileSettings \/>\}/g) ?? []).length).toBe(3);
+    // One route per shell; the operator's wraps the page in the admin's padding
+    // (see app-shell-parity), so allow an optional <div …> around it.
+    expect((m.match(/path="profile"\s+element=\{\s*(?:<div[^>]*>\s*)?<ProfileSettings \/>/g) ?? []).length).toBe(3);
     expect(read("src/pages/PortalLayout.tsx")).toContain('"/portal/profile"');
     expect(read("src/pages/operate/OperatorLayout.tsx")).toContain('"/operate/profile"');
     expect(read("src/pages/RegistryLayout.tsx")).toContain('"/registry/profile"');
