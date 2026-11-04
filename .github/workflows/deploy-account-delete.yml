@@ -43,9 +43,10 @@ jobs:
         with:
           version: latest
 
-      - name: Deploy account-delete
+        - name: Deploy account-delete
         run: |
           supabase functions deploy account-delete \
-            --project-ref "$SUPABASE_PROJECT_ID" \
+            --remote="$SUPABASE_PROJECT_ID" \
             --use-api \
             --yes
+      
