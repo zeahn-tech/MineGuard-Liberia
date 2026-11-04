@@ -157,7 +157,17 @@ createRoot(document.getElementById("root")!).render(
               <Route path="corrective-actions" element={<OperatorCorrectiveActions />} />
               <Route path="incidents" element={<OperatorIncidents />} />
               <Route path="team" element={<OperatorTeam />} />
-              <Route path="profile" element={<ProfileSettings />} />
+              {/* The operator shell leaves each page to own its gutter, but the profile page is
+                  shared with the admin and registry shells (whose <main> pads it). Give it the
+                  same padding here so it looks identical. */}
+              <Route
+                path="profile"
+                element={
+                  <div className="px-4 py-6 md:px-8 md:py-8">
+                    <ProfileSettings />
+                  </div>
+                }
+              />
               <Route path="import" element={<OperatorImport />} />
               <Route path="security" element={<OperatorSecurity />} />
             </Route>
