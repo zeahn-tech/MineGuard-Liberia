@@ -17,6 +17,8 @@ import { Check, Loader2, ShieldAlert, X } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
+import { errorSentence } from "@/lib/error-messages";
+import { PageLoading } from "@/components/PageLoading";
 
 function Row({ r }: { r: SiteRequest }) {
   const [busy, setBusy] = useState(false);
@@ -29,7 +31,7 @@ function Row({ r }: { r: SiteRequest }) {
       await api.siteRequests.approve(r);
       toast.success(`${r.name} registered for ${r.companyName}.`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not approve.");
+      toast.error(errorSentence(e, { action: "approve the request" }));
     } finally {
       setBusy(false);
     }
@@ -41,7 +43,7 @@ function Row({ r }: { r: SiteRequest }) {
       toast.success("Request declined.");
       setDeclining(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not decline.");
+      toast.error(errorSentence(e, { action: "decline the request" }));
     } finally {
       setBusy(false);
     }
@@ -113,7 +115,7 @@ export default function SiteRequests() {
         <h1 className="display mt-1 text-2xl sm:text-3xl">Site requests</h1>
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Companies ask; you register. Approving creates the site in Mining sites.</p>
       </header>
-      {requests === undefined ? <p className="text-sm text-muted-foreground" role="status">Loading…</p> : (
+      {requests === undefined ? <PageLoading shape="list" label="site requests" /> : (
         <>
           <section className="space-y-3" aria-label="Waiting for review">
             <h2 className="text-sm font-semibold">Waiting for review ({pending.length})</h2>

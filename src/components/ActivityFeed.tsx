@@ -5,6 +5,9 @@ import { api } from "@/lib/backend";
 import type { ActivityItem } from "@/lib/types";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { errorSentence } from "@/lib/error-messages";
+import { PageLoading } from "@/components/PageLoading";
+import { EmptyState } from "@/components/EmptyState";
 
 type Cursor = { atRaw: string; id: string };
 interface Loaded {
@@ -30,7 +33,7 @@ export function ActivityFeed({ organizationId, siteId }: { organizationId: strin
         setFailed(null);
       })
       .catch((e: unknown) => {
-        if (live) setFailed(e instanceof Error ? e.message : "The history could not be loaded.");
+        if (live) setFailed(errorSentence(e, { action: "load the history" }));
       });
     return () => {
       live = false;
@@ -43,7 +46,7 @@ export function ActivityFeed({ organizationId, siteId }: { organizationId: strin
       const p = await api.activity.page({ organizationId, siteId, before: cursor });
       setLoaded((cur) => (cur && cur.scope === scope ? { scope, items: [...cur.items, ...p.items], next: p.next } : cur));
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : "The history could not be loaded.");
+      setFailed(errorSentence(e, { action: "load more history" }));
     } finally {
       setBusy(false);
     }
@@ -58,8 +61,8 @@ export function ActivityFeed({ organizationId, siteId }: { organizationId: strin
     );
   }
   const current = loaded && loaded.scope === scope ? loaded : null;
-  if (!current) return <p className="text-sm text-muted-foreground" role="status">Loading history…</p>;
-  if (current.items.length === 0) return <p className="text-sm text-muted-foreground">Nothing has happened yet.</p>;
+  if (!current) return <PageLoading shape="list" label="history" compact />;
+  if (current.items.length === 0) return <EmptyState title="No activity yet" why="Changes to people, invitations, sites and their records will be listed here as they happen." />;
 
   return (
     <div className="space-y-3">

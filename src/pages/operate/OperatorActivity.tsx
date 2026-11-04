@@ -7,10 +7,11 @@ import { ActivityFeed } from "@/components/ActivityFeed";
 import { api } from "@/lib/backend";
 import { useQuery } from "@/lib/backend-react";
 import { ShieldAlert } from "lucide-react";
+import { PageLoading } from "@/components/PageLoading";
 
 export default function OperatorActivity() {
   const me = useQuery(api.workforce.myMembership);
-  if (me === undefined) return <p className="p-4 text-sm text-muted-foreground md:p-6" role="status">Loading…</p>;
+  if (me === undefined) return <div className="p-4 md:p-6"><PageLoading shape="list" label="activity" /></div>;
   if (!me || me.orgRole !== "company_admin" || me.memberStatus !== "active") {
     return (
       <div className="p-4 md:p-6">

@@ -25,6 +25,8 @@ import type { AdminUserRow } from "@/lib/types";
 import { Loader2, Search, ShieldAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { errorSentence } from "@/lib/error-messages";
+import { PageLoading } from "@/components/PageLoading";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Administrator", supervisor: "Supervisor", inspector: "Inspector", registrar: "Company registrar", operator: "Company user",
@@ -63,7 +65,7 @@ export default function AdminUsers() {
         setMore(r.length === 25);
         setLoadError(null);
       })
-      .catch((e: unknown) => live && setLoadError(e instanceof Error ? e.message : "People could not be loaded."));
+      .catch((e: unknown) => live && setLoadError(errorSentence(e, { action: "load people" })));
     return () => {
       live = false;
     };
@@ -94,7 +96,7 @@ export default function AdminUsers() {
     setPassword("");
     setError(null);
     if (m === "account") {
-      api.adminUsers.blockers({ userId: row.userId }).then(setBlockers).catch((e: Error) => setError(e.message));
+      api.adminUsers.blockers({ userId: row.userId }).then(setBlockers).catch((e: unknown) => setError(errorSentence(e, { action: "check whether this account can be removed" })));
     }
   }
   const close = () => { if (!busy) { setTarget(null); setMode(null); } };
@@ -115,7 +117,7 @@ export default function AdminUsers() {
       setMode(null);
       setReload((n) => n + 1);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "That did not work.");
+      setError(errorSentence(e, { action: "remove this account" }));
     } finally {
       setBusy(false);
     }
@@ -140,7 +142,7 @@ export default function AdminUsers() {
 
       {loadError && <p role="alert" className="text-sm text-destructive">{loadError}</p>}
       {rows === null && !loadError ? (
-        <p className="text-sm text-muted-foreground" role="status">Loading people…</p>
+        <PageLoading shape="list" label="people" />
       ) : rows && rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">No one matches.</p>
       ) : (

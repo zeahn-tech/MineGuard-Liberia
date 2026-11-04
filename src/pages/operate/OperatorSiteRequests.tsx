@@ -15,6 +15,9 @@ import { COUNTIES } from "@/lib/counties";
 import { Loader2, ShieldAlert } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { errorSentence } from "@/lib/error-messages";
+import { PageLoading } from "@/components/PageLoading";
+import { EmptyState } from "@/components/EmptyState";
 
 const EMPTY = { name: "", county: "", district: "", community: "", mineralType: "", latitude: "", longitude: "", notes: "" };
 const STATUS_LABEL = { pending: "Waiting for the Ministry", approved: "Approved", rejected: "Declined", cancelled: "Cancelled" } as const;
@@ -26,7 +29,7 @@ export default function OperatorSiteRequests() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (me === undefined) return <p className="p-4 text-sm text-muted-foreground md:p-6" role="status">Loading…</p>;
+  if (me === undefined) return <div className="p-4 md:p-6"><PageLoading shape="list" label="site requests" /></div>;
   if (!me || me.orgRole !== "company_admin" || me.memberStatus !== "active") {
     return (
       <div className="p-4 md:p-6">
@@ -63,7 +66,7 @@ export default function OperatorSiteRequests() {
       setForm(EMPTY);
       toast.success("Request sent to the Ministry.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not send the request.");
+      setError(errorSentence(e, { action: "send the request" }));
     } finally {
       setBusy(false);
     }
@@ -112,8 +115,8 @@ export default function OperatorSiteRequests() {
       <Card>
         <CardHeader><CardTitle className="text-base">Your requests</CardTitle></CardHeader>
         <CardContent>
-          {requests === undefined ? <p className="text-sm text-muted-foreground" role="status">Loading requests…</p> : mine.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No requests yet.</p>
+          {requests === undefined ? <PageLoading shape="list" label="your requests" compact /> : mine.length === 0 ? (
+            <EmptyState title="No site requests" why="When you ask the Ministry to register a site, the request and its decision appear here." />
           ) : (
             <ul className="space-y-2">
               {mine.map((r) => (
@@ -126,7 +129,7 @@ export default function OperatorSiteRequests() {
                   <div className="flex items-center gap-2">
                     <Badge variant={r.status === "approved" ? "secondary" : r.status === "rejected" ? "destructive" : "outline"}>{STATUS_LABEL[r.status]}</Badge>
                     {r.status === "pending" && (
-                      <Button size="sm" variant="ghost" onClick={() => void api.siteRequests.cancel({ requestId: r.id }).catch((e: Error) => toast.error(e.message))}>Cancel</Button>
+                      <Button size="sm" variant="ghost" onClick={() => void api.siteRequests.cancel({ requestId: r.id }).catch((e: unknown) => toast.error(errorSentence(e, { action: "cancel the request" })))}>Cancel</Button>
                     )}
                   </div>
                 </li>

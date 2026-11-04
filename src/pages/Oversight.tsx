@@ -10,6 +10,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/lib/backend";
 import { useQuery } from "@/lib/backend-react";
 import { Link } from "react-router";
+import { PageLoading } from "@/components/PageLoading";
+import { EmptyState } from "@/components/EmptyState";
 
 function Stat({ label, value, tone }: { label: string; value: number; tone?: "bad" }) {
   return (
@@ -42,7 +44,7 @@ export default function Oversight() {
       </header>
 
       {rows === undefined ? (
-        <p className="text-sm text-muted-foreground" role="status">Loading oversight…</p>
+        <PageLoading shape="table" label="company oversight" />
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -58,7 +60,7 @@ export default function Oversight() {
             </p>
           )}
           {rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No companies in your scope yet.</p>
+            <EmptyState title="No companies in your scope" why="Companies appear here once they have sites you are responsible for." />
           ) : (
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full min-w-[40rem] text-left text-sm">

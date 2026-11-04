@@ -15,6 +15,8 @@ import { useQuery } from "@/lib/backend-react";
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { errorSentence } from "@/lib/error-messages";
+import { PageLoading } from "@/components/PageLoading";
 
 type Draft = { contactEmail: string; contactPhone: string; address: string; website: string; description: string };
 
@@ -25,7 +27,7 @@ export default function OperatorCompany() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (me === undefined || (me && profile === undefined)) return <p className="p-4 text-sm text-muted-foreground md:p-6" role="status">Loading…</p>;
+  if (me === undefined || (me && profile === undefined)) return <div className="p-4 md:p-6"><PageLoading shape="form" label="company profile" /></div>;
   if (!me || !profile) return <div className="p-4 md:p-6"><div className="paper p-6 text-sm">No company is linked to this account.</div></div>;
 
   const canEdit = me.orgRole === "company_admin" && me.memberStatus === "active" && me.companyStatus === "approved";
@@ -48,7 +50,7 @@ export default function OperatorCompany() {
       setDraft(null);
       toast.success("Company profile saved.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save.");
+      setError(errorSentence(e, { action: "save the company profile" }));
     } finally {
       setSaving(false);
     }
