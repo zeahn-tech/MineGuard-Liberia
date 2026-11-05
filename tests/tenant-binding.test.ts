@@ -3,7 +3,7 @@
 // Regression for: complete_staff_profile() let any signed-in user re-point
 // their company binding by typing a company name. All sessions roll back.
 // ---------------------------------------------------------------------------
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { asUser, getDb, getFixture } from "./helpers/pglite-db";
@@ -16,6 +16,22 @@ beforeAll(async () => {
   await db.exec(
     readFileSync(join(import.meta.dir, "..", "supabase", "migrations", "0024_self_service_tenant_lockdown.sql"), "utf8"),
   );
+});
+
+// This file re-applies 0024 on the shared database so it can assert 0024's own behaviour. That
+// overwrites the guard function that migration 0025 later replaced (the version that honours the
+// transaction-local mg.org_assign flag set by trusted RPCs). Restore the real end state, or every
+// test file that runs after this one in the same process sees the stale guard and fails with
+// FORBIDDEN_TENANT_CHANGE. (File order differs between machines, so this only showed up in CI.)
+afterAll(async () => {
+  const db = await getDb();
+  const m25 = readFileSync(
+    join(import.meta.dir, "..", "supabase", "migrations", "0025_company_status_membership_invitations.sql"),
+    "utf8",
+  );
+  const guard = m25.match(/create or replace function public\.mg_guard_profile_self_tenant\(\)[\s\S]*?\$mg\$;/);
+  if (!guard) throw new Error("0025 guard definition not found");
+  await db.exec(guard[0]);
 });
 
 async function denied(p: Promise<unknown>): Promise<string> {
