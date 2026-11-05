@@ -83,6 +83,74 @@ export interface Company {
   members: CompanyAdminMember[];
 }
 
+/** One row of the Ministry's cross-company oversight summary (migration 0039). */
+export interface CompanyOversightRow {
+  organizationId: string;
+  name: string;
+  status: CompanyStatus;
+  sites: number;
+  openActions: number;
+  overdueActions: number;
+  incidents30d: number;
+  lastInspection?: number;
+}
+
+/** A person as an administrator sees them when finding someone to remove (migration 0039). */
+export interface AdminUserRow {
+  userId: string;
+  email: string | null;
+  name: string | null;
+  role?: string;
+  company?: string;
+  orgRole?: string;
+  memberId?: string;
+  createdAt: number;
+  removed: boolean;
+}
+
+/** One line of a company's / site's activity history (migration 0038). Curated: no emails, ids or raw records. */
+export interface ActivityItem {
+  id: string;
+  /** The server's own timestamp text (microsecond precision) — the paging cursor travels as this. */
+  atRaw: string;
+  at: number;
+  who: string;
+  subject: string;
+  what: string;
+  detail?: string;
+}
+
+/** The company's own contact details (migration 0037). Name and status are Ministry-only. */
+export interface CompanyProfile {
+  id: string;
+  name: string;
+  status: CompanyStatus;
+  contactEmail?: string;
+  contactPhone?: string;
+  address?: string;
+  website?: string;
+  description?: string;
+}
+
+export interface SiteRequest {
+  id: string;
+  organizationId: string;
+  companyName: string;
+  name: string;
+  county: string;
+  district?: string;
+  community?: string;
+  mineralType?: string;
+  latitude?: number;
+  longitude?: number;
+  notes?: string;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  decisionNote?: string;
+  siteId?: string;
+  createdAt: number;
+  decidedAt?: number;
+}
+
 /** One row of a company's workforce (migration 0026). */
 export interface WorkforceMember {
   memberId: string;

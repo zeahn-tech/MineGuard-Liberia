@@ -1,6 +1,6 @@
 # 18 — Multi-company, site and workforce administration
 
-Status: implemented on branch `feature/multi-company-admin` (migrations 0024–0035).
+Status: implemented on branch `feature/multi-company-admin` (migrations 0024–0039; 0036 is `main`'s site-scoped update policies).
 **Not applied to any live database.** Phase E (bulk CSV onboarding + the dedicated
 Onboarding officer role) is built; see §10.
 
@@ -274,3 +274,29 @@ Retrying is safe at every step. Deploy: `supabase functions deploy account-delet
 
 Rollback: drop the four functions, the `avatars` policies and bucket, and the two columns;
 restore the 0034 notifications guard.
+
+## 15. Completion pass: company profile, site requests, activity history, oversight, user removal (migrations 0037–0039)
+
+* **Company profile (0037).** Contact email/phone, address, https website and description
+  are maintained by the company administrator (validated in the database). The registered
+  name, kind and status stay Ministry-only. Company page: *Company profile*.
+* **Site registration requests (0037).** A company cannot create sites; its administrator
+  *requests* one (details only). The Ministry approves — which registers the site through
+  the normal validated flow (code, coordinates, provenance) and links it — or declines with a
+  reason the company sees. Audit-trailed; both sides are notified.
+* **Activity history (0038).** `mg_company_activity`: a curated, read-only history for company
+  administrators (company-wide) and for the site manager assigned to a site (that site only).
+  Names and plain words; Ministry staff appear as "Ministry"; never emails, ids or raw records.
+  The raw audit trail stays Ministry-only. Paged by a (time, id) cursor.
+* **Company oversight (0039).** `mg_company_oversight` (runs as the caller, so row-level
+  security scopes every number): per company — sites, open/overdue corrective actions,
+  incidents in 30 days, last inspection — for Ministry staff. Page: *Company Oversight*.
+* **Administrator removes a user (0039).** *Users* (administrators): find a person; either end
+  their company membership (account stays) or remove the account — same blockers and the same
+  two outcomes as self-service deletion, plus: never oneself, the exact email must be typed,
+  the administrator's password is re-verified by the server, and an audit entry records who
+  removed whom. Company administrators removing their own members was already built (Team).
+Deploy: run 0037, 0038, 0039; redeploy `account-delete`.
+
+Rollback: drop the new functions and the request table/columns; restore the 0035 deletion
+functions (0039 turns them into thin wrappers over internal cores).

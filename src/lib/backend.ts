@@ -97,7 +97,12 @@ import {
   type SiteBoundary,
   type UserProfile,
   type Company,
+  type ActivityItem,
+  type AdminUserRow,
+  type CompanyOversightRow,
+  type CompanyProfile,
   type CompanySearchResult,
+  type SiteRequest,
   type ImportOutcome,
   type ImportStatus,
   type MyMembership,
@@ -1919,7 +1924,8 @@ type DerivedNotification = {
     | "org_request"
     | "org_decision"
     | "org_role"
-    | "org_status";
+    | "org_status"
+    | "org_site_request";
   /** Deadline notifications are state; the state is part of the stored key so
    *  due-soon → overdue is a NEW (unread, urgent) notification. */
   state?: "overdue" | "soon";
@@ -2259,6 +2265,274 @@ async function legacyCompanyList(): Promise<Company[]> {
 
 export const api = {
   // ----------------------------------------------------------------- users
+  /** Ministry cross-company oversight (migration 0039): numbers are scoped by the database to the caller. */
+  oversight: {
+    list: () =>
+      live<CompanyOversightRow[]>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase.rpc("mg_company_oversight");
+          if (error) throw backendError(error);
+          return ((data ?? []) as AnyRow[]).map((r) => ({
+            organizationId: r.organization_id as string,
+            name: r.name as string,
+            status: ((r.status as CompanyStatus) ?? "approved") as CompanyStatus,
+            sites: Number(r.sites ?? 0),
+            openActions: Number(r.open_actions ?? 0),
+            overdueActions: Number(r.overdue_actions ?? 0),
+            incidents30d: Number(r.incidents_30d ?? 0),
+            lastInspection: r.last_inspection ? Date.parse(r.last_inspection as string) : undefined,
+          }));
+        },
+        ["organizations", "sites", "corrective_actions", "incidents", "inspections"],
+      ),
+  },
+
+  /** Administrators finding and removing people (migration 0039). Every call is re-checked by the database. */
+  adminUsers: {
+    search: async (args: { query: string; offset?: number }): Promise<AdminUserRow[]> => {
+      await requireAdminUser();
+      const { data, error } = await supabase.rpc("mg_admin_user_directory", {
+        p_query: args.query || null,
+        p_limit: 25,
+        p_offset: args.offset ?? 0,
+      });
+      if (error) throw new Error("People could not be loaded.");
+      return ((data ?? []) as AnyRow[]).map((r) => ({
+        userId: r.user_id as string,
+        email: (r.email as string) ?? null,
+        name: (r.name as string) ?? null,
+        role: (r.role as string) ?? undefined,
+        company: (r.company as string) ?? undefined,
+        orgRole: (r.org_role as string) ?? undefined,
+        memberId: (r.member_id as string) ?? undefined,
+        createdAt: Date.parse(r.created_at as string),
+        removed: Boolean(r.removed),
+      }));
+    },
+    blockers: async (args: { userId: string }): Promise<{ code: string; message: string }[]> => {
+      await requireAdminUser();
+      const { data, error } = await supabase.rpc("mg_admin_account_deletion_blockers", { p_target: args.userId });
+      if (error) throw new Error(error.message.replace(/^[A-Z_]+:\s*/, "") || "Could not check.");
+      return (data ?? []) as { code: string; message: string }[];
+    },
+    /** Ends the person's company membership only; the account stays. */
+    removeFromCompany: async (args: { memberId: string }) => {
+      await requireAdminUser();
+      const { error } = await supabase.rpc("mg_revoke_member", { p_member_id: args.memberId });
+      if (error) throw friendlyInviteError(error.message);
+    },
+    /** Re-checks the administrator's password on the server, then removes / anonymizes the account. */
+    deleteAccount: async (args: { userId: string; confirmEmail: string; password: string }): Promise<{ mode: "removed" | "anonymized" }> => {
+      await requireAdminUser();
+      const { data, error } = await supabase.functions.invoke("account-delete", {
+        body: { confirm: "DELETE", targetUserId: args.userId, confirmEmail: args.confirmEmail, password: args.password },
+      });
+      if (error) {
+        let message = "The account could not be removed. Nothing was changed.";
+        try {
+          const ctx = (error as { context?: Response }).context;
+          const parsed = ctx ? ((await ctx.json()) as { message?: string }) : null;
+          if (parsed?.message) message = parsed.message;
+        } catch {
+          /* not JSON */
+        }
+        throw new Error(message);
+      }
+      return { mode: (data as { mode: "removed" | "anonymized" }).mode };
+    },
+  },
+
+  /** Curated activity history for a company, or for one site (migration 0038). */
+  activity: {
+    PAGE: 25,
+    page: async (args: {
+      organizationId: string;
+      siteId?: string;
+      before?: { atRaw: string; id: string };
+    }): Promise<{ items: ActivityItem[]; next: { atRaw: string; id: string } | null }> => {
+      await requireAuthed();
+      const limit = 25;
+      const { data, error } = await supabase.rpc("mg_company_activity", {
+        p_org: args.organizationId,
+        p_site: args.siteId ?? null,
+        p_limit: limit,
+        p_before: args.before?.atRaw ?? null,
+        p_before_id: args.before?.id ?? null,
+      });
+      if (error) throw new Error("The history could not be loaded.");
+      const items = ((data ?? []) as AnyRow[]).map((r) => ({
+        id: r.id as string,
+        atRaw: r.at as string,
+        at: Date.parse(r.at as string),
+        who: r.who as string,
+        subject: r.subject as string,
+        what: r.what as string,
+        detail: (r.detail as string) ?? undefined,
+      }));
+      const last = items[items.length - 1];
+      return { items, next: items.length === limit && last ? { atRaw: last.atRaw, id: last.id } : null };
+    },
+  },
+
+  /** A company's own contact details (migration 0037). */
+  companyProfile: {
+    get: (args: { organizationId: string }) =>
+      live<CompanyProfile | null>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase
+            .from("organizations")
+            .select("id,name,status,contact_email,contact_phone,address,website,description")
+            .eq("id", args.organizationId)
+            .maybeSingle();
+          if (error) throw backendError(error);
+          if (!data) return null;
+          const r = data as AnyRow;
+          return {
+            id: r.id as string,
+            name: r.name as string,
+            status: ((r.status as CompanyStatus) ?? "approved") as CompanyStatus,
+            contactEmail: (r.contact_email as string) ?? undefined,
+            contactPhone: (r.contact_phone as string) ?? undefined,
+            address: (r.address as string) ?? undefined,
+            website: (r.website as string) ?? undefined,
+            description: (r.description as string) ?? undefined,
+          };
+        },
+        ["organizations"],
+      ),
+    update: async (args: {
+      organizationId: string;
+      contactEmail: string;
+      contactPhone: string;
+      address: string;
+      website: string;
+      description: string;
+    }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_update_company_profile", {
+        p_org: args.organizationId,
+        p_contact_email: args.contactEmail,
+        p_contact_phone: args.contactPhone,
+        p_address: args.address,
+        p_website: args.website,
+        p_description: args.description,
+      });
+      if (error) throw new Error(error.message.replace(/^[A-Z_]+:\s*/, "") || "Could not save.");
+    },
+  },
+
+  /** Site registration requests (migration 0037): companies ask, the Ministry decides. */
+  siteRequests: {
+    list: () =>
+      live<SiteRequest[]>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase
+            .from("site_registration_requests")
+            .select("*, organizations(name)")
+            .order("created_at", { ascending: false })
+            .limit(200);
+          if (error) throw backendError(error);
+          return ((data ?? []) as AnyRow[]).map((r) => ({
+            id: r.id as string,
+            organizationId: r.organization_id as string,
+            companyName: ((r.organizations as AnyRow | null)?.name as string) ?? "",
+            name: r.name as string,
+            county: r.county as string,
+            district: (r.district as string) ?? undefined,
+            community: (r.community as string) ?? undefined,
+            mineralType: (r.mineral_type as string) ?? undefined,
+            latitude: r.latitude === null ? undefined : Number(r.latitude),
+            longitude: r.longitude === null ? undefined : Number(r.longitude),
+            notes: (r.notes as string) ?? undefined,
+            status: r.status as SiteRequest["status"],
+            decisionNote: (r.decision_note as string) ?? undefined,
+            siteId: (r.site_id as string) ?? undefined,
+            createdAt: Date.parse(r.created_at as string),
+            decidedAt: r.decided_at ? Date.parse(r.decided_at as string) : undefined,
+          }));
+        },
+        ["site_registration_requests"],
+      ),
+    request: async (args: {
+      organizationId: string;
+      name: string;
+      county: string;
+      district?: string;
+      community?: string;
+      mineralType?: string;
+      latitude?: number;
+      longitude?: number;
+      notes?: string;
+    }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_request_site", {
+        p_org: args.organizationId,
+        p_name: args.name,
+        p_county: args.county,
+        p_district: args.district ?? null,
+        p_community: args.community ?? null,
+        p_mineral: args.mineralType ?? null,
+        p_lat: args.latitude ?? null,
+        p_lng: args.longitude ?? null,
+        p_notes: args.notes ?? null,
+      });
+      if (error) throw new Error(error.message.replace(/^[A-Z_]+:\s*/, "") || "Could not send the request.");
+    },
+    cancel: async (args: { requestId: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_cancel_site_request", { p_id: args.requestId });
+      if (error) throw new Error("This request can no longer be cancelled.");
+    },
+    /** Ministry: approving registers the site through the normal validated flow, then links it. */
+    approve: async (request: SiteRequest) => {
+      await requireAdminUser();
+      const siteId = await api.sites.create({
+        name: request.name,
+        operatorName: request.companyName,
+        county: request.county,
+        district: request.district,
+        community: request.community,
+        mineralType: request.mineralType,
+        latitude: request.latitude,
+        longitude: request.longitude,
+        geoSource: "manual_entry",
+        notes: request.notes,
+      });
+      // The site now exists. Linking it to the request is retried once; if it still fails the
+      // person is told NOT to register the site again (it is already in Mining sites).
+      let linkError: unknown = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const { error } = await supabase.rpc("mg_decide_site_request", {
+          p_id: request.id,
+          p_decision: "approved",
+          p_note: null,
+          p_site: siteId,
+        });
+        linkError = error;
+        if (!error) break;
+      }
+      if (linkError) {
+        throw new Error(
+          `"${request.name}" was registered (find it in Mining sites) but the request could not be marked approved. Do not register it again — reload this page and try Approve once more, or tell an administrator.`,
+        );
+      }
+      return siteId;
+    },
+    reject: async (args: { requestId: string; note: string }) => {
+      await requireAdminUser();
+      const { error } = await supabase.rpc("mg_decide_site_request", {
+        p_id: args.requestId,
+        p_decision: "rejected",
+        p_note: args.note,
+        p_site: null,
+      });
+      if (error) throw new Error(error.message.replace(/^[A-Z_]+:\s*/, "") || "Could not decline the request.");
+    },
+  },
+
   /** The signed-in person's own profile: details, photo, and account deletion (migration 0035). */
   account: {
     updateProfile: async (args: { name: string; jobTitle: string }) => {

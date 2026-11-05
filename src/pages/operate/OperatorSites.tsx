@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ActivityFeed } from "@/components/ActivityFeed";
 import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { Building2, FileCheck2, Loader2, MapPin } from "lucide-react";
@@ -152,6 +153,25 @@ function SiteTeam({ siteId }: { siteId: string }) {
   );
 }
 
+/** Site history (migration 0038): company administrators and the site manager assigned to THIS site. */
+function SiteActivity({ siteId }: { siteId: string }) {
+  const me = useQuery(api.workforce.myMembership);
+  const allowed = me?.memberStatus === "active" && (me.orgRole === "company_admin" || me.orgRole === "site_manager");
+  if (!me || !allowed) return null;
+  return (
+    <Card className="paper rounded-none border-border shadow-none">
+      <CardHeader className="pb-2">
+        <p className="kicker">History</p>
+        <CardTitle className="display text-lg">Site activity</CardTitle>
+        <CardDescription>Changes to this site, its people and its safety records, newest first.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ActivityFeed organizationId={me.organizationId} siteId={siteId} />
+      </CardContent>
+    </Card>
+  );
+}
+
 export function OperatorSiteDetail() {
   const { siteId } = useParams();
   const siteQ = useQuery(api.sites.get, { siteId: siteId ?? "" });
@@ -236,6 +256,7 @@ export function OperatorSiteDetail() {
           </div>
 
           <SiteTeam siteId={siteQ._id} />
+          <SiteActivity siteId={siteQ._id} />
         </>
       )}
     </div>

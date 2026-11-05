@@ -91,6 +91,15 @@ select migration, applied
                 where schemaname = 'public' and tablename = 'incidents'
                   and policyname = 'incidents update'
                   and qual like '%mg_can_access_site%')),
+    ('0037 company profile + site requests',
+       exists (select 1 from fns where proname = 'mg_request_site')
+       and exists (select 1 from information_schema.columns
+                    where table_schema = 'public' and table_name = 'organizations' and column_name = 'contact_email')),
+    ('0038 company activity history',
+       exists (select 1 from fns where proname = 'mg_company_activity')),
+    ('0039 oversight + admin user removal',
+       exists (select 1 from fns where proname = 'mg_admin_prepare_account_deletion')
+       and exists (select 1 from fns where proname = 'mg_company_oversight')),
     ('0018 boundaries published to Realtime',
        exists (
          select 1 from pg_publication_tables

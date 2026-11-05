@@ -78,7 +78,7 @@ describe("operator pages keep the standard page gutter", () => {
     expect(read(`src/pages/operate/${file}`)).toContain("p-4 md:p-6");
   });
 
-  test.each(["OperatorTeam.tsx", "OperatorImport.tsx"])(
+  test.each(["OperatorTeam.tsx", "OperatorImport.tsx", "OperatorCompany.tsx", "OperatorSiteRequests.tsx"])(
     "%s: no unpadded root and no unpadded early-return states",
     (file) => {
       const src = read(`src/pages/operate/${file}`);

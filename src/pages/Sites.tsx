@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { COUNTIES } from "@/lib/counties";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { SiteLocationPicker } from "@/components/SiteLocationPicker";
 import {
@@ -33,11 +34,6 @@ import { toastError, toastSuccess } from "@/lib/feedback";
 import { SITE_FIELD_ORDER, validateSite, type SiteField } from "@/lib/form-rules";
 import { firstInvalid, focusField, hasErrors, type FieldErrors } from "@/lib/validation";
 
-const COUNTIES = [
-  "Bomi", "Bong", "Gbarpolu", "Grand Bassa", "Grand Cape Mount", "Grand Gedeh",
-  "Grand Kru", "Lofa", "Margibi", "Maryland", "Montserrado", "Nimba",
-  "River Cess", "River Gee", "Sinoe",
-];
 
 const STATUS_STYLES: Record<string, string> = {
   active: "text-foreground",

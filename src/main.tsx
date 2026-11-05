@@ -26,6 +26,12 @@ const Companies = lazy(() => import("./pages/Companies.tsx"));
 const RegistryLayout = lazy(() => import("./pages/RegistryLayout.tsx"));
 const CompanyDetail = lazy(() => import("./pages/CompanyDetail.tsx"));
 const ProfileSettings = lazy(() => import("./pages/ProfileSettings.tsx"));
+const Oversight = lazy(() => import("./pages/Oversight.tsx"));
+const AdminUsers = lazy(() => import("./pages/AdminUsers.tsx"));
+const SiteRequests = lazy(() => import("./pages/SiteRequests.tsx"));
+const OperatorActivity = lazy(() => import("./pages/operate/OperatorActivity.tsx"));
+const OperatorCompany = lazy(() => import("./pages/operate/OperatorCompany.tsx"));
+const OperatorSiteRequests = lazy(() => import("./pages/operate/OperatorSiteRequests.tsx"));
 const Invitation = lazy(() => import("./pages/Invitation.tsx"));
 const Join = lazy(() => import("./pages/Join.tsx"));
 const OperatorTeam = lazy(() => import("./pages/operate/OperatorTeam.tsx"));
@@ -157,6 +163,9 @@ createRoot(document.getElementById("root")!).render(
               <Route path="corrective-actions" element={<OperatorCorrectiveActions />} />
               <Route path="incidents" element={<OperatorIncidents />} />
               <Route path="team" element={<OperatorTeam />} />
+              <Route path="company" element={<OperatorCompany />} />
+              <Route path="activity" element={<OperatorActivity />} />
+              <Route path="site-requests" element={<OperatorSiteRequests />} />
               {/* The operator shell leaves each page to own its gutter, but the profile page is
                   shared with the admin and registry shells (whose <main> pads it). Give it the
                   same padding here so it looks identical. */}
@@ -186,6 +195,9 @@ createRoot(document.getElementById("root")!).render(
               <Route index element={<CommandCenter />} />
               <Route path="operate" element={<OperatorPortal />} />
               <Route path="companies" element={<Companies />} />
+              <Route path="site-requests" element={<SiteRequests />} />
+              <Route path="oversight" element={<Oversight />} />
+              <Route path="users" element={<AdminUsers />} />
               <Route path="companies/:companyId" element={<CompanyDetail />} />
               <Route path="sites" element={<Sites />} />
               <Route path="sites/:siteId" element={<SiteDetail />} />
