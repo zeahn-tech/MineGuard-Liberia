@@ -1,0 +1,18 @@
+-- OPTIONAL scheduled retry for queued emergency push messages (not applied by migrations).
+-- Requires the pg_cron and pg_net extensions (Supabase: Database -> Extensions) and the
+-- edge function secret EMERGENCY_SWEEP_SECRET. Replace the two placeholders, then run once
+-- in the SQL editor. Runs every minute; it only touches undelivered rows younger than 6 hours.
+--
+-- select cron.schedule(
+--   'mineguard-emergency-push-sweep',
+--   '* * * * *',
+--   $$ select net.http_post(
+--        url     := 'https://<PROJECT-REF>.supabase.co/functions/v1/emergency-dispatch',
+--        headers := jsonb_build_object('Content-Type','application/json','x-sweep-secret','<EMERGENCY_SWEEP_SECRET>'),
+--        body    := '{"sweep": true}'::jsonb,
+--        timeout_milliseconds := 20000) $$);
+--
+-- Stop it:  select cron.unschedule('mineguard-emergency-push-sweep');
+-- NOTE: this sends push messages only. If pg_cron/pg_net are unavailable, queued rows stay
+-- queued until a manager presses "Retry push delivery". The secret is stored in cron.job —
+-- treat that table as sensitive and rotate EMERGENCY_SWEEP_SECRET if it is ever exposed.

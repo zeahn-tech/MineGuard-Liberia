@@ -13,6 +13,9 @@
 // inspection flow.
 // ---------------------------------------------------------------------------
 
+import { acknowledgeEmergency } from "@/lib/emergency";
+import { EmergencyBanner } from "@/components/emergency/EmergencyBanner";
+import { Siren } from "lucide-react";
 import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import {
@@ -73,6 +76,7 @@ const OPERATOR_NAV = [
   { to: "/operate/findings", label: "Findings", icon: FileCheck2 },
   { to: "/operate/corrective-actions", label: "Corrective Actions", icon: ShieldCheck },
   { to: "/operate/incidents", label: "Incidents", icon: HeartPulse },
+  { to: "/operate/emergency", label: "Emergency", icon: Siren },
   { to: "/operate/team", label: "Team", icon: Users, adminOnly: true },
   { to: "/operate/site-requests", label: "Site requests", icon: MapPinPlus, adminOnly: true },
   { to: "/operate/activity", label: "Activity", icon: History, adminOnly: true },
@@ -173,6 +177,7 @@ export default function OperatorLayout() {
     const api: SyncApi = {
       reportIncident: (a) => apiRef.current.reportIncident(a),
       respondCorrectiveAction: (a) => apiRef.current.respondCorrectiveAction(a),
+      acknowledgeEmergency: (a) => acknowledgeEmergency(a),
     };
     const scheduler = startSyncScheduler({
       api,
@@ -347,6 +352,7 @@ export default function OperatorLayout() {
                   Access to company records is paused by the Ministry; nothing has been deleted.
                 </p>
               )}
+              <EmergencyBanner basePath="/operate" />
               {/* Light path on a poor connection: reports are saved on the device
                   first and sent when the signal allows. */}
               <LightPathProvider

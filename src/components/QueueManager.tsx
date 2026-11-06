@@ -72,6 +72,7 @@ import { storeBackend, subscribeStore, type StoreBackend } from "@/lib/offline-s
 import { syncQueue } from "@/lib/offline-queue";
 import { CONFLICT_PREFIX } from "@/lib/offline-retry";
 import { toastError } from "@/lib/feedback";
+import { acknowledgeEmergency } from "@/lib/emergency";
 
 const KIND_LABEL: Record<QueueKind, string> = {
   inspectionDraft: "Inspection draft",
@@ -79,6 +80,7 @@ const KIND_LABEL: Record<QueueKind, string> = {
   incidentReport: "Incident report",
   observationReport: "Observation",
   caResponse: "CA response",
+  emergencyAck: "Emergency acknowledgment",
 };
 
 function statusChip(item: QueueItem): { label: string; cls: string } {
@@ -101,6 +103,7 @@ function statusChip(item: QueueItem): { label: string; cls: string } {
 
 function payloadSummary(item: QueueItem): string {
   if (item.kind === "caResponse") return item.ca?.operatorNote ?? "";
+  if (item.kind === "emergencyAck") return `Alert update ${item.emergencyAck?.revision ?? ""}`;
   if (item.payload?.description) return item.payload.description;
   if (item.answers) return `${Object.keys(item.answers).length} answer(s)`;
   return "";
@@ -183,6 +186,7 @@ export default function QueueManager({
     reportIncident,
     reportObservation,
     respondCorrectiveAction: respondCa,
+    acknowledgeEmergency,
   };
 
   const retryAll = async () => {

@@ -1,3 +1,5 @@
+import { acknowledgeEmergency } from "@/lib/emergency";
+import { Siren } from "lucide-react";
 import { LegalLinks } from "@/components/LegalLayout";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
@@ -90,6 +92,7 @@ const NAV: { to: string; label: string; icon: typeof Map; adminOnly?: boolean }[
   { to: "/portal/boundaries", label: "Map Boundaries", icon: Layers, adminOnly: true },
   { to: "/portal/inspections", label: "Field Inspections", icon: FileCheck2 },
   { to: "/portal/incidents", label: "Incidents", icon: HeartPulse },
+  { to: "/portal/emergency", label: "Emergency", icon: Siren },
   { to: "/portal/environment", label: "Environment", icon: Leaf },
   { to: "/portal/community", label: "Community Reports", icon: MessageSquareWarning },
   { to: "/portal/reports", label: "Summary Report", icon: FileText },
@@ -196,6 +199,7 @@ export default function PortalLayout() {
       reportIncident: (a) => apiRef.current.reportIncident(a),
       reportObservation: (a) => apiRef.current.reportObservation(a),
       respondCorrectiveAction: (a) => apiRef.current.respondCorrectiveAction(a),
+      acknowledgeEmergency: (a) => acknowledgeEmergency(a),
     };
     const scheduler = startSyncScheduler({
       api,

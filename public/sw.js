@@ -12,7 +12,7 @@
  * Version bump busts the cache on deploy.
  * ------------------------------------------------------------------------- */
 
-const VERSION = "v1.3.2";
+const VERSION = "v1.4.0";
 const CACHE = `mineguard-shell-${VERSION}`;
 
 // ---- Map tiles (GIS-5) — keep in sync with src/lib/map-tiles.ts (pinned by
@@ -253,4 +253,79 @@ self.addEventListener("fetch", (event) => {
       ),
     );
   }
+});
+
+/* ---------------------------------------------------------------------------
+ * EMERGENCY ALERT PUSH (supplementary channel — NOT a replacement for sirens,
+ * radios or the site's approved procedure; delivery is best-effort and depends
+ * on the device, the browser vendor's push service and connectivity).
+ *
+ * The payload deliberately carries NO instructions: only the alert id, event,
+ * title and severity. Instructions are fetched, with authorization, when the
+ * worker opens the app — so a lock-screen preview or a captured push message
+ * never exposes the response instructions. Every field is length-limited and
+ * type-checked; an unparseable payload still shows a generic notification
+ * (browsers require a visible notification for every push).
+ * ------------------------------------------------------------------------- */
+function emergencyPayload(event) {
+  let d = null;
+  try {
+    d = event.data ? event.data.json() : null;
+  } catch (e) {
+    d = null;
+  }
+  const str = (v, max) => (typeof v === "string" ? v.slice(0, max) : "");
+  const id = d && /^[0-9a-f-]{36}$/i.test(str(d.id, 36)) ? d.id : "";
+  const ev = d && ["activated", "updated", "cancelled", "resolved"].includes(d.event) ? d.event : "activated";
+  const sev = d && ["advisory", "warning", "critical"].includes(d.severity) ? d.severity : "warning";
+  return { id, ev, sev, title: str(d && d.title, 120) };
+}
+
+self.addEventListener("push", (event) => {
+  const p = emergencyPayload(event);
+  const verb =
+    p.ev === "updated" ? "Emergency alert UPDATED" :
+    p.ev === "cancelled" ? "Emergency alert CANCELLED" :
+    p.ev === "resolved" ? "Emergency alert resolved" :
+    p.sev === "critical" ? "CRITICAL emergency alert" : "Emergency alert";
+  const open = p.ev === "activated" || p.ev === "updated";
+  event.waitUntil(
+    self.registration.showNotification(verb, {
+      body: (p.title ? p.title + " — " : "") +
+        "Open MineGuard for details. Follow your site's emergency procedure, radio and siren instructions.",
+      tag: "mg-emergency-" + (p.id || "unknown"),
+      renotify: true,
+      requireInteraction: open && p.sev === "critical",
+      icon: "./icons/pwa-192.v2.png",
+      badge: "./icons/pwa-192.v2.png",
+      data: { url: "./#/emergency/" + (p.id || "") },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const raw = (event.notification.data && event.notification.data.url) || "./";
+  const target = new URL(raw, self.registration.scope).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
+      for (const w of wins) {
+        if (w.url.startsWith(self.registration.scope) && "focus" in w) {
+          return w.focus().then((c) => ("navigate" in c ? c.navigate(target) : c));
+        }
+      }
+      return self.clients.openWindow(target);
+    }),
+  );
+});
+
+// The browser rotated or invalidated the subscription. The worker cannot authenticate to
+// MineGuard, so it tells any open window to re-register; otherwise the app re-registers
+// the next time it is opened. Until then this device is NOT reachable by push.
+self.addEventListener("pushsubscriptionchange", (event) => {
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
+      for (const w of wins) w.postMessage({ type: "mg-push-subscription-changed" });
+    }),
+  );
 });

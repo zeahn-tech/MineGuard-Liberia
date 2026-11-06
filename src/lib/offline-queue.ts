@@ -41,7 +41,8 @@ export type QueueKind =
   | "inspectionSubmit"
   | "incidentReport"
   | "observationReport"
-  | "caResponse";
+  | "caResponse"
+  | "emergencyAck";
 
 export type QueueStatus = "pending" | "syncing" | "failed" | "done" | "conflict" | "dead";
 
@@ -90,6 +91,14 @@ export type QueueItem = {
     caId: string;
     operatorNote: string;
     expectedRowVersion?: number;
+  };
+  // Emergency acknowledgment (emergencyAck kind). Only the alert, the revision the worker
+  // actually saw and when they pressed the button; WHO acknowledged is always the signed-in
+  // session on the server, never a field in this payload.
+  emergencyAck?: {
+    alertId: string;
+    revision: number;
+    seenAt: number;
   };
 };
 
@@ -323,6 +332,30 @@ export function enqueueObservationReport(item: {
 }
 
 /**
+ * Enqueue a worker's emergency acknowledgment. Persists BEFORE any network attempt so a
+ * tap made without signal is not lost; the UI must say "saved on this device, not yet
+ * received by the server" until it syncs. (Alert creation/activation/cancellation are
+ * deliberately NOT queueable: a stale queued activation firing later would be dangerous.)
+ */
+export function enqueueEmergencyAck(item: {
+  clientRef: string;
+  siteId: string;
+  siteCode: string;
+  alertId: string;
+  revision: number;
+  seenAt?: number;
+}): Promise<QueueItem> {
+  const { clientRef, siteId, siteCode, alertId, revision, seenAt } = item;
+  return enqueue({
+    kind: "emergencyAck",
+    clientRef,
+    siteId,
+    siteCode,
+    emergencyAck: { alertId, revision, seenAt: seenAt ?? Date.now() },
+  });
+}
+
+/**
  * Enqueue an operator corrective-action response (offline CA response +
  * 409 conflict detection through row_version, OFF-4 / operator parity).
  * Persists BEFORE any network attempt.
@@ -480,6 +513,12 @@ type Api = {
     operatorNote: string;
     expectedRowVersion?: number;
   }) => Promise<unknown>;
+  acknowledgeEmergency?: (args: {
+    alertId: string;
+    revision: number;
+    clientRef: string;
+    seenAt: number;
+  }) => Promise<unknown>;
 };
 
 /** The handler bundle a layout binds into syncQueue (exported for the
@@ -563,6 +602,16 @@ async function runItem(item: QueueItem, api: Api): Promise<string | null> {
       expectedRowVersion: item.ca?.expectedRowVersion,
     });
     return null; // the CA already has a server id
+  }
+  if (item.kind === "emergencyAck") {
+    if (!api.acknowledgeEmergency || !item.emergencyAck) throw new Error("NO_SYNC_HANDLER");
+    await api.acknowledgeEmergency({
+      alertId: item.emergencyAck.alertId,
+      revision: item.emergencyAck.revision,
+      clientRef: item.clientRef,
+      seenAt: item.emergencyAck.seenAt,
+    });
+    return null; // server dedupes on (alert, user, revision)
   }
   throw new Error("NO_SYNC_HANDLER");
 }
