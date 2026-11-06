@@ -22,6 +22,14 @@ const ROWS: Row[] = [
     kind: "Essential",
   },
   {
+    name: "mg.emergency.last.v1",
+    where: "localStorage",
+    purpose:
+      "The last emergency alerts addressed to you that this device received, so a phone that loses signal can still show what it last knew (clearly marked as possibly out of date). Used only for your own alerts; ignored if a different account signs in.",
+    keeps: "Replaced on every successful check; remove it by clearing this site's data.",
+    kind: "Essential",
+  },
+  {
     name: "mg.auth.recovery.v1",
     where: "sessionStorage",
     purpose: "Holds a password-reset in progress so a page reload does not lose it.",

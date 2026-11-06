@@ -36,7 +36,7 @@ afterEach(async () => {
     "0025_company_status_membership_invitations.sql",
     "0026_company_workforce.sql",
     "0027_site_scoped_access.sql",
-    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql",
+    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0040_emergency_alerts.sql",
   ]) {
     await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
   }
@@ -80,7 +80,7 @@ describe("migrations apply to a clean database", () => {
       // two GIS boundary tables (admin_boundaries, site_boundaries) + 0019's
       // risk_config_versions + 0020's ai_request_log + 0021's notifications.
       // …+ 0025's organization_members and organization_invitations.
-      expect(Number(scalar(tables))).toBe(29); // …0037 adds site_registration_requests
+      expect(Number(scalar(tables))).toBe(35); // …0037 adds site_registration_requests; 0040 adds six emergency tables
 
       const rls = await one(
         run,
@@ -90,7 +90,7 @@ describe("migrations apply to a clean database", () => {
       // every table above has RLS, including 0015's two boundary tables and
       // 0019's risk_config_versions + 0020's ai_request_log + 0021's notifications
       // …and 0025's two RPC-only tables.
-      expect(Number(scalar(rls))).toBe(29);
+      expect(Number(scalar(rls))).toBe(35); // 0040: six emergency tables, all RLS-closed
 
       const guards = await one(
         run,
@@ -482,12 +482,12 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
     );
     // 10 domain tables + organizations (0010's integrity stamps).
     // 0025 adds organization_members + organization_invitations.
-    expect(Number(trig.rows[0]?.touch)).toBe(15); // 0029: organization_imports; 0037: site_registration_requests
+    expect(Number(trig.rows[0]?.touch)).toBe(20); // 0029: organization_imports; 0037: site_registration_requests; 0040: five emergency tables
     // …and organizations + site_assignments join the audit trail: exactly one
     // row per mutation, one trigger per table. 0015 adds the two boundary
     // tables (admin_boundaries, site_boundaries) to the trail; 0019 adds
     // risk_config_versions (one audit row per published version).
-    expect(Number(trig.rows[0]?.audit)).toBe(19);
+    expect(Number(trig.rows[0]?.audit)).toBe(24); // 0040: five emergency tables (push_subscriptions deliberately not audited)
     // "audit append" (0001) stays gone; only the staff-read policy remains.
     const pol = await db.query<{ n: string }>(
       `select count(*)::text as n from pg_policies
@@ -555,6 +555,9 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
       const READ_ONLY = new Set([
         "audit_log", "organization_members", "organization_invitations",
         "organization_imports", "organization_import_rows", "site_registration_requests",
+        // 0040: emergency alerts are written only through self-authorizing RPCs
+        "emergency_alerts", "emergency_alert_revisions", "emergency_alert_acks",
+        "emergency_alert_views", "emergency_alert_deliveries", "push_subscriptions",
       ]);
       expect(r.a_ins, `authenticated INSERT on ${r.t}`).toBe(!READ_ONLY.has(r.t));
       expect(r.n_ins, `anon must not hold INSERT on ${r.t}`).toBe(false);
@@ -689,7 +692,7 @@ describe("0010 organizations, scopes & permissions (SEC-5/SITE-1)", () => {
     // + 4 supervisor + 3 inspector + 1 operator, then 0031 adds admin's
     // workforce.oversee and the registrar's single organizations.write) — the
     // unique constraint is the backstop, the count is the drift alarm.
-    expect(Number(first.perms)).toBe(21);
+    expect(Number(first.perms)).toBe(25); // 0040: admin emergency.manage + emergency.read; supervisor and inspector emergency.read
     // The scope enum stands at its six values: the rename-and-repoint
     // sequence skips straight through on re-run (no seven-value creep, no
     // resurrection of the three-value predecessor).
@@ -776,7 +779,9 @@ describe("GAP-0: function execute surface (0011)", () => {
     // 0026 (Phase C): company workforce administration (each self-authorizes)
     "mg_can_manage_company(uuid)",
     // 0029 (Phase E): onboarding officer + bulk import (each self-authorizes)
+    "mg_can_manage_emergency(uuid)",
     "mg_can_onboard_company(uuid)",
+    "mg_can_view_emergency(uuid)",
     "mg_cancel_membership_request()",
     // 0037: company profile + site registration requests (each self-authorizes)
     "mg_cancel_site_request(uuid)",
@@ -795,6 +800,14 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_create_org_invitation(uuid, text, text)",
     "mg_decide_membership_request(uuid, boolean, text)",
     "mg_decide_site_request(uuid, text, text, uuid)",
+    "mg_emergency_ack(uuid, integer, text, timestamp with time zone)",
+    "mg_emergency_activate(uuid, text, integer)",
+    "mg_emergency_close(uuid, text, text, text, integer)",
+    "mg_emergency_create(uuid, text, text, text, text, text, text, text, text)",
+    "mg_emergency_dashboard(uuid)",
+    "mg_emergency_dispatch_allowed(uuid)",
+    "mg_emergency_mark_displayed(uuid, integer)",
+    "mg_emergency_update(uuid, integer, text, text, text, text, text, text, text, text, text)",
     "mg_has_permission(text)",
     "mg_import_apply(uuid, jsonb)",
     "mg_import_check(uuid, jsonb)",
@@ -806,15 +819,18 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_is_admin()",
     "mg_is_reviewer()",
     "mg_is_staff()",
+    "mg_my_emergency_alerts()",
     "mg_my_membership()",
     "mg_my_pending_invitations()",
     // 0021 (Session 9): notification sync
+    "mg_my_push_status()",
     "mg_notifications_sync(jsonb)",
     "mg_operator_name()",
     "mg_prepare_account_deletion()",
     "mg_prepare_invitation_send(uuid)",
     "mg_profile()",
     "mg_register_company(text)",
+    "mg_register_push_subscription(text, text, text, text)",
     "mg_release_invitation_send(uuid)",
     "mg_request_membership(uuid)",
     "mg_request_site(uuid, text, text, text, text, text, double precision, double precision, text)",
@@ -838,6 +854,7 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_trend_geo(text, date, date)",
     "mg_trend_series(text, text, date, date)",
     "mg_unassign_member_site(uuid, uuid)",
+    "mg_unregister_push_subscription(text)",
     "mg_update_company_profile(uuid, text, text, text, text, text)",
     "mg_update_my_profile(text, text)",
     // 0015 (GIS): pure definer validator the boundary CHECK constraints call.
