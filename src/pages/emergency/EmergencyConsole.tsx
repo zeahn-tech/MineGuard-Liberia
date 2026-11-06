@@ -15,11 +15,11 @@ import { EmergencyDisclaimer } from "@/components/emergency/EmergencyNotice";
 import { PushSetupCard } from "@/components/emergency/PushSetupCard";
 import { EmptyState } from "@/components/EmptyState";
 import { PageLoading } from "@/components/PageLoading";
-import { supabase } from "@/lib/supabase";
 import {
   createAlert,
   explainEmergencyError,
   listAlerts,
+  manageableSites,
   newIdempotencyKey,
   SEVERITY_LABEL,
   TARGET_GROUP_LABEL,
@@ -34,7 +34,7 @@ export default function EmergencyConsole() {
   const base = useLocation().pathname.startsWith("/portal") ? "/portal" : "/operate";
   const navigate = useNavigate();
   const [alerts, setAlerts] = useState<ListedAlert[] | null>(null);
-  const [sites, setSites] = useState<SiteOption[]>([]);
+  const [sites, setSites] = useState<SiteOption[] | null>(null); // null = still checking
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -47,7 +47,7 @@ export default function EmergencyConsole() {
 
   useEffect(() => {
     void listAlerts().then(setAlerts).catch((e) => setLoadErr(explainEmergencyError(e)));
-    void supabase.from("sites").select("id, name, code").order("name").limit(300).then(({ data }) => setSites((data ?? []) as SiteOption[]));
+    void manageableSites().then(setSites).catch(() => setSites([])); // on any doubt: no create controls
   }, []);
 
   const submit = async (e: React.FormEvent) => {
@@ -63,6 +63,7 @@ export default function EmergencyConsole() {
       setBusy(false);
     }
   };
+  const canCreate = (sites?.length ?? 0) > 0;
   const valid = f.siteId && f.title.trim().length >= 3 && f.instructions.trim().length >= 1;
 
   return (
@@ -73,17 +74,25 @@ export default function EmergencyConsole() {
       </header>
       <EmergencyDisclaimer />
 
-      <div>
-        <Button onClick={() => setShowNew((v) => !v)} variant={showNew ? "outline" : "default"}>{showNew ? "Close" : "New alert"}</Button>
-      </div>
+      {canCreate ? (
+        <div>
+          <Button onClick={() => setShowNew((v) => !v)} variant={showNew ? "outline" : "default"}>{showNew ? "Close" : "New alert"}</Button>
+        </div>
+      ) : (
+        sites !== null && (
+          <p className="text-sm text-muted-foreground">
+            You can view alerts addressed to you{base === "/portal" ? " and oversee delivery status" : ""}. Creating or changing alerts is limited to authorized company administrators and the site managers and safety officers assigned to the site.
+          </p>
+        )
+      )}
 
-      {showNew && (
+      {canCreate && showNew && (
         <form onSubmit={submit} className="paper grid gap-3 p-4 md:p-6" aria-label="New emergency alert">
           <div>
             <Label htmlFor="n-site">Site</Label>
             <select id="n-site" required className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={f.siteId} onChange={(e) => setF({ ...f, siteId: e.target.value })}>
               <option value="">Choose a site…</option>
-              {sites.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
+              {(sites ?? []).map((s) => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
             </select>
           </div>
           <div><Label htmlFor="n-title">Title</Label><Input id="n-title" required minLength={3} maxLength={120} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></div>
@@ -118,7 +127,7 @@ export default function EmergencyConsole() {
         {loadErr && <p role="alert" className="text-sm text-destructive">{loadErr}</p>}
         {alerts === null && !loadErr && <PageLoading shape="list" label="emergency alerts" compact />}
         {alerts?.length === 0 && (
-          <EmptyState icon={Siren} title="No emergency alerts" why="Alerts created for the sites you can manage appear here. Authorized site managers and company administrators can create one with “New alert”." />
+          <EmptyState icon={Siren} title="No emergency alerts" why="Alerts addressed to you, or created for sites you manage, appear here." />
         )}
         <ul className="mt-2 divide-y rounded-md border">
           {alerts?.map((a) => (

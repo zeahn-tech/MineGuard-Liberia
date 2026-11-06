@@ -206,6 +206,12 @@ export const closeAlert = (id: string, outcome: "cancelled" | "resolved", reason
     p_expected_revision: expectedRevision,
   });
 
+/** Sites this person may manage alerts for — the same predicate the write RPCs enforce. Display
+ *  only: hiding controls is a courtesy, the database refuses anyone else regardless. */
+export async function manageableSites(): Promise<Array<{ id: string; name: string; code: string }>> {
+  return rpc("mg_emergency_manageable_sites", {});
+}
+
 export async function listAlerts(): Promise<ListedAlert[]> {
   const { data, error } = await supabase
     .from("emergency_alerts")
