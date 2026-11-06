@@ -27,6 +27,7 @@ the field tests in §8 are done and the Ministry / site operator approves it in 
 * **Read + delivery dashboard:** the above, plus Ministry `admin` / `supervisor` / `inspector` inside their existing scope (permission `emergency.read`, read-only).
 * **Receive / acknowledge:** the live audience only.
 * Revoking a membership, assignment or permission takes effect on the very next call. Client-side checks are courtesy only.
+* Migration `0041` removes any leftover `emergency.manage` grant (a database that applied an earlier draft of 0040 needs it) and adds `mg_emergency_manageable_sites()`, which the app uses to show "New alert" and the site list only to people the database would let through. Everyone else sees a read-only list.
 * No role holds `emergency.manage`; the hook remains so a future explicit grant is a data change.
 
 ## 3. Alert model
@@ -87,7 +88,7 @@ Unauthorized create/activate/update/cancel (worker, other company, anonymous, un
 **Not testable in this environment:** real browsers / real push services / real network loss (see §8); Playwright a11y e2e was not run; expired-session behaviour relies on the existing auth layer (RPCs reject without a JWT).
 
 ## 10. Files changed
-New: `supabase/migrations/0040_emergency_alerts.sql`, `supabase/functions/emergency-dispatch/index.ts`, `supabase/functions/_shared/emergency/dispatch.ts`, `src/lib/emergency.ts`, `src/hooks/use-my-emergency-alerts.ts`, `src/components/emergency/*`, `src/pages/emergency/*`, `tests/emergency-alerts.test.ts`, `tests/emergency-client.test.ts`, this document.
+New: `supabase/migrations/0040_emergency_alerts.sql`, `supabase/migrations/0041_emergency_authority_corrections.sql`, `supabase/functions/emergency-dispatch/index.ts`, `supabase/functions/_shared/emergency/dispatch.ts`, `src/lib/emergency.ts`, `src/hooks/use-my-emergency-alerts.ts`, `src/components/emergency/*`, `src/pages/emergency/*`, `tests/emergency-alerts.test.ts`, `tests/emergency-client.test.ts`, this document.
 Modified: `public/sw.js` (push handlers, v1.4.0), `src/lib/offline-queue.ts` (+`emergencyAck`), `src/components/QueueManager.tsx`, `src/pages/operate/OperatorLayout.tsx` and `src/pages/PortalLayout.tsx` (nav, banner, sync binding), `src/main.tsx` (routes), `src/vite-env.d.ts`.
 Pinned-count tests updated for the new migration: `tests/migration-apply.test.ts` (tables 29→35, RLS 29→35, touch triggers 15→20, audit triggers 19→24, permissions 21→25, read-only table set, client RPC allowlist, end-state restore list). `src/pages/Cookies.tsx` discloses the new `mg.emergency.last.v1` storage key.
 

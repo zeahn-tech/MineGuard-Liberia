@@ -22,9 +22,17 @@ beforeAll(async () => {
 // Other suites in the same process re-run older migrations (0002/0009/0011) to test their
 // idempotency, which resets function grants. 0040 is idempotent: re-apply it so these tests
 // observe its real end state regardless of file order.
+// The migration's own cleanup statement, taken from the file so the test cannot drift from it.
+const db0 = async (run: Runner) => {
+  const sql = readFileSync(join(import.meta.dir, "..", "supabase", "migrations", "0041_emergency_authority_corrections.sql"), "utf8");
+  const stmt = sql.match(/delete from public\.permissions where permission = 'emergency\.manage';/)?.[0];
+  if (!stmt) throw new Error("0041 no longer removes emergency.manage");
+  await run(stmt);
+};
 beforeEach(async () => {
   const db = await getDb();
   await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", "0040_emergency_alerts.sql"), "utf8"));
+  await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", "0041_emergency_authority_corrections.sql"), "utf8"));
 });
 
 const as = (run: Runner, uid: string) =>
@@ -81,6 +89,41 @@ async function world<T>(fn: (run: Runner, c: { orgA: string; siteA: string; site
     return fn(run, { orgA, siteA: f.siteA, siteB: f.siteB });
   });
 }
+
+describe("what the app is allowed to offer (manageable sites)", () => {
+  test("only people the database would let through are offered any site; everyone else gets none", async () => {
+    await world(async (run, c) => {
+      const sitesFor = async (_uid: string) => (await run("select id from public.mg_emergency_manageable_sites()")).map((r) => r.id);
+      await as(run, XA);
+      expect(await sitesFor(XA)).toContain(c.siteA);
+      await as(run, SM);
+      expect(await sitesFor(SM)).toEqual([c.siteA]);
+      await as(run, OTH);
+      expect(await sitesFor(OTH)).toEqual([c.siteB]); // their OWN company's site only, never siteA
+      for (const who of [WK, WK2, f.admin, f.national]) {
+        await as(run, who);
+        expect(await sitesFor(who)).toEqual([]);
+      }
+      await run("select set_config('request.jwt.claims', '', true)");
+      expect(await fails(run("select * from public.mg_emergency_manageable_sites()"))).toBeDefined();
+    });
+  });
+
+  test("the corrective migration removes a leftover emergency.manage grant from an earlier draft", async () => {
+    await world(async (run, c) => {
+      await run("reset role");
+      await run("insert into public.permissions (role, permission) values ('admin','emergency.manage') on conflict do nothing");
+      await run("set local role authenticated");
+      await as(run, f.admin);
+      expect(await create(run, c.siteA)).toBeTruthy(); // the stale grant WOULD have let admin through
+      await run("reset role");
+      await db0(run);
+      await run("set local role authenticated");
+      await as(run, f.admin);
+      expect(await fails(create(run, c.siteA))).toMatch(/FORBIDDEN/);
+    });
+  });
+});
 
 const key = () => crypto.randomUUID();
 const create = async (run: Runner, site: string, over: Record<string, string> = {}) =>
