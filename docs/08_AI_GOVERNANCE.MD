@@ -152,3 +152,34 @@ function has no service-role key):
    throttle) and a retention period for `ai_request_log`.
 7. UI surfaces for the capabilities (the client wrapper `src/lib/ai-assist.ts` exists;
    no page was added in this session).
+
+## Implementation Phase 3 — incident insights [IMPLEMENTED, deterministic]
+
+Extends the Session 8 `ai-assist` function (same handler, log, label, cite-or-abstain and
+no-write guarantees); no competing integration was added.
+
+| Capability | Behaviour |
+|---|---|
+| `incident_trend_summary` | For a chosen period (7–365 days, default 90), optionally one site: incident count versus the preceding equal period (no percentage when there is no baseline; no change figure if a list was capped), categories, severity, findings with the same title recorded two or more times at a site, and corrective actions not yet closed/verified with how many are past due. |
+| `risk_patterns` | Recurrence (same site and category, 3 or more incidents inside 90 days) and rising volume (last 90 days at least double the preceding 90, at least 3, with a non-zero baseline). Requires 10 incidents spanning 90 days within the caller's access, otherwise it abstains with the numbers. Each pattern carries evidence ids, period, limitations, why a review may be appropriate, and "This is not a prediction of an accident." No score is produced. |
+
+Controls: all figures are computed in `_shared/ai/insights.ts`; **no model is called** and
+`narrate()` is not applied to these capabilities, so no incident text leaves the platform.
+Only non-sensitive columns are read (no incident description, reporter, contact or
+anonymous community report). Per-user hourly rate limit counted from `ai_request_log`
+(default 60, `AI_RATE_LIMIT_PER_HOUR`; fails closed if the log cannot be read); request bodies
+are capped at 32,000 characters. Migration 0042 only widens the log's capability CHECK.
+
+### Not built in Phase 3, and why
+- **Safety guidance assistant / glossary.** The repository contains no safety glossary and no
+  reviewed guidance content to ground answers in. An assistant without an approved source would
+  be making unsupported claims, so it is not built. Needs: owner-approved guidance content.
+- **JSA drafting.** The repository has no JSA workflow (no table, page or approval step), and
+  adding one is a new feature, not an extension. Needs: an owner decision to build the JSA
+  workflow with a qualified-person approval step first. No capability exists that could approve
+  a JSA, authorise a task, or close an incident or corrective action (asserted in tests).
+- **Live model provider.** Still no approved provider, adapter or credential (see Session 8
+  list above). Enabling one for narration would send aggregate claim text to that provider and
+  needs the data-processing decision recorded there first.
+- **Retention of `ai_request_log`.** Still an owner decision. The log is append-only and holds
+  hashes, counts and validated arguments only.

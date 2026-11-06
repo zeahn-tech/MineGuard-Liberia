@@ -17,6 +17,8 @@ export const CAPABILITIES = [
   "inspection_priorities",
   "executive_briefing",
   "document_analysis",
+  "incident_trend_summary",
+  "risk_patterns",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 

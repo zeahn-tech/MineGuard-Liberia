@@ -19,7 +19,9 @@ export type AiCapability =
   | "trend_notes"
   | "inspection_priorities"
   | "executive_briefing"
-  | "document_analysis";
+  | "document_analysis"
+  | "incident_trend_summary"
+  | "risk_patterns";
 
 export interface AiClaim {
   text: string;
@@ -47,7 +49,9 @@ export type AiAssistRequest =
   | { capability: "trend_notes"; siteId?: string; months?: number }
   | { capability: "inspection_priorities"; limit?: number }
   | { capability: "executive_briefing" }
-  | { capability: "document_analysis"; text: string };
+  | { capability: "document_analysis"; text: string }
+  | { capability: "incident_trend_summary"; siteId?: string; days?: number }
+  | { capability: "risk_patterns"; siteId?: string; months?: number };
 
 export async function askAiAssistant<T = unknown>(req: AiAssistRequest): Promise<AiAssistResponse<T>> {
   const { data, error } = await supabase.functions.invoke("ai-assist", { body: req });

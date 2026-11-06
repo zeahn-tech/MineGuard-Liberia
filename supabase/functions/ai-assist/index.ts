@@ -15,7 +15,7 @@
 // ---------------------------------------------------------------------------
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { handleAiRequest } from "../_shared/ai/handler.ts";
+import { DEFAULT_RATE_LIMIT_PER_HOUR, handleAiRequest, MAX_BODY_CHARS } from "../_shared/ai/handler.ts";
 import { resolveProvider } from "../_shared/ai/provider.ts";
 
 const CORS = {
@@ -47,15 +47,26 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const { data: profile } = await db.from("profiles").select("role").eq("id", u.user.id).maybeSingle();
 
+  // Oversized bodies are refused before they are parsed.
+  const declared = Number(req.headers.get("content-length") ?? "0");
+  if (declared > MAX_BODY_CHARS * 4) return json(413, { error: "BAD_REQUEST", message: "Request too large" });
+
+  // Per-user hourly limit (counted from ai_request_log). AI_RATE_LIMIT_PER_HOUR
+  // overrides the default; an unparsable value falls back to the default.
+  const configured = Number.parseInt(Deno.env.get("AI_RATE_LIMIT_PER_HOUR") ?? "", 10);
+  const rateLimitPerHour = Number.isInteger(configured) && configured > 0 ? configured : DEFAULT_RATE_LIMIT_PER_HOUR;
+
   let body: unknown;
   try {
-    body = await req.json();
+    const raw = await req.text();
+    if (raw.length > MAX_BODY_CHARS * 2) return json(413, { error: "BAD_REQUEST", message: "Request too large" });
+    body = JSON.parse(raw);
   } catch {
     return json(400, { error: "BAD_REQUEST", message: "JSON body required" });
   }
 
   const result = await handleAiRequest(
-    { db, caller: { id: u.user.id, role: (profile?.role as string | null) ?? null }, provider: resolveProvider(Deno.env) },
+    { db, caller: { id: u.user.id, role: (profile?.role as string | null) ?? null }, provider: resolveProvider(Deno.env), rateLimitPerHour },
     body,
   );
   return json(result.status, result.body);

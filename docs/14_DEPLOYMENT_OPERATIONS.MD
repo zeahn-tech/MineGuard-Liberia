@@ -442,6 +442,26 @@ deploy job never ran and the broken state persisted.
 5. Review `select * from ai_request_log order by created_at desc` (administrators see
    all rows; others see their own). `injection_flagged = true` rows deserve a look.
 
+### Phase 3 additions — incident insights, limits, usage monitoring
+1. Apply `supabase/migrations/0042_ai_incident_insights.sql` (idempotent) **before** deploying the
+   new function code: the request log's capability CHECK must admit `incident_trend_summary`
+   and `risk_patterns`, otherwise the log insert fails and the function (correctly) withholds output.
+2. Redeploy: `supabase functions deploy ai-assist` (JWT verification stays on).
+3. Optional secret `AI_RATE_LIMIT_PER_HOUR` (positive integer; default 60 per user per rolling hour).
+   An invalid value falls back to the default. Requests over the limit get HTTP 429 and are logged.
+4. No provider secret is needed or used: both new capabilities are deterministic.
+5. Usage monitoring (administrators; the log holds no prompt or response text):
+   ```sql
+   select date_trunc('day', created_at) as day, capability, mode, outcome, count(*) as requests,
+          round(avg(latency_ms)) as avg_ms
+     from public.ai_request_log
+    where created_at > now() - interval '30 days'
+    group by 1, 2, 3, 4 order by 1 desc, 2;
+   ```
+   Rows with `error_code = 'RATE_LIMITED'` show who is hitting the limit.
+6. Rollback: redeploy the previous function version and revert the UI commit. Leave 0042 in place —
+   the log is append-only, and the wider CHECK is harmless without the code.
+
 ## Deploying notifications, trends and the summary report [Session 9]
 1. Apply `supabase/migrations/0021_notifications_trends_reporting.sql` (idempotent; needs
    0010, 0012 and 0019). Re-running 0011 afterwards is safe — its allowlist carries the
