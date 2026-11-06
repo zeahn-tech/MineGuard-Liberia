@@ -26,6 +26,8 @@ import {
   classifyPushStatus,
   endpointAllowed,
   handleDispatch,
+  handleSweep,
+  secretsMatch,
   type Claimed,
   type DispatchDeps,
 } from "../supabase/functions/_shared/emergency/dispatch";
@@ -203,6 +205,37 @@ describe("push dispatcher", () => {
     const p = JSON.parse(buildPayload({ alert_id: A, event: "activated", revision: 1, title: "T", severity: "critical", ...({ instructions: "SECRET", assembly_point: "Gate 2" } as object) }));
     expect(Object.keys(p).sort()).toEqual(["event", "id", "revision", "severity", "title", "v"]);
     expect(JSON.stringify(p)).not.toMatch(/SECRET|Gate 2/);
+  });
+});
+
+describe("scheduled sweep", () => {
+  test("sweeps each pending alert through the same recording path; no sender → not_configured", async () => {
+    const recorded: Array<Record<string, unknown>> = [];
+    const row = { delivery_id: "d1", alert_id: A, event: "activated", revision: 1, title: "T", severity: "critical", endpoint: "https://x.push.test/a", p256dh: "k", auth: "a" };
+    const service = {
+      rpc: async (fn: string, args?: Record<string, unknown>) => {
+        if (fn === "mg_emergency_pending_alerts") return { data: [{ alert_id: A }], error: null };
+        if (fn === "mg_emergency_claim_push") return { data: [row], error: null };
+        recorded.push(args ?? {});
+        return { data: null, error: null };
+      },
+    };
+    const ok = await handleSweep({ service, sender: async () => ({ status: 201 }) });
+    expect(ok.body).toMatchObject({ ok: true, alerts: 1, attempted: 1 });
+    expect(recorded[0]).toMatchObject({ p_outcome: "accepted" });
+    await handleSweep({ service, sender: null });
+    expect(recorded[1]).toMatchObject({ p_outcome: "not_configured" });
+  });
+  test("the shared secret compare rejects empty, short and wrong values", () => {
+    expect(secretsMatch("abc123", "abc123")).toBe(true);
+    expect(secretsMatch("", "")).toBe(false);
+    expect(secretsMatch("abc", "abcd")).toBe(false);
+    expect(secretsMatch("abc124", "abc123")).toBe(false);
+  });
+  test("the function refuses a sweep when no secret is configured", () => {
+    const fn = readFileSync("supabase/functions/emergency-dispatch/index.ts", "utf8");
+    expect(fn).toMatch(/presented !== null/);
+    expect(fn).toMatch(/secretsMatch\(presented, sweepSecret\)/);
   });
 });
 

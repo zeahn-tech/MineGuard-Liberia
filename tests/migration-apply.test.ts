@@ -692,7 +692,7 @@ describe("0010 organizations, scopes & permissions (SEC-5/SITE-1)", () => {
     // + 4 supervisor + 3 inspector + 1 operator, then 0031 adds admin's
     // workforce.oversee and the registrar's single organizations.write) — the
     // unique constraint is the backstop, the count is the drift alarm.
-    expect(Number(first.perms)).toBe(25); // 0040: admin emergency.manage + emergency.read; supervisor and inspector emergency.read
+    expect(Number(first.perms)).toBe(24); // 0040: emergency.read for admin, supervisor and inspector (no role holds emergency.manage — owner decision)
     // The scope enum stands at its six values: the rename-and-repoint
     // sequence skips straight through on re-run (no seven-value creep, no
     // resurrection of the three-value predecessor).

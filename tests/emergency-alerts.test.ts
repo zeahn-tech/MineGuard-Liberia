@@ -145,11 +145,36 @@ describe("who may create / activate / update / cancel", () => {
     });
   });
 
-  test("Ministry administrator holds emergency.manage; supervisors and inspectors are read-only", async () => {
+  test("Ministry roles cannot create or activate company alerts (owner decision) but can read", async () => {
     await world(async (run, c) => {
+      await as(run, XA);
+      const id = await create(run, c.siteA);
+      await activate(run, id);
+      for (const who of [f.admin, f.national]) {
+        await as(run, who);
+        expect(await fails(create(run, c.siteA))).toMatch(/FORBIDDEN/);
+        expect(await fails(run("select public.mg_emergency_close($1, 'cancelled', 'x', 'CANCEL', 1)", [id]))).toMatch(/FORBIDDEN/);
+      }
       await as(run, f.admin);
-      expect(await create(run, c.siteA)).toBeTruthy();
-      await as(run, f.national);
+      const d = (await run("select public.mg_emergency_dashboard($1) as r", [id]))[0].r;
+      expect(d.can_manage).toBe(false);
+      expect(d.alert.title).toBe("Pit wall instability");
+    });
+  });
+
+  test("safety officers assigned to the site may create and activate; unassigned ones may not", async () => {
+    await world(async (run, c) => {
+      await as(run, XA);
+      await run(`select public.mg_change_member_role((select id from public.organization_members where user_id = '${WK}'), 'safety_officer')`).catch(() => null);
+      const role = (await owner(run, `select org_role from public.organization_members where user_id = '${WK}'`))[0].org_role;
+      if (role !== "safety_officer") await owner(run, `update public.organization_members set org_role = 'safety_officer' where user_id = '${WK}'`);
+      await as(run, WK);
+      const id = await create(run, c.siteA);
+      await activate(run, id);
+      await as(run, XA);
+      const m = (await run(`select id from public.organization_members where user_id = '${WK}'`))[0].id;
+      await run(`select public.mg_unassign_member_site('${m}', '${c.siteA}')`);
+      await as(run, WK);
       expect(await fails(create(run, c.siteA))).toMatch(/FORBIDDEN/);
     });
   });
@@ -427,6 +452,31 @@ describe("push subscriptions and delivery outbox", () => {
       expect(d.counts.push_service_accepted).toBe(0);
       const sub = await owner(run, "select expired_at from public.push_subscriptions");
       expect(sub[0].expired_at).not.toBeNull();
+    });
+  });
+});
+
+describe("scheduled retry sweep", () => {
+  test("only undelivered, recent rows are listed, to the service role only; stale rows are closed out, not pushed late", async () => {
+    await world(async (run, c) => {
+      await as(run, WK);
+      await run("select public.mg_register_push_subscription('https://push.example.test/abc', 'k1', 'a1')");
+      await as(run, XA);
+      const id = await create(run, c.siteA);
+      await activate(run, id);
+      expect(await fails(run("select * from public.mg_emergency_pending_alerts()"))).toMatch(/permission denied/);
+      await run("reset role");
+      await run("set local role service_role");
+      expect((await run("select alert_id from public.mg_emergency_pending_alerts()")).map((r) => r.alert_id)).toEqual([id]);
+      await run("reset role");
+      await run("update public.emergency_alert_deliveries set created_at = now() - interval '7 hours'");
+      await run("set local role service_role");
+      expect(await run("select alert_id from public.mg_emergency_pending_alerts()")).toHaveLength(0);
+      expect(await run("select * from public.mg_emergency_claim_push($1)", [id])).toHaveLength(0);
+      await run("reset role");
+      const st = await run("select state, detail from public.emergency_alert_deliveries");
+      expect(st[0]).toMatchObject({ state: "service_rejected", detail: "not sent: older than 6 hours" });
+      await run("set local role authenticated");
     });
   });
 });

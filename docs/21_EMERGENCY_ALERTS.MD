@@ -23,11 +23,11 @@ the field tests in §8 are done and the Ministry / site operator approves it in 
 
 ## 2. Who may do what (server-enforced — migration 0040)
 
-* **Create / activate / update / cancel / resolve:** Ministry `admin` (permission `emergency.manage`), **or** an active member of the site's *approved* company who is `company_admin`, or a `site_manager` / `safety_officer` **with a live assignment to that site**.
-* **Read + delivery dashboard:** the above, plus Ministry `supervisor` / `inspector` inside their existing scope (permission `emergency.read`).
+* **Create / activate / update / cancel / resolve:** an active member of the site's *approved* company who is `company_admin`, or a `site_manager` / `safety_officer` **with a live assignment to that site**. (Owner-approved: site managers and safety officers may activate; Ministry roles may **not** create or activate alerts at company sites.)
+* **Read + delivery dashboard:** the above, plus Ministry `admin` / `supervisor` / `inspector` inside their existing scope (permission `emergency.read`, read-only).
 * **Receive / acknowledge:** the live audience only.
 * Revoking a membership, assignment or permission takes effect on the very next call. Client-side checks are courtesy only.
-* **Decision needed from the program owner:** that Ministry `admin` may activate alerts at company sites, and that `safety_officer` may activate. Change the `permissions` rows / `mg_can_manage_emergency` if not.
+* No role holds `emergency.manage`; the hook remains so a future explicit grant is a data change.
 
 ## 3. Alert model
 `emergency_alerts` — title, severity (advisory/warning/critical), instructions, assembly point, procedure reference, zone label, target group (all / workers / safety officers / site managers), status (draft → active → cancelled | resolved), revision, creator, activator, closer + reason, timestamps. `emergency_alert_revisions` is the append-only update/cancellation history.
@@ -58,7 +58,7 @@ The dashboard prints these limits on screen. After an update, earlier acknowledg
 | Alert changes while offline | Next fetch shows the new revision and asks for a fresh acknowledgment |
 | Push permission denied / unsupported / no HTTPS / no VAPID | Card explains in plain words; in-app alerts still work while the app is open |
 | Subscription expires | Dispatcher marks it expired on 404/410; app re-registers on next start; SW tells open windows on `pushsubscriptionchange`. Until then the device is unreachable by push |
-| Push service down | rows stay *queued* / retry (max 5); dashboard shows "waiting to send"; manager can "Retry push delivery" |
+| Push service down | rows stay *queued* and are retried (max 5 attempts, 6-hour limit; automatically once the sweep is scheduled); dashboard shows "waiting to send"; manager can "Retry push delivery" |
 | Old cached app | Server reports `api_version`; a newer server makes the app ask for a reload. A shell that predates this release shows nothing — see §8 |
 
 ## 6. Audit trail
@@ -69,7 +69,7 @@ Every table row change is written by the database (`mg_audit_row`): creation, ac
 2. Edge Function secrets: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, `INVITE_ALLOWED_ORIGIN`; deploy `supabase functions deploy emergency-dispatch --use-api`.
 3. Build variable `VITE_VAPID_PUBLIC_KEY` (same public key) for the web app. Without it the app says push is not set up.
 4. HTTPS origin; browser support for Push API + service workers (iOS only for installed home-screen web apps on supported versions; some Android battery-saver modes suppress push).
-5. Optional: a scheduled call to `emergency-dispatch` for automatic retries (not included).
+5. Scheduled retries (approved): set secret `EMERGENCY_SWEEP_SECRET`, enable `pg_cron` + `pg_net`, and run `supabase/cron/emergency-dispatch-sweep.sql` (commented template — not applied by migrations). Every minute it retries undelivered rows younger than 6 hours (max 5 attempts); older rows are closed out as "not sent", never pushed late. If cron is unavailable, a manager's "Retry push delivery" button is the fallback.
 6. Realtime: `emergency_alerts` is added to the `supabase_realtime` publication as a speed-up; polling is the fallback.
 
 ## 8. Manual field-testing required before any operational claim

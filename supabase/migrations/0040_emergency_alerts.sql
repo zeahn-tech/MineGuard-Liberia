@@ -13,11 +13,11 @@
 --   push_subscriptions          browser push endpoints (secrets: never readable by clients)
 --
 -- Authorization is decided HERE (mg_can_manage_emergency), live, on every call:
---   * Ministry role holding permission 'emergency.manage' (admin), or
 --   * an ACTIVE member of the site's APPROVED company who is company_admin, or a
 --     site_manager / safety_officer with a live assignment to THAT site.
 -- Revoking a membership, assignment or permission takes effect on the next call.
--- Ministry supervisor/inspector may READ (permission 'emergency.read') inside their scope.
+-- Ministry admin/supervisor/inspector may READ (permission 'emergency.read'); admin has no
+-- write authority over company sites' alerts (owner decision).
 --
 -- High-impact actions need a server-checked confirmation word (ACTIVATE / UPDATE /
 -- CANCEL / RESOLVE) and an expected revision (stale or replayed requests are refused).
@@ -33,8 +33,10 @@
 begin;
 
 -- permissions ---------------------------------------------------------------------------------
+-- DECISION (owner-approved): Ministry roles do NOT create or activate alerts at company sites;
+-- they read. No role is granted 'emergency.manage' — the hook stays in mg_can_manage_emergency
+-- so a future, explicit grant is a data change, not a code change.
 insert into public.permissions (role, permission) values
-  ('admin',      'emergency.manage'),
   ('admin',      'emergency.read'),
   ('supervisor', 'emergency.read'),
   ('inspector',  'emergency.read')
@@ -640,6 +642,10 @@ returns table (delivery_id uuid, alert_id uuid, event text, revision integer, ti
                endpoint text, p256dh text, auth text)
 language plpgsql security definer set search_path = public as $mg$
 begin
+  -- Never push an alert hours late as if it were current: stale rows are closed out honestly.
+  update public.emergency_alert_deliveries as x
+     set state = 'service_rejected', detail = 'not sent: older than 6 hours', updated_at = now()
+   where x.alert_id = p_alert and x.state in ('queued','sending') and x.created_at < now() - interval '6 hours';
   return query
   with c as (
     select d.id from public.emergency_alert_deliveries d
@@ -660,6 +666,18 @@ begin
     join public.push_subscriptions ps on ps.id = u.subscription_id
    where ps.expired_at is null and ps.revoked_at is null;
 end;
+$mg$;
+
+-- scheduled sweep (service_role only): alerts that still have undelivered push rows
+create or replace function public.mg_emergency_pending_alerts(p_limit integer default 50)
+returns table (alert_id uuid)
+language sql stable security definer set search_path = public as $mg$
+  select distinct d.alert_id
+    from public.emergency_alert_deliveries d
+   where d.attempts < 5
+     and d.created_at > now() - interval '6 hours'
+     and (d.state = 'queued' or (d.state = 'sending' and d.updated_at < now() - interval '2 minutes'))
+   limit greatest(1, least(p_limit, 200))
 $mg$;
 
 create or replace function public.mg_emergency_record_push(p_delivery uuid, p_outcome text, p_detail text default null)
@@ -719,6 +737,8 @@ revoke all on function public.mg_emergency_claim_push(uuid, integer),
   public.mg_emergency_record_push(uuid, text, text) from public, anon, authenticated;
 grant execute on function public.mg_emergency_claim_push(uuid, integer),
   public.mg_emergency_record_push(uuid, text, text) to service_role;
+revoke all on function public.mg_emergency_pending_alerts(integer) from public, anon, authenticated;
+grant execute on function public.mg_emergency_pending_alerts(integer) to service_role;
 
 -- Realtime (a convenience channel only; the app also polls) -----------------------------------------------------------------
 do $$

@@ -79,6 +79,31 @@ export function buildPayload(c: Pick<Claimed, "alert_id" | "event" | "revision" 
   });
 }
 
+/** Constant-time string compare for the sweep secret. */
+export function secretsMatch(a: string, b: string): boolean {
+  if (!a || !b || a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+
+/**
+ * Scheduled retry sweep. Authenticated by a shared secret (never a user session) and limited
+ * to alerts that still have undelivered rows younger than 6 hours. It uses the same send path
+ * and the same honest outcome recording as a manager-triggered dispatch.
+ */
+export async function handleSweep(deps: Pick<DispatchDeps, "service" | "sender">): Promise<DispatchResult> {
+  const pending = await deps.service.rpc("mg_emergency_pending_alerts", { p_limit: 50 });
+  if (pending.error) return { status: 500, body: { ok: false, error: "SWEEP_FAILED" } };
+  const ids = ((pending.data ?? []) as Array<{ alert_id: string }>).map((r) => r.alert_id);
+  let attempted = 0;
+  for (const alertId of ids) {
+    const r = await dispatchAlert(deps, alertId);
+    attempted += Number(r.body.attempted ?? 0);
+  }
+  return { status: 200, body: { ok: true, alerts: ids.length, attempted } };
+}
+
 export async function handleDispatch(deps: DispatchDeps, body: unknown): Promise<DispatchResult> {
   const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
   const alertId = typeof b.alertId === "string" ? b.alertId : "";
@@ -90,7 +115,11 @@ export async function handleDispatch(deps: DispatchDeps, body: unknown): Promise
     return { status: 403, body: { ok: false, error: "FORBIDDEN", detail: "Not authorized for this alert." } };
   }
 
-  // 2. claim queued deliveries for THIS alert only
+  return dispatchAlert(deps, alertId);
+}
+
+async function dispatchAlert(deps: Pick<DispatchDeps, "service" | "sender">, alertId: string): Promise<DispatchResult> {
+  // claim queued deliveries for THIS alert only
   const claimed = await deps.service.rpc("mg_emergency_claim_push", { p_alert: alertId, p_limit: 200 });
   if (claimed.error) return { status: 500, body: { ok: false, error: "CLAIM_FAILED", detail: "Could not read the delivery queue." } };
   const rows = (claimed.data ?? []) as Claimed[];
