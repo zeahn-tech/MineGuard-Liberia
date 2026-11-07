@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// OPERATOR SAFETY ANALYTICS (company administrators): incidents by severity,
+// OPERATOR SAFETY ANALYTICS (every active member of an approved company): incidents by severity,
 // by location, by weekday this month, and the company's most active reporters.
 // Built only from records the account can already read (server RLS); the
 // charts are bars with visible counts, so they read the same without colour.
@@ -57,14 +57,14 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 export default function OperatorAnalytics() {
   const now = useNow();
   const me = useQuery(api.workforce.myMembership);
-  const isAdmin = me?.orgRole === "company_admin" && me.memberStatus === "active";
+  const isMember = me?.memberStatus === "active" && me.companyStatus === "approved";
   const incidentsQ = useQuery(api.records.listIncidents);
-  const teamQ = useQuery(api.workforce.list, isAdmin && me ? { organizationId: me.organizationId } : "skip");
+  const namesQ = useQuery(api.workforce.memberNames, isMember && me ? { organizationId: me.organizationId } : "skip");
   const [jsas, setJsas] = useState<Jsa[] | undefined>();
   const [jsaFailed, setJsaFailed] = useState(false);
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!isMember) return;
     let live = true;
     listJsas().then((j) => live && setJsas(j)).catch(() => {
       if (live) {
@@ -75,20 +75,20 @@ export default function OperatorAnalytics() {
     return () => {
       live = false;
     };
-  }, [isAdmin]);
+  }, [isMember]);
 
   if (me === undefined) return <div className="p-4 md:p-6"><PageLoading shape="list" label="analytics" /></div>;
-  if (!isAdmin) {
+  if (!isMember) {
     return (
       <div className="p-4 md:p-6">
         <div className="paper flex items-start gap-3 p-6">
           <ShieldAlert className="mt-0.5 size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
-          <p className="text-sm">Safety analytics are limited to company administrators.</p>
+          <p className="text-sm">Safety analytics are available to active members of an approved company.</p>
         </div>
       </div>
     );
   }
-  if (incidentsQ === undefined || jsas === undefined || teamQ === undefined) {
+  if (incidentsQ === undefined || jsas === undefined || namesQ === undefined) {
     return <div className="p-4 md:p-6"><PageLoading shape="list" label="analytics" /></div>;
   }
 
@@ -96,7 +96,7 @@ export default function OperatorAnalytics() {
   const sev = bySeverity(incidents);
   const loc = byLocation(incidents);
   const days = byWeekdayThisMonth(incidents, now);
-  const reporters = topReporters(incidents, jsas, teamQ?.members ?? []);
+  const reporters = topReporters(incidents, jsas, namesQ ?? []);
   const month = new Date(now).toLocaleDateString(undefined, { month: "long", year: "numeric" });
 
   return (
@@ -105,7 +105,7 @@ export default function OperatorAnalytics() {
         <p className="kicker">{me.organizationName}</p>
         <h1 className="display text-2xl">Safety analytics</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Built from your company's own incident reports and job safety analyses.
+          Built from the incident reports and job safety analyses your account can see.
         </p>
       </header>
 
