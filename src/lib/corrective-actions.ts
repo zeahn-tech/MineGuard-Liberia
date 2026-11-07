@@ -8,7 +8,7 @@
 import type { CorrectiveAction } from "./types";
 
 /** Company roles that may see and answer corrective actions. */
-export const CA_COMPANY_ROLES = ["site_manager", "safety_officer"] as const;
+export const CA_COMPANY_ROLES = ["company_admin", "site_manager", "safety_officer"] as const;
 
 export interface MembershipLike {
   orgRole: string;

@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Migration 0046 — only site managers and safety officers answer corrective
+// Migration 0046 — company administrators, site managers and safety officers answer corrective
 // actions, and an action that is open OR in progress can be answered.
 // Exercised as a hostile client would: raw updates, real RLS, real guard.
 // ---------------------------------------------------------------------------
@@ -100,9 +100,12 @@ describe("who may answer a corrective action (migration 0046)", () => {
     });
   });
 
-  test("a company administrator, worker or onboarding officer cannot answer", async () => {
+  test("a company administrator can answer", async () => {
+    await world(async (run) => expect(await respond(run, XA, CA_OPEN)).toBe("submitted"));
+  });
+
+  test("a worker or onboarding officer cannot answer", async () => {
     await world(async (run) => {
-      expect(await respond(run, XA, CA_OPEN)).toBe("open");
       expect(await respond(run, WK, CA_OPEN)).toBe("open");
       expect(await respond(run, OF, CA_OPEN)).toBe("open");
     });
@@ -123,7 +126,7 @@ describe("who may answer a corrective action (migration 0046)", () => {
       };
       expect(await may(SM)).toBe(true);
       expect(await may(SO)).toBe(true);
-      expect(await may(XA)).toBe(false);
+      expect(await may(XA)).toBe(true);
       expect(await may(WK)).toBe(false);
       expect(await may(OF)).toBe(false);
     });
