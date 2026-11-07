@@ -11,7 +11,6 @@
 export interface GlossaryEntry { id: string; term: string; short: string; definition: string; category: string }
 export interface PpeEntry { id: string; emoji: string; name: string; description: string; when: string; mandatory: string }
 export interface FirstAidEntry { id: string; emoji: string; title: string; steps: string[] }
-export interface ContactEntry { id: string; name: string; number: string }
 export interface TipEntry { id: string; text: string }
 export interface ImmediateAction { id: string; order: number; text: string }
 
@@ -1802,23 +1801,6 @@ export const FIRST_AID: FirstAidEntry[] = [
    "Call emergency services and report the chemical name",
    "Do NOT induce vomiting unless instructed by medical personnel"
   ]
- }
-];
-export const EMERGENCY_CONTACTS: ContactEntry[] = [
- {
-  "id": "ref:contact:mine-emergency-control",
-  "name": "Mine Emergency Control",
-  "number": "Emergency: 112"
- },
- {
-  "id": "ref:contact:site-safety-officer",
-  "name": "Site Safety Officer",
-  "number": "Contact site management"
- },
- {
-  "id": "ref:contact:ambulance-medical",
-  "name": "Ambulance / Medical",
-  "number": "National Emergency: 112"
  }
 ];
 export const SAFETY_TIPS: TipEntry[] = [

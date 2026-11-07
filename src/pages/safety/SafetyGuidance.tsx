@@ -5,14 +5,17 @@
 // server and labels each statement's provenance. It never declares anything safe, replaces
 // site emergency procedures, or decides for anyone.
 // ---------------------------------------------------------------------------
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { EmptyState } from "@/components/EmptyState";
+import { PageLoading } from "@/components/PageLoading";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { askAiAssistant, type AiAssistResponse } from "@/lib/ai-assist";
 import { AiFooter, AiHeader, KindBadge, aiFailure } from "@/components/AiOutputNotice";
-import { EMERGENCY_CONTACTS, FIRST_AID, GLOSSARY, IMMEDIATE_ACTIONS, PPE, REVIEW } from "@/data/safety-reference";
+import { FIRST_AID, GLOSSARY, IMMEDIATE_ACTIONS, PPE, REVIEW } from "@/data/safety-reference";
+import { contactScopes, explainContactError, listEmergencyContacts, PHONE_PATTERN, removeEmergencyContact, saveEmergencyContact, type ContactScope, type EmergencyContact } from "@/lib/emergencyContacts";
 
 function ReviewNotice() {
   return REVIEW.approvedBy ? (
@@ -56,6 +59,16 @@ function Ask() {
               ))}
             </ul>
           )}
+          {(res.data as { contacts?: { id: string; name: string; phone: string; label: string | null }[] } | null)?.contacts?.length ? (
+            <div className="space-y-1 border border-border p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Emergency contacts set up by your company</p>
+              <ul className="space-y-1">
+                {(res.data as { contacts: { id: string; name: string; phone: string; label: string | null }[] }).contacts.map((c) => (
+                  <li key={c.id} className="flex justify-between gap-2 text-sm"><span>{c.name}{c.label ? ` — ${c.label}` : ""}</span><a className="font-medium underline underline-offset-4" href={`tel:${c.phone.replace(/[^+\d]/g, "")}`}>{c.phone}</a></li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           <AiFooter res={res} />
         </div>
       )}
@@ -128,6 +141,95 @@ function PpeGuide() {
   );
 }
 
+function EmergencyContacts() {
+  const [rows, setRows] = useState<EmergencyContact[] | null>(null);
+  const [scopes, setScopes] = useState<ContactScope[]>([]);
+  const [loadErr, setLoadErr] = useState(false);
+  const [tick, setTick] = useState(0);
+  const [form, setForm] = useState<{ id?: string; scope: string; name: string; phone: string; label: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void Promise.all([listEmergencyContacts(), contactScopes().catch(() => [] as ContactScope[])]).then(
+      ([r, sc]) => { if (live) { setRows(r); setScopes(sc); } },
+      () => { if (live) setLoadErr(true); },
+    );
+    return () => { live = false; };
+  }, [tick]);
+
+  const scopeKey = (sc: { organization_id: string; site_id: string | null }) => `${sc.organization_id}|${sc.site_id ?? ""}`;
+  const scopeName = (c: EmergencyContact) => scopes.find((x) => x.organization_id === c.organization_id && x.site_id === c.site_id);
+  const canManage = (c: EmergencyContact) => !!scopeName(c);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form) return;
+    const sc = scopes.find((x) => scopeKey(x) === form.scope);
+    if (!sc) return;
+    if (!PHONE_PATTERN.test(form.phone.trim())) { setErr("Enter a valid phone number (digits, spaces, + ( ) -)."); return; }
+    setBusy(true); setErr(null);
+    try {
+      await saveEmergencyContact({ organizationId: sc.organization_id, siteId: sc.site_id, name: form.name.trim(), phone: form.phone.trim(), roleLabel: form.label.trim() }, form.id);
+      setForm(null); setTick((t) => t + 1);
+    } catch (e2) { setErr(explainContactError(e2)); }
+    finally { setBusy(false); }
+  };
+  const remove = async (id: string) => {
+    setBusy(true); setErr(null);
+    try { await removeEmergencyContact(id); setTick((t) => t + 1); }
+    catch (e2) { setErr(explainContactError(e2)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="space-y-2">
+      <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Emergency contacts</h3>
+      {loadErr && <p role="alert" className="text-sm">Contacts could not be loaded. Use your site&apos;s own emergency numbers.</p>}
+      {!loadErr && rows === null && <PageLoading shape="list" label="emergency contacts" rows={2} compact />}
+      {rows && rows.length === 0 && (
+        <EmptyState title="No emergency contacts added" why="Ask your company administrator or site manager to add them. Until then, use your site's own emergency numbers." />
+      )}
+      {rows && rows.length > 0 && (
+        <ul className="space-y-2">
+          {rows.map((c) => (
+            <li key={c.id} className={`flex flex-wrap items-center justify-between gap-2 border border-border p-3 text-sm ${c.active ? "" : "opacity-60"}`}>
+              <span>
+                <span className="font-medium">{c.name}</span>{c.role_label ? ` — ${c.role_label}` : ""}
+                <span className="block text-xs text-muted-foreground">{scopeName(c)?.site_name ?? (c.site_id ? "Site contact" : "Company-wide")}{c.active ? "" : " · removed"}</span>
+              </span>
+              <span className="flex items-center gap-2">
+                <a className="font-medium underline underline-offset-4" href={`tel:${c.phone.replace(/[^+\d]/g, "")}`}>{c.phone}</a>
+                {canManage(c) && c.active && (
+                  <>
+                    <Button size="sm" variant="outline" onClick={() => setForm({ id: c.id, scope: `${c.organization_id}|${c.site_id ?? ""}`, name: c.name, phone: c.phone, label: c.role_label ?? "" })}>Edit</Button>
+                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => remove(c.id)}>Remove</Button>
+                  </>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-xs text-muted-foreground">Maintained by your company. Confirm they are current.</p>
+      {scopes.length > 0 && !form && <Button size="sm" variant="outline" onClick={() => setForm({ scope: scopeKey(scopes[0]), name: "", phone: "", label: "" })}>Add emergency contact</Button>}
+      {form && (
+        <form onSubmit={submit} className="space-y-2 border border-border p-3">
+          <select aria-label="Applies to" className="h-9 w-full border border-input bg-background px-2 text-sm" value={form.scope} disabled={!!form.id} onChange={(e) => setForm({ ...form, scope: e.target.value })}>
+            {scopes.map((sc) => <option key={scopeKey(sc)} value={scopeKey(sc)}>{sc.site_name ? `Site: ${sc.site_name}` : `Whole company: ${sc.organization_name}`}</option>)}
+          </select>
+          <Input aria-label="Contact name" value={form.name} maxLength={80} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Name" required />
+          <Input aria-label="Phone number" value={form.phone} maxLength={24} inputMode="tel" onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Phone number" required />
+          <Input aria-label="Role or note" value={form.label} maxLength={60} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="Role (e.g. Site medic, Ambulance)" />
+          {err && <p role="alert" className="text-sm text-destructive">{err}</p>}
+          <div className="flex gap-2"><Button type="submit" disabled={busy || !form.name.trim() || !form.phone.trim()}>Save contact</Button><Button type="button" variant="ghost" onClick={() => { setForm(null); setErr(null); }}>Cancel</Button></div>
+        </form>
+      )}
+      {!form && err && <p role="alert" className="text-sm text-destructive">{err}</p>}
+    </div>
+  );
+}
+
 function EmergencyReference() {
   const [open, setOpen] = useState<string | null>(null);
   return (
@@ -143,18 +245,7 @@ function EmergencyReference() {
           ))}
         </ol>
       </div>
-      <div className="space-y-2">
-        <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Contacts listed in the app</h3>
-        <ul className="space-y-2">
-          {EMERGENCY_CONTACTS.map((c) => (
-            <li key={c.id} className="flex items-center justify-between border border-border p-3 text-sm">
-              <span>{c.name}</span>
-              <a className="font-medium underline underline-offset-4" href={`tel:${c.number.replace(/[^+\d]/g, "")}`}>{c.number}</a>
-            </li>
-          ))}
-        </ul>
-        <p className="text-xs text-muted-foreground">Check that these match your site&apos;s own emergency contacts.</p>
-      </div>
+      <EmergencyContacts />
       <div className="space-y-2">
         <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">First aid quick guide</h3>
         <ul className="space-y-2">

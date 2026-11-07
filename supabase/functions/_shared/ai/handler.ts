@@ -21,7 +21,7 @@ import { enforceCiteOrAbstain } from "./cite.ts";
 import { detectInjection } from "./injection.ts";
 import { analyzeDocument, executiveBriefing, inspectionPriorities, siteSummary, trendNotes, type Draft } from "./capabilities.ts";
 import { incidentTrendSummary, riskPatterns } from "./insights.ts";
-import { safetyGuidance } from "./guidance.ts";
+import { isEmergencyQuery, safetyGuidance, type SiteContact } from "./guidance.ts";
 import { jsaSuggestions } from "./jsa-assist.ts";
 import { executeFilter, parseQuestion, validateFilter, type SearchFilter } from "./filters.ts";
 import { narrate, translateWithProvider, type ProviderAdapter } from "./provider.ts";
@@ -108,6 +108,21 @@ async function enforceRateLimit(deps: HandlerDeps, now: Date): Promise<void> {
   if (rows.length >= limit) throw new AiError("RATE_LIMITED", `Request limit reached (${limit} per hour). Try again later.`);
 }
 
+/** The caller's own emergency contacts, read under THEIR row-level security (so another
+ *  company's contacts can never appear). Fetched only for emergency questions; any failure
+ *  means "no contacts", never a guess. */
+async function loadContacts(db: ScopedDb): Promise<SiteContact[]> {
+  try {
+    const { data, error } = await db.from("emergency_contacts").select("id, name, phone, role_label, site_id, sort_order")
+      .eq("active", true).order("sort_order", { ascending: true }).limit(20);
+    if (error || !Array.isArray(data)) return [];
+    return (data as Record<string, unknown>[]).filter((r) => typeof r.id === "string" && typeof r.name === "string" && typeof r.phone === "string")
+      .map((r) => ({ id: r.id as string, name: r.name as string, phone: r.phone as string, role_label: typeof r.role_label === "string" ? r.role_label : null }));
+  } catch {
+    return [];
+  }
+}
+
 export async function handleAiRequest(deps: HandlerDeps, body: unknown): Promise<HandlerResult> {
   const started = Date.now();
   const now = (deps.now ?? (() => new Date()))();
@@ -167,7 +182,7 @@ export async function handleAiRequest(deps: HandlerDeps, body: unknown): Promise
         filterLog = { siteId: b.siteId ?? null, months: b.months ?? null };
         break;
       case "safety_guidance":
-        draft = safetyGuidance(b.query);
+        draft = safetyGuidance(b.query, isEmergencyQuery(b.query) ? await loadContacts(deps.db) : []);
         queryText = typeof b.query === "string" ? b.query : null; // logged as hash + length only
         break;
       case "jsa_suggestions":

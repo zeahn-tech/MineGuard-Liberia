@@ -5,7 +5,7 @@ import vm from "node:vm";
 const src = readFileSync(process.argv[2], "utf8");
 const ctx = {};
 vm.createContext(ctx);
-vm.runInContext(src + "\n;this.__o={GLOSSARY_TERMS,PPE_ITEMS,EMERGENCY_CONTACTS,FIRST_AID_GUIDES,SAFETY_TIPS};", ctx);
+vm.runInContext(src + "\n;this.__o={GLOSSARY_TERMS,PPE_ITEMS,FIRST_AID_GUIDES,SAFETY_TIPS};", ctx);
 const o = ctx.__o;
 const slug = (s) => s.toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const used = new Set();
@@ -22,7 +22,8 @@ const clean = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 const glossary = o.GLOSSARY_TERMS.map((t) => ({ id: uniq("ref:glossary", t.term), term: clean(t.term), short: clean(t.short), definition: clean(t.definition), category: clean(t.category) }));
 const ppe = o.PPE_ITEMS.map((p) => ({ id: uniq("ref:ppe", p.name), emoji: p.emoji, name: clean(p.name), description: clean(p.description), when: clean(p.when), mandatory: p.mandatory }));
 const firstAid = o.FIRST_AID_GUIDES.map((g) => ({ id: uniq("ref:firstaid", g.title), emoji: g.emoji, title: clean(g.title), steps: g.steps.map(clean) }));
-const contacts = o.EMERGENCY_CONTACTS.map((c) => ({ id: uniq("ref:contact", c.name), name: clean(c.name), number: clean(c.number) }));
+// Emergency contacts are NOT imported: numbers differ per company and site, so they live in the
+// database (emergency_contacts, migration 0044) and are maintained by authorised people.
 const tips = o.SAFETY_TIPS.map((t, i) => ({ id: `ref:tip:${i + 1}`, text: clean(t) }));
 // Immediate actions (SOS screen) live in the app's English string table, not data.js.
 const lang = process.argv[3] ? readFileSync(process.argv[3], "utf8") : "";
@@ -45,7 +46,6 @@ const out = `// ----------------------------------------------------------------
 export interface GlossaryEntry { id: string; term: string; short: string; definition: string; category: string }
 export interface PpeEntry { id: string; emoji: string; name: string; description: string; when: string; mandatory: string }
 export interface FirstAidEntry { id: string; emoji: string; title: string; steps: string[] }
-export interface ContactEntry { id: string; name: string; number: string }
 export interface TipEntry { id: string; text: string }
 export interface ImmediateAction { id: string; order: number; text: string }
 
@@ -58,7 +58,6 @@ export const REVIEW: { source: string; approvedBy: string | null; approvedOn: st
 export const GLOSSARY: GlossaryEntry[] = ${J(glossary)};
 export const PPE: PpeEntry[] = ${J(ppe)};
 export const FIRST_AID: FirstAidEntry[] = ${J(firstAid)};
-export const EMERGENCY_CONTACTS: ContactEntry[] = ${J(contacts)};
 export const SAFETY_TIPS: TipEntry[] = ${J(tips)};
 export const IMMEDIATE_ACTIONS: ImmediateAction[] = ${J(immediate)};
 `;
@@ -66,4 +65,4 @@ export const IMMEDIATE_ACTIONS: ImmediateAction[] = ${J(immediate)};
 // reference tabs (Vite, cannot import from supabase/). tests/ai-guidance.test.ts fails on drift.
 writeFileSync("supabase/functions/_shared/ai/guidance-content.ts", out);
 writeFileSync("src/data/safety-reference.ts", out);
-console.log({ glossary: glossary.length, ppe: ppe.length, firstAid: firstAid.length, contacts: contacts.length, tips: tips.length });
+console.log({ glossary: glossary.length, ppe: ppe.length, firstAid: firstAid.length, tips: tips.length });
