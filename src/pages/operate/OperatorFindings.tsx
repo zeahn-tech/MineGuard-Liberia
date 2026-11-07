@@ -14,6 +14,10 @@ import { api } from "@/lib/backend";
 import type { Severity } from "@/lib/types";
 import { Link, useSearchParams } from "react-router";
 import { PageLoading } from "@/components/PageLoading";
+import { EmptyState } from "@/components/EmptyState";
+import { useCaAccess } from "@/hooks/use-ca-access";
+import { isRespondable } from "@/lib/corrective-actions";
+import { FileCheck2 } from "lucide-react";
 
 function severityClasses(sev: Severity): string {
   switch (sev) {
@@ -30,6 +34,8 @@ function severityClasses(sev: Severity): string {
 
 export default function OperatorFindings() {
   const findingsQ = useQuery(api.inspections.listMyFindings);
+  const access = useCaAccess();
+  const casQ = useQuery(api.inspections.listMyCorrectiveActions, access === "allowed" ? undefined : "skip");
   const [searchParams] = useSearchParams();
   const siteFilter = searchParams.get("siteId") ?? null;
 
@@ -43,8 +49,9 @@ export default function OperatorFindings() {
         <h1 className="display text-2xl">Findings on your sites</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
           Recorded by oversight inspectors after field inspections. Findings
-          are read-only for operators — your response channel is the corrective
-          action each finding may carry.
+          are read-only — the response channel is the corrective action the
+          reviewing authority opens for a finding, handled by your
+          company administrator, site managers and safety officers.
         </p>
       </div>
 
@@ -61,9 +68,11 @@ export default function OperatorFindings() {
         <PageLoading shape="list" label="findings" />
       )}
       {findingsQ !== undefined && findings.length === 0 && (
-        <p className="text-sm text-muted-foreground">
-          No findings on your sites.
-        </p>
+        <EmptyState
+          icon={FileCheck2}
+          title="No findings on your sites"
+          why="Findings appear here after an oversight inspector records them during a field inspection."
+        />
       )}
 
       <div className="space-y-3">
@@ -94,6 +103,30 @@ export default function OperatorFindings() {
               {f.description && (
                 <p className="mt-1 text-sm text-muted-foreground">{f.description}</p>
               )}
+              {access === "allowed" && casQ !== undefined && (() => {
+                const cas = casQ.filter((c) => c.findingId === f._id);
+                if (cas.length === 0) {
+                  return (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      The reviewing authority has not opened a corrective action for this finding — it sets the
+                      deadline. Once opened, it appears under Corrective Actions.
+                    </p>
+                  );
+                }
+                return cas.map((c) => (
+                  <p key={c._id} className="mt-2 text-xs">
+                    <span className="text-muted-foreground">
+                      Corrective action: {c.status.replace("_", " ")} ·{" "}
+                    </span>
+                    <Link
+                      to={`/operate/corrective-actions?siteId=${f.siteId}`}
+                      className="text-primary underline-offset-4 hover:underline"
+                    >
+                      {isRespondable(c.status) ? "Respond" : "View"}
+                    </Link>
+                  </p>
+                ));
+              })()}
             </CardContent>
           </Card>
         ))}
