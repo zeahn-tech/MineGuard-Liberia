@@ -29,6 +29,7 @@ const ProfileSettings = lazy(() => import("./pages/ProfileSettings.tsx"));
 const Oversight = lazy(() => import("./pages/Oversight.tsx"));
 const AdminUsers = lazy(() => import("./pages/AdminUsers.tsx"));
 const SiteRequests = lazy(() => import("./pages/SiteRequests.tsx"));
+const OperatorAnalytics = lazy(() => import("./pages/operate/OperatorAnalytics.tsx"));
 const OperatorActivity = lazy(() => import("./pages/operate/OperatorActivity.tsx"));
 const OperatorCompany = lazy(() => import("./pages/operate/OperatorCompany.tsx"));
 const OperatorSiteRequests = lazy(() => import("./pages/operate/OperatorSiteRequests.tsx"));
@@ -175,6 +176,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="team" element={<OperatorTeam />} />
               <Route path="company" element={<OperatorCompany />} />
               <Route path="activity" element={<OperatorActivity />} />
+              <Route path="analytics" element={<OperatorAnalytics />} />
               <Route path="site-requests" element={<OperatorSiteRequests />} />
               {/* The operator shell leaves each page to own its gutter, but the profile page is
                   shared with the admin and registry shells (whose <main> pads it). Give it the

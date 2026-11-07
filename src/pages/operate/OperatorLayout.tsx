@@ -52,6 +52,7 @@ import { api, refreshAllData } from "@/lib/backend";
 import { useLatest } from "@/lib/use-latest";
 import { useMutation, useQuery } from "@/lib/backend-react";
 import {
+  BarChart3,
   Building2,
   ClipboardList,
   CloudOff,
@@ -84,6 +85,7 @@ const OPERATOR_NAV = [
   { to: "/operate/jsa", label: "Job Safety Analysis", icon: ClipboardCheck },
   { to: "/operate/team", label: "Team", icon: Users, adminOnly: true },
   { to: "/operate/site-requests", label: "Site requests", icon: MapPinPlus, adminOnly: true },
+  { to: "/operate/analytics", label: "Safety analytics", icon: BarChart3, adminOnly: true },
   { to: "/operate/activity", label: "Activity", icon: History, adminOnly: true },
   { to: "/operate/company", label: "Company profile", icon: Building2 },
   { to: "/operate/import", label: "Import workers", icon: Upload, onboardOnly: true },
