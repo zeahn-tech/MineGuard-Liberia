@@ -60,6 +60,15 @@ const ROWS: Row[] = [
     kind: "Essential",
   },
   {
+    name: "mg.voice.queue.v1",
+    where: "IndexedDB (or localStorage in some browsers)",
+    purpose:
+      "Worker Voice reports you wrote and saved on this phone before they could be sent. It holds only what you typed and the private follow-up code, with no account details, even for a named or confidential report.",
+    keeps:
+      "Until the report is received by MineGuard or you delete it from the Worker Voice page. Nothing is sent to anyone until you submit.",
+    kind: "Essential",
+  },
+  {
     name: "mg.session.lastactive.v1",
     where: "localStorage",
     purpose:

@@ -1925,7 +1925,8 @@ type DerivedNotification = {
     | "org_decision"
     | "org_role"
     | "org_status"
-    | "org_site_request";
+    | "org_site_request"
+    | "worker_voice";
   /** Deadline notifications are state; the state is part of the stored key so
    *  due-soon → overdue is a NEW (unread, urgent) notification. */
   state?: "overdue" | "soon";
