@@ -61,8 +61,8 @@ export default function OperatorCorrectiveActions() {
       <div className="p-4 md:p-6">
         <EmptyState
           icon={ShieldAlert}
-          title="Corrective actions are for site managers and safety officers"
-          why="Responding to a corrective action is a compliance act, so it is limited to the people who run safety on your sites. Ask your company administrator if you need that role."
+          title="Corrective actions are limited to your company's safety leadership"
+          why="Responding to a corrective action is a compliance act, so it is limited to the company administrator, site managers and safety officers. Ask your company administrator if you need that role."
         />
       </div>
     );
@@ -123,7 +123,7 @@ function CorrectiveActionsBody() {
       } else if (msg.includes("NOT_FOUND")) {
         toast.error("That obligation is no longer visible to your account.");
       } else if (msg.includes("FORBIDDEN_ROLE")) {
-        toast.error("Only site managers and safety officers can respond to corrective actions.");
+        toast.error("Only the company administrator, site managers and safety officers can respond to corrective actions.");
       } else if (msg.includes("FORBIDDEN")) {
         toast.error(
           "This action can no longer be answered by your company — it may have been escalated or already answered. Refresh to see its current state.",

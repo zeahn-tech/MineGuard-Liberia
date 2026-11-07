@@ -50,8 +50,8 @@ export default function OperatorFindings() {
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
           Recorded by oversight inspectors after field inspections. Findings
           are read-only — the response channel is the corrective action the
-          reviewing authority opens for a finding, handled by your site
-          managers and safety officers.
+          reviewing authority opens for a finding, handled by your
+          company administrator, site managers and safety officers.
         </p>
       </div>
 

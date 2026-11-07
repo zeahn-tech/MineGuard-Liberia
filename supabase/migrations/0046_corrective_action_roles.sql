@@ -5,14 +5,15 @@
 --  1. Any company account with operator access could answer a corrective
 --     action — company administrators, workers and onboarding officers
 --     included. Responding is a compliance act and belongs to the people who
---     run the site's safety: site managers and safety officers.
+--     run the company and its site safety: the company administrator, site
+--     managers and safety officers (workers and onboarding officers cannot).
 --  2. The reviewer guard (mg_guard_ca_update) only let an operator move an
 --     action from 'open' to 'submitted'. Actions the reviewing authority had
 --     moved to 'in_progress' showed a Respond button in the app but every
 --     response was refused by the database.
 --
 -- FIX: a single database rule, mg_can_work_corrective_actions() — an ACTIVE
--- member of an APPROVED company whose role is site_manager or safety_officer —
+-- member of an APPROVED company whose role is company_admin, site_manager or safety_officer —
 -- now gates the operator branch of both the UPDATE policy and the guard, and
 -- the guard accepts open OR in_progress as the starting state. Reviewers
 -- (admin, supervisor) are unchanged. Per-site scoping is unchanged
@@ -26,7 +27,7 @@ returns boolean
 language sql stable security definer set search_path = public
 as $mg$
   select
-    -- a company member: only an ACTIVE site manager / safety officer of an APPROVED company
+    -- a company member: only an ACTIVE company administrator / site manager / safety officer of an APPROVED company
     exists (
       select 1
         from public.organization_members m
@@ -34,7 +35,7 @@ as $mg$
        where m.user_id = auth.uid()
          and m.status = 'active'
          and o.status = 'approved'
-         and m.org_role in ('site_manager', 'safety_officer')
+         and m.org_role in ('company_admin', 'site_manager', 'safety_officer')
     )
     -- a legacy single-account operator that predates company roles has NO membership
     -- row at all and is the company itself; anyone who has ever held a membership

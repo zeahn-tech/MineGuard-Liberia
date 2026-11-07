@@ -6,10 +6,9 @@ const DAY = 86_400_000;
 const m = (orgRole: string, memberStatus = "active", companyStatus = "approved") => ({ orgRole, memberStatus, companyStatus });
 
 describe("corrective action access", () => {
-  test("only active site managers and safety officers of an approved company", () => {
-    expect(canWorkCorrectiveActions(m("site_manager"))).toBe(true);
-    expect(canWorkCorrectiveActions(m("safety_officer"))).toBe(true);
-    for (const r of ["company_admin", "worker", "onboarding_officer"]) expect(canWorkCorrectiveActions(m(r))).toBe(false);
+  test("company administrators, site managers and safety officers — active, approved company only", () => {
+    for (const r of ["company_admin", "site_manager", "safety_officer"]) expect(canWorkCorrectiveActions(m(r))).toBe(true);
+    for (const r of ["worker", "onboarding_officer"]) expect(canWorkCorrectiveActions(m(r))).toBe(false);
     expect(canWorkCorrectiveActions(m("site_manager", "pending"))).toBe(false);
     expect(canWorkCorrectiveActions(m("site_manager", "active", "suspended"))).toBe(false);
     expect(canWorkCorrectiveActions(null)).toBe(false);
