@@ -21,6 +21,8 @@ import { enforceCiteOrAbstain } from "./cite.ts";
 import { detectInjection } from "./injection.ts";
 import { analyzeDocument, executiveBriefing, inspectionPriorities, siteSummary, trendNotes, type Draft } from "./capabilities.ts";
 import { incidentTrendSummary, riskPatterns } from "./insights.ts";
+import { safetyGuidance } from "./guidance.ts";
+import { jsaSuggestions } from "./jsa-assist.ts";
 import { executeFilter, parseQuestion, validateFilter, type SearchFilter } from "./filters.ts";
 import { narrate, translateWithProvider, type ProviderAdapter } from "./provider.ts";
 
@@ -163,6 +165,14 @@ export async function handleAiRequest(deps: HandlerDeps, body: unknown): Promise
       case "risk_patterns":
         draft = await riskPatterns(deps.db, { siteId: b.siteId, months: b.months }, now);
         filterLog = { siteId: b.siteId ?? null, months: b.months ?? null };
+        break;
+      case "safety_guidance":
+        draft = safetyGuidance(b.query);
+        queryText = typeof b.query === "string" ? b.query : null; // logged as hash + length only
+        break;
+      case "jsa_suggestions":
+        draft = jsaSuggestions({ task: b.task, location: b.location });
+        queryText = typeof b.task === "string" ? b.task : null; // logged as hash + length only
         break;
       case "document_analysis":
         draft = analyzeDocument(b.text);

@@ -15,7 +15,10 @@
 
 import { acknowledgeEmergency } from "@/lib/emergency";
 import { EmergencyBanner } from "@/components/emergency/EmergencyBanner";
-import { Siren } from "lucide-react";
+import { Siren,
+  BookOpen,
+  ClipboardCheck,
+} from "lucide-react";
 import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import {
@@ -77,6 +80,8 @@ const OPERATOR_NAV = [
   { to: "/operate/corrective-actions", label: "Corrective Actions", icon: ShieldCheck },
   { to: "/operate/incidents", label: "Incidents", icon: HeartPulse },
   { to: "/operate/emergency", label: "Emergency", icon: Siren },
+  { to: "/operate/safety", label: "Safety Guidance", icon: BookOpen },
+  { to: "/operate/jsa", label: "Job Safety Analysis", icon: ClipboardCheck },
   { to: "/operate/team", label: "Team", icon: Users, adminOnly: true },
   { to: "/operate/site-requests", label: "Site requests", icon: MapPinPlus, adminOnly: true },
   { to: "/operate/activity", label: "Activity", icon: History, adminOnly: true },

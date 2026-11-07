@@ -170,14 +170,48 @@ anonymous community report). Per-user hourly rate limit counted from `ai_request
 (default 60, `AI_RATE_LIMIT_PER_HOUR`; fails closed if the log cannot be read); request bodies
 are capped at 32,000 characters. Migration 0042 only widens the log's capability CHECK.
 
-### Not built in Phase 3, and why
-- **Safety guidance assistant / glossary.** The repository contains no safety glossary and no
-  reviewed guidance content to ground answers in. An assistant without an approved source would
-  be making unsupported claims, so it is not built. Needs: owner-approved guidance content.
-- **JSA drafting.** The repository has no JSA workflow (no table, page or approval step), and
-  adding one is a new feature, not an extension. Needs: an owner decision to build the JSA
-  workflow with a qualified-person approval step first. No capability exists that could approve
-  a JSA, authorise a task, or close an incident or corrective action (asserted in tests).
+## Implementation Phase 3b — safety guidance assistant and JSA assistance [IMPLEMENTED, deterministic]
+
+Follows the owner's clarification (screenshots of the MineGuard field app: Glossary, PPE guide,
+JSA form, Emergency screen). Same `ai-assist` handler, log, label, rate limit and no-write rules.
+
+| Capability | Behaviour |
+|---|---|
+| `safety_guidance` | Retrieval over the bundled reference content: 229 glossary terms, 12 PPE items, 6 first-aid guides, the 5 immediate-action steps and 3 contacts from the field app. Every statement is a verbatim excerpt that cites its entry id. Each carries a provenance `kind`. No match: it abstains and guesses nothing. Asked whether a mine/site/area is safe: it refuses. Legal/regulatory questions: flagged as needing a qualified safety professional; the content states no regulation. Emergency questions return the immediate actions and say that site procedures apply. |
+| `jsa_suggestions` | Matches the task description against a fixed library of 11 hazard categories and returns possible hazards, consequences, controls to consider, further-assessment questions and PPE ids (checked against the PPE guide), plus general questions for every task. Always `needs_verification`; never approved. No match: abstains and says that does not mean the task is hazard free. |
+
+**Provenance (`kind`):** `approved_source` only when `REVIEW.approvedBy` in
+`guidance-content.ts` names a person; `needs_verification` otherwise; `general_explanation`
+exists in the contract for a future approved provider and is never produced today. **As shipped
+the repository records no sign-off, so every statement is shown as needing verification** and the
+UI says why. Filling in `REVIEW` after a qualified person has reviewed the content flips the label
+(regenerate the two copies with `scripts/gen-guidance-content.mjs`; a test fails if they drift).
+The hazard library in `jsa-assist.ts` is general knowledge written for this feature, not reviewed
+content, and is never labelled approved.
+
+**No model, no network.** Neither capability calls a provider, `narrate()` is not applied (safety
+text is not reworded), the task text is matched against a fixed library and never forwarded. The
+request log keeps a hash and length of the question only (asserted).
+
+**JSA workflow (migration 0043; none existed).** `job_safety_analyses`, closed to client writes;
+RPCs `mg_jsa_save` / `mg_jsa_submit` / `mg_jsa_review`. Lifecycle draft -> submitted -> approved |
+rejected. Approval requires a *different* person who is company_admin, or a site_manager /
+safety_officer assigned to the site, and the typed word APPROVE; a CHECK constraint refuses an
+approved row without a distinct reviewer, a trigger freezes submitted/approved content and bans
+deletion, and `ai_assisted` is derived from hazard sources (never settable). No function accepts AI
+as an approver. Approval records review; it does **not** authorise the task. The table stores no
+worker names (profile ids only); Ministry roles get read access via `jsa.read` within their scope.
+"Qualified" is approximated by organisation role: the database cannot verify competence.
+
+**Rollback.** Revert the Phase 3b commit. Migration 0043 is additive: to remove it, drop
+`job_safety_analyses` and the `mg_jsa_*` / `mg_can_*_jsa` functions, delete the `jsa.read`
+permission rows, and restore the previous `ai_request_log_capability_check` (list in 0042) after
+deleting any `safety_guidance` / `jsa_suggestions` log rows (the log is append-only; do this as the
+database owner). Removing only the UI: delete the `safety` and `jsa` routes in `src/main.tsx`.
+
+### Not built, and why
+- **Sign-off of the reference content.** Needs a named qualified safety professional to review `guidance-content.ts` and record `REVIEW.approvedBy`; until then nothing is labelled approved.
+- **French content.** The field app is bilingual; only English was imported.
 - **Live model provider.** Still no approved provider, adapter or credential (see Session 8
   list above). Enabling one for narration would send aggregate claim text to that provider and
   needs the data-processing decision recorded there first.

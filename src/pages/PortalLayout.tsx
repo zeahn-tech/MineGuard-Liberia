@@ -1,5 +1,8 @@
 import { acknowledgeEmergency } from "@/lib/emergency";
-import { Siren } from "lucide-react";
+import { Siren,
+  BookOpen,
+  ClipboardCheck,
+} from "lucide-react";
 import { LegalLinks } from "@/components/LegalLayout";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
@@ -93,6 +96,8 @@ const NAV: { to: string; label: string; icon: typeof Map; adminOnly?: boolean }[
   { to: "/portal/inspections", label: "Field Inspections", icon: FileCheck2 },
   { to: "/portal/incidents", label: "Incidents", icon: HeartPulse },
   { to: "/portal/emergency", label: "Emergency", icon: Siren },
+  { to: "/portal/safety", label: "Safety Guidance", icon: BookOpen },
+  { to: "/portal/jsa", label: "Job Safety Analysis", icon: ClipboardCheck },
   { to: "/portal/environment", label: "Environment", icon: Leaf },
   { to: "/portal/community", label: "Community Reports", icon: MessageSquareWarning },
   { to: "/portal/reports", label: "Summary Report", icon: FileText },
