@@ -71,6 +71,10 @@ const OperatorSiteDetail = lazy(() => import("./pages/operate/OperatorSites.tsx"
 const OperatorFindings = lazy(() => import("./pages/operate/OperatorFindings.tsx"));
 const OperatorCorrectiveActions = lazy(() => import("./pages/operate/OperatorCorrectiveActions.tsx"));
 const OperatorIncidents = lazy(() => import("./pages/operate/OperatorIncidents.tsx"));
+const VoiceReport = lazy(() => import("./pages/voice/VoiceReport.tsx"));
+const VoicePublic = lazy(() => import("./pages/voice/VoicePublic.tsx"));
+const VoiceStatus = lazy(() => import("./pages/voice/VoiceStatus.tsx"));
+const VoiceReview = lazy(() => import("./pages/voice/VoiceReview.tsx"));
 const SafetyGuidance = lazy(() => import("./pages/safety/SafetyGuidance.tsx"));
 const JsaPage = lazy(() => import("./pages/safety/JsaPage.tsx"));
 const EmergencyConsole = lazy(() => import("./pages/emergency/EmergencyConsole.tsx"));
@@ -137,6 +141,8 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/cookies" element={<Cookies />} />
             <Route path="/report" element={<CommunitySubmit />} />
             <Route path="/report/track" element={<CommunityTrack />} />
+            <Route path="/voice" element={<VoicePublic />} />
+            <Route path="/voice/status" element={<VoiceStatus />} />
 
             {/* COMPANY REGISTRY — the dedicated Ministry registrar's workspace: the
                 companies screen only. Gated by RequireRegistrar (routing); the database
@@ -173,6 +179,8 @@ createRoot(document.getElementById("root")!).render(
               <Route path="emergency/:alertId" element={<EmergencyAlertPage />} />
               <Route path="safety" element={<SafetyGuidance />} />
               <Route path="jsa" element={<JsaPage />} />
+              <Route path="voice" element={<VoiceReport />} />
+              <Route path="voice-review" element={<VoiceReview />} />
               <Route path="team" element={<OperatorTeam />} />
               <Route path="company" element={<OperatorCompany />} />
               <Route path="activity" element={<OperatorActivity />} />

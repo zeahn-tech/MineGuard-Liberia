@@ -39,6 +39,7 @@ const KIND_ICON = {
   ca_deadline: ClipboardList,
   ca_decision: ClipboardList,
   report_status: MessageSquareWarning,
+  worker_voice: MessageSquareWarning,
   // company administration (migration 0034)
   org_invitation: Mail,
   org_request: UserPlus,
