@@ -70,6 +70,8 @@ const OperatorSiteDetail = lazy(() => import("./pages/operate/OperatorSites.tsx"
 const OperatorFindings = lazy(() => import("./pages/operate/OperatorFindings.tsx"));
 const OperatorCorrectiveActions = lazy(() => import("./pages/operate/OperatorCorrectiveActions.tsx"));
 const OperatorIncidents = lazy(() => import("./pages/operate/OperatorIncidents.tsx"));
+const SafetyGuidance = lazy(() => import("./pages/safety/SafetyGuidance.tsx"));
+const JsaPage = lazy(() => import("./pages/safety/JsaPage.tsx"));
 const EmergencyConsole = lazy(() => import("./pages/emergency/EmergencyConsole.tsx"));
 const EmergencyAlertPage = lazy(() => import("./pages/emergency/EmergencyAlertPage.tsx"));
 const EmergencyRedirect = lazy(() => import("./pages/emergency/EmergencyRedirect.tsx"));
@@ -168,6 +170,8 @@ createRoot(document.getElementById("root")!).render(
               <Route path="incidents" element={<OperatorIncidents />} />
               <Route path="emergency" element={<EmergencyConsole />} />
               <Route path="emergency/:alertId" element={<EmergencyAlertPage />} />
+              <Route path="safety" element={<SafetyGuidance />} />
+              <Route path="jsa" element={<JsaPage />} />
               <Route path="team" element={<OperatorTeam />} />
               <Route path="company" element={<OperatorCompany />} />
               <Route path="activity" element={<OperatorActivity />} />
@@ -216,6 +220,8 @@ createRoot(document.getElementById("root")!).render(
               <Route path="incidents" element={<Incidents />} />
               <Route path="emergency" element={<EmergencyConsole />} />
               <Route path="emergency/:alertId" element={<EmergencyAlertPage />} />
+              <Route path="safety" element={<SafetyGuidance />} />
+              <Route path="jsa" element={<JsaPage />} />
               <Route path="incidents/:incidentId" element={<IncidentDetail />} />
               <Route path="environment" element={<Environment />} />
               <Route path="environment/:observationId" element={<ObservationDetail />} />

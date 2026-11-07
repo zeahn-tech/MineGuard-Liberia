@@ -20,6 +20,7 @@ import {
 import { CloudOff, HeartPulse, Plus } from "lucide-react";
 import { enqueueIncidentReport, newClientRef, syncQueue } from "@/lib/offline-queue";
 import { PageLoading } from "@/components/PageLoading";
+import { IncidentInsightsPanel } from "@/components/IncidentInsightsPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { FormField, invalidControlClass } from "@/components/FormField";
 import { useFormDraft } from "@/hooks/use-form-draft";
@@ -82,6 +83,8 @@ export default function Incidents() {
         </div>
         {sites && sites.length > 0 && <ReportDialog open={reportOpen} onOpenChange={setReportOpen} />}
       </header>
+
+      {user?.role && incidents.length > 0 && <IncidentInsightsPanel />}
 
       {incidents.length === 0 && feed.loading ? (
         <PageLoading shape="list" label="incidents" />

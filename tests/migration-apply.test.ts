@@ -80,7 +80,7 @@ describe("migrations apply to a clean database", () => {
       // two GIS boundary tables (admin_boundaries, site_boundaries) + 0019's
       // risk_config_versions + 0020's ai_request_log + 0021's notifications.
       // …+ 0025's organization_members and organization_invitations.
-      expect(Number(scalar(tables))).toBe(35); // …0037 adds site_registration_requests; 0040 adds six emergency tables
+      expect(Number(scalar(tables))).toBe(36); // …0037 adds site_registration_requests; 0040 adds six emergency tables; 0043 adds job_safety_analyses
 
       const rls = await one(
         run,
@@ -90,7 +90,7 @@ describe("migrations apply to a clean database", () => {
       // every table above has RLS, including 0015's two boundary tables and
       // 0019's risk_config_versions + 0020's ai_request_log + 0021's notifications
       // …and 0025's two RPC-only tables.
-      expect(Number(scalar(rls))).toBe(35); // 0040: six emergency tables, all RLS-closed
+      expect(Number(scalar(rls))).toBe(36); // 0040: six emergency tables, all RLS-closed; 0043: job_safety_analyses
 
       const guards = await one(
         run,
@@ -482,12 +482,12 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
     );
     // 10 domain tables + organizations (0010's integrity stamps).
     // 0025 adds organization_members + organization_invitations.
-    expect(Number(trig.rows[0]?.touch)).toBe(20); // 0029: organization_imports; 0037: site_registration_requests; 0040: five emergency tables
+    expect(Number(trig.rows[0]?.touch)).toBe(21); // 0029: organization_imports; 0037: site_registration_requests; 0040: five emergency tables; 0043: job_safety_analyses
     // …and organizations + site_assignments join the audit trail: exactly one
     // row per mutation, one trigger per table. 0015 adds the two boundary
     // tables (admin_boundaries, site_boundaries) to the trail; 0019 adds
     // risk_config_versions (one audit row per published version).
-    expect(Number(trig.rows[0]?.audit)).toBe(24); // 0040: five emergency tables (push_subscriptions deliberately not audited)
+    expect(Number(trig.rows[0]?.audit)).toBe(25); // 0040: five emergency tables (push_subscriptions deliberately not audited); 0043: job_safety_analyses
     // "audit append" (0001) stays gone; only the staff-read policy remains.
     const pol = await db.query<{ n: string }>(
       `select count(*)::text as n from pg_policies
@@ -692,7 +692,7 @@ describe("0010 organizations, scopes & permissions (SEC-5/SITE-1)", () => {
     // + 4 supervisor + 3 inspector + 1 operator, then 0031 adds admin's
     // workforce.oversee and the registrar's single organizations.write) — the
     // unique constraint is the backstop, the count is the drift alarm.
-    expect(Number(first.perms)).toBe(24); // 0040: emergency.read for admin, supervisor and inspector (no role holds emergency.manage — owner decision)
+    expect(Number(first.perms)).toBe(27); // 0040: emergency.read for admin, supervisor and inspector (no role holds emergency.manage — owner decision); 0043: jsa.read for the same three
     // The scope enum stands at its six values: the rename-and-repoint
     // sequence skips straight through on re-run (no seven-value creep, no
     // resurrection of the three-value predecessor).

@@ -17,6 +17,10 @@ export const CAPABILITIES = [
   "inspection_priorities",
   "executive_briefing",
   "document_analysis",
+  "incident_trend_summary",
+  "risk_patterns",
+  "safety_guidance",
+  "jsa_suggestions",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -26,8 +30,15 @@ export type AiMode = "deterministic" | "provider";
 export type AiOutcome = "answered" | "abstained" | "refused" | "error";
 
 /** One statement of fact + the record IDs (or document spans) it is grounded in. */
+/** How a statement should be read (safety guidance + JSA drafting):
+ *  approved_source     — reviewed content, signed off by a named person (REVIEW in guidance-content.ts);
+ *  general_explanation — explanatory help not taken from a reviewed source (only ever produced with an approved provider);
+ *  needs_verification  — must be checked by a qualified safety professional before anyone relies on it. */
+export type ClaimKind = "approved_source" | "general_explanation" | "needs_verification";
+
 export interface Claim {
   text: string;
+  kind?: ClaimKind;
   /** Record UUIDs the statement is derived from, or `span:<start>-<end>` for document analysis. */
   citations: string[];
 }
