@@ -25,6 +25,8 @@ import {
 } from "@/lib/site-status";
 import { TriangleAlert, WifiOff } from "lucide-react";
 import { PageLoading } from "@/components/PageLoading";
+import { BarList, ChartCard, type BarTone } from "@/components/BarList";
+import { countyLoad, incidentSeverityInPeriod, statusCounts, topIncidentSites, prettify } from "@/lib/admin-charts";
 
 const PAGE = 25;
 
@@ -356,6 +358,18 @@ export function SiteStatusBoardView({
         )}
       </div>
 
+      {/* Charts — drawn from exactly the sites the filters leave in view. */}
+      {filtered.length > 0 && (
+        <BoardCharts
+          rows={filtered}
+          summary={summary}
+          incidents={feed.incidents}
+          now={now}
+          periodMs={periodMsOf(period)}
+          periodLabel={periodLabel.toLowerCase()}
+        />
+      )}
+
       {/* List */}
       {rows.length === 0 ? (
         <p className="py-6 text-sm text-muted-foreground">
@@ -484,5 +498,95 @@ function Row({ r, now }: { r: SiteStatusRow; now: number }) {
         {!r.hasPosition && " · no valid map position on record"}
       </p>
     </li>
+  );
+}
+
+const STATUS_BAR_TONE: Record<SiteStatusKey, BarTone> = {
+  review_now: "critical",
+  action_overdue: "warn",
+  insufficient: "muted",
+  stale: "muted",
+  recent_information: "primary",
+};
+
+function BoardCharts({
+  rows,
+  summary,
+  incidents,
+  now,
+  periodMs,
+  periodLabel,
+}: {
+  rows: SiteStatusRow[];
+  summary: ReturnType<typeof summarize>;
+  incidents: SiteStatusInputs["incidents"];
+  now: number;
+  periodMs: number | null;
+  periodLabel: string;
+}) {
+  const statuses = statusCounts(rows);
+  const counties = countyLoad(rows);
+  const topSites = topIncidentSites(rows);
+  const sev = incidentSeverityInPeriod(incidents, new Set(rows.map((r) => r.site.id)), now, periodMs);
+  const SEV_TONE: Record<string, BarTone> = { critical: "critical", high: "warn", medium: "primary", low: "ok" };
+  const none = <p className="text-xs text-muted-foreground">Nothing to show for the sites in view.</p>;
+
+  return (
+    <div className="grid min-w-0 gap-3 md:grid-cols-2" aria-label="Site status charts">
+      <ChartCard title="Sites by status" note="One primary status per site, most urgent first. Not a safety verdict.">
+        <BarList
+          items={statuses.map((s) => ({
+            label: `${STATUS_META[s.status].glyph} ${STATUS_META[s.status].label}`,
+            value: s.count,
+            tone: STATUS_BAR_TONE[s.status],
+          }))}
+          max={Math.max(1, summary.sites)}
+        />
+      </ChartCard>
+
+      <ChartCard title="Age of verified information" note={`Latest approved inspection; policy window ${STALE_AFTER_DAYS} days.`}>
+        <BarList
+          items={[
+            { label: `Within ${STALE_AFTER_DAYS} days`, value: summary.recentApproved, tone: "primary" },
+            { label: `Older than ${STALE_AFTER_DAYS} days`, value: summary.stale, tone: "muted" },
+            { label: "No approved inspection", value: summary.noApprovedInspection, tone: "warn" },
+          ]}
+          max={Math.max(1, summary.sites)}
+        />
+      </ChartCard>
+
+      <ChartCard title={`Incidents by severity (${periodLabel})`} note="Reported by companies; not independently verified.">
+        <BarList
+          items={sev.map((s) => ({ label: prettify(s.severity), value: s.count, tone: SEV_TONE[s.severity] }))}
+        />
+      </ChartCard>
+
+      <ChartCard title={`Sites with most incidents (${periodLabel})`}>
+        {topSites.length === 0 ? none : <BarList items={topSites} tone="primary" />}
+      </ChartCard>
+
+      <div className="md:col-span-2">
+        <ChartCard title="Open critical findings, overdue actions and incidents by county" note="Counties with at least one of these; top six.">
+          {counties.length === 0 ? (
+            none
+          ) : (
+            <div className="grid min-w-0 gap-6 sm:grid-cols-3">
+              <div>
+                <p className="mb-2 text-xs font-medium">Open critical findings</p>
+                <BarList items={counties.map((c) => ({ label: c.county, value: c.openCritical }))} tone="critical" />
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-medium">Overdue corrective actions</p>
+                <BarList items={counties.map((c) => ({ label: c.county, value: c.overdue }))} tone="warn" />
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-medium">Incidents ({periodLabel})</p>
+                <BarList items={counties.map((c) => ({ label: c.county, value: c.incidents }))} tone="primary" />
+              </div>
+            </div>
+          )}
+        </ChartCard>
+      </div>
+    </div>
   );
 }
