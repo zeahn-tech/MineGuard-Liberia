@@ -133,7 +133,11 @@ export default function OperatorAnalytics() {
 
           <Panel title="Incidents by location">
             {loc.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No incidents recorded.</p>
+              <EmptyState
+                icon={BarChart3}
+                title="No incident locations yet"
+                why="Locations appear here once an incident is reported at one of your sites."
+              />
             ) : (
               <ul className="space-y-2">
                 {loc.map((l) => (
@@ -164,7 +168,11 @@ export default function OperatorAnalytics() {
               </p>
             )}
             {reporters.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No reports or JSAs yet.</p>
+              <EmptyState
+                icon={BarChart3}
+                title="No active reporters yet"
+                why="Workers appear here once they submit an incident report or file a job safety analysis."
+              />
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
