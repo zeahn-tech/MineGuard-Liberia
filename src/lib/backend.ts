@@ -2733,6 +2733,25 @@ export const api = {
         ["organization_members", "organizations"],
       ),
 
+    /** Display names of the company's active members (migration 0045) — any active member may
+     *  ask; no emails. Release order: before 0045 is applied it yields an empty list. */
+    memberNames: (args: { organizationId: string }) =>
+      live<{ userId: string; name: string | null }[]>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase.rpc("mg_company_member_names", { p_org: args.organizationId });
+          if (error && (error.code === "PGRST202" || /could not find the function/i.test(error.message ?? ""))) {
+            return [];
+          }
+          if (error) throw backendError(error);
+          return ((data ?? []) as AnyRow[]).map((r) => ({
+            userId: r.user_id as string,
+            name: (r.name as string) ?? null,
+          }));
+        },
+        ["organization_members", "profiles"],
+      ),
+
     list: (args: { organizationId: string }) =>
       live<{ members: WorkforceMember[]; invitations: CompanyInvitation[] }>(
         async () => {
