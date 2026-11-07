@@ -280,7 +280,17 @@ describe("authorization and organization isolation", () => {
     expect(byId.abstained).toBe(true);
     const wide = await ok(f.opB, { capability: "incident_trend_summary", days: 365 });
     for (const id of wide.citations) expect(aIds.has(id)).toBe(false);
-    expect((wide.data as any).incidents.current).toBe(2); // tenant B's own two
+    // The in-process test database is shared across test files, so other files may add their own
+    // tenant-B incidents (depending on file order). Assert against an independent oracle instead of a
+    // hard-coded 2: tenant B's incidents in the window, counted straight from SQL by the site's operator.
+    const bOwn = await adminSql(`select count(*)::int n from public.incidents i join public.sites s on s.id = i.site_id where s.operator_name = (select operator_name from public.sites where id='${f.siteB}') and i.occurred_at >= now() - interval '365 days' and i.occurred_at <= now()`);
+    const current = (wide.data as any).incidents.current;
+    expect(current).toBe(Number(bOwn[0].n));
+    expect(current).toBeGreaterThanOrEqual(2); // at least the two seeded for tenant B
+    // ...and none of tenant A's seeded incidents may be counted or cited.
+    const aInWindow = Number((await adminSql(`select count(*)::int n from public.incidents where site_id='${f.siteA}' and occurred_at >= now() - interval '365 days'`))[0].n);
+    expect(aInWindow).toBeGreaterThan(0);
+    expect(wide.citations.some((id) => aIds.has(id))).toBe(false);
     const pat = await ok(f.opB, { capability: "risk_patterns", months: 12 });
     expect(pat.abstained).toBe(true); // only 2 incidents visible: insufficient history
     expect(pat.abstainReason).toContain("Not enough history");

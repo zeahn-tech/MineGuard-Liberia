@@ -193,11 +193,17 @@ describe("through the real handler", () => {
     expect((await ask(f.opA, { capability: "safety_guidance", query: "x", pad: "y".repeat(40_000) })).status).toBe(400);
   });
   test("the rate limit applies to the new capabilities", async () => {
-    // the request log is append-only, so use a caller no other test in this file has used
-    const lim = { rateLimitPerHour: 2 };
+    // The request log is append-only and the in-process test database is shared by every test file,
+    // so other files (e.g. ai-insights) may already have logged requests for this caller within the
+    // hour, depending on file order. The limit is therefore set RELATIVE to what is already logged:
+    // exactly two more requests fit, the third is refused. (Same pattern as tests/ai-insights.test.ts.)
+    const n = Number((await adminSql(`select count(*)::int n from public.ai_request_log where user_id='${f.county}' and created_at > now() - interval '1 hour'`))[0].n);
+    const lim = { rateLimitPerHour: n + 2 };
     expect((await ask(f.county, { capability: "safety_guidance", query: "adit" }, lim)).status).toBe(200);
     expect((await ask(f.county, { capability: "jsa_suggestions", task: "Work on a ladder at height" }, lim)).status).toBe(200);
-    expect((await ask(f.county, { capability: "safety_guidance", query: "adit" }, lim)).status).toBe(429);
+    const blocked = await ask(f.county, { capability: "safety_guidance", query: "adit" }, lim);
+    expect(blocked.status).toBe(429);
+    expect((blocked.body as { error: string }).error).toBe("RATE_LIMITED");
   });
   test("the log holds a hash and length of the question, never the question or the answer", async () => {
     const secret = "unique-marker-zebra-4471 ladder at height";
