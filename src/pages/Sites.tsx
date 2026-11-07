@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { COUNTIES } from "@/lib/counties";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { SiteLocationPicker } from "@/components/SiteLocationPicker";
 import {
@@ -22,14 +23,17 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
-import { toast } from "sonner";
-import { Plus, MapPin, MapPinOff, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, MapPin, MapPinOff, ChevronLeft, ChevronRight, Landmark } from "lucide-react";
+import { PageLoading } from "@/components/PageLoading";
+import { EmptyState } from "@/components/EmptyState";
+import { FormField } from "@/components/FormField";
+import { FieldError } from "@/components/ui/field";
+import { useFormDraft } from "@/hooks/use-form-draft";
+import { suggestFromList } from "@/lib/did-you-mean";
+import { toastError, toastSuccess } from "@/lib/feedback";
+import { SITE_FIELD_ORDER, validateSite, type SiteField } from "@/lib/form-rules";
+import { firstInvalid, focusField, hasErrors, type FieldErrors } from "@/lib/validation";
 
-const COUNTIES = [
-  "Bomi", "Bong", "Gbarpolu", "Grand Bassa", "Grand Cape Mount", "Grand Gedeh",
-  "Grand Kru", "Lofa", "Margibi", "Maryland", "Montserrado", "Nimba",
-  "River Cess", "River Gee", "Sinoe",
-];
 
 const STATUS_STYLES: Record<string, string> = {
   active: "text-foreground",
@@ -44,6 +48,7 @@ export default function Sites() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const [registerOpen, setRegisterOpen] = useState(false);
 
   // Company filter (kept in the address, so a company page can link straight to its sites).
   const [params, setParams] = useSearchParams();
@@ -93,7 +98,7 @@ export default function Sites() {
             geography permit.
           </p>
         </div>
-        {isAdmin && <RegisterSiteDialog />}
+        {isAdmin && <RegisterSiteDialog open={registerOpen} onOpenChange={setRegisterOpen} />}
       </header>
 
       {sites && sites.length > 0 && companyOptions.length > 0 && (
@@ -120,14 +125,18 @@ export default function Sites() {
       )}
 
       {!sites ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>
+        <PageLoading shape="list" label="sites" />
       ) : sites.length === 0 ? (
-        <div className="paper p-10 text-center">
-          <p className="text-sm text-muted-foreground">
-            No sites registered in your scope yet. An administrator can register
-            sites here.
-          </p>
-        </div>
+        <EmptyState
+          icon={Landmark}
+          title="No sites registered yet"
+          why={
+            isAdmin
+              ? "Inspections, incidents and observations all hang off a registered site, so nothing else can be recorded until one exists."
+              : "Inspections, incidents and observations all hang off a registered site. An administrator registers sites — once they do, the ones in your area appear here."
+          }
+          action={isAdmin ? { label: "Register the first site", onClick: () => setRegisterOpen(true) } : undefined}
+        />
       ) : (
         <div className="relative overflow-hidden rounded-sm border border-border">
           {/* Edge-pan buttons: shown only while more content exists in that
@@ -259,36 +268,65 @@ export default function Sites() {
   );
 }
 
-function RegisterSiteDialog() {
+function blankSite() {
+  return { name: "", operatorName: "", county: "", district: "", community: "", mineralType: "", notes: "" };
+}
+
+const SITE_IDS: Record<SiteField, string> = {
+  name: "site-name",
+  operatorName: "site-company",
+  county: "site-county",
+};
+
+function RegisterSiteDialog({
+  open: openProp,
+  onOpenChange,
+}: {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
   const create = useMutation(api.sites.create);
   const companies = useQuery(api.companies.approvedOptions);
-  const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = onOpenChange ?? setOpenState;
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    name: "", operatorName: "", county: "",
-    district: "", community: "", mineralType: "",
-    notes: "",
-  });
+  const { form, setForm, restoredAt, hasDraft, clearDraft, discardDraft } = useFormDraft(
+    "site-registration",
+    blankSite(),
+  );
   const [position, setPosition] = useState<PositionDraft>(EMPTY_POSITION_DRAFT);
-  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm((f) => ({ ...f, [k]: e.target.value }));
+  const [errors, setErrors] = useState<FieldErrors<SiteField>>({});
+  const [positionError, setPositionError] = useState<string | undefined>();
+  const [attempted, setAttempted] = useState(false);
+  const set = (k: keyof ReturnType<typeof blankSite>) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const next = { ...form, [k]: e.target.value };
+    setForm(next);
+    if (attempted) setErrors(validateSite(next));
+  };
+  // A typo in the county is pointed out, but never blocks the form: the list is
+  // a guide, and rejecting free text could lock out a legitimate spelling.
+  const countyHint = suggestFromList(form.county, COUNTIES);
 
   const submit = async () => {
     if (saving) return;
-    if (!form.name || !form.operatorName || !form.county) {
-      toast.error("Name, company and county are required.");
-      return;
-    }
+    const found = validateSite(form);
+    setErrors(found);
+    setAttempted(true);
     // Validate the position BEFORE saving: a site that can never be mapped is
     // worse than a slower form.
     const pos = parsePositionInput(position.latitude, position.longitude);
-    if (pos.kind === "error") {
-      toast.error(pos.error);
+    setPositionError(pos.kind === "error" ? pos.error : undefined);
+    if (hasErrors(found)) {
+      const first = firstInvalid(found, SITE_FIELD_ORDER);
+      if (first) focusField(SITE_IDS[first]);
       return;
     }
+    if (pos.kind === "error") return;
     setSaving(true);
     try {
-      await create({
+      const id = await create({
         name: form.name,
         operatorName: form.operatorName,
         county: form.county,
@@ -305,14 +343,20 @@ function RegisterSiteDialog() {
           : {}),
         notes: form.notes || undefined,
       });
-      toast.success("Site registered");
+      toastSuccess({
+        title: `${form.name.trim()} registered.`,
+        reassure: "It starts as pending verification and the registration is in the audit log.",
+        next: id ? { label: "Open site", onClick: () => navigate(`/portal/sites/${id}`) } : undefined,
+      });
       setOpen(false);
-      setForm({ name: "", operatorName: "", county: "", district: "", community: "", mineralType: "", notes: "" });
+      setForm(blankSite());
+      clearDraft();
       setPosition(EMPTY_POSITION_DRAFT);
+      setErrors({});
+      setPositionError(undefined);
+      setAttempted(false);
     } catch (e) {
-      toast.error(
-        e instanceof Error ? e.message.replace(/^[A-Z_]+:\s*/, "") : "Failed to register site",
-      );
+      toastError(e, { action: "register the site" });
     } finally {
       setSaving(false);
     }
@@ -322,7 +366,7 @@ function RegisterSiteDialog() {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button>
-          <Plus className="size-4" /> Register site
+          <Plus className="size-4" /> {hasDraft ? "Resume draft" : "Register site"}
         </Button>
       </DialogTrigger>
       <DialogContent className="paper max-h-[85vh] overflow-y-auto">
@@ -333,59 +377,124 @@ function RegisterSiteDialog() {
             pending verification. The action is audit logged.
           </DialogDescription>
         </DialogHeader>
+        {restoredAt && (
+          <p role="status" className="flex flex-wrap items-center gap-x-2 rounded-sm border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+            <span>
+              Restored your unsaved draft from{" "}
+              {new Date(restoredAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}. The map position
+              isn't kept in drafts — set it again.
+            </span>
+            <button type="button" className="font-medium text-foreground underline underline-offset-2" onClick={discardDraft}>
+              Start over
+            </button>
+          </p>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label>Site name *</Label>
-            <Input value={form.name} onChange={set("name")} placeholder="e.g. Zorzor Corridor Operation" />
-          </div>
+          <FormField label="Site name" required id={SITE_IDS.name} error={errors.name} className="sm:col-span-2">
+            {(a11y) => (
+              <Input {...a11y} value={form.name} onChange={set("name")} placeholder="e.g. Zorzor Corridor Operation" />
+            )}
+          </FormField>
           <div className="space-y-1.5">
-            <Label>Operator company *</Label>
             {companies !== undefined && companies.length === 0 ? (
-              <p className="rounded-md border p-2 text-xs text-muted-foreground">
-                No approved company yet. <Link className="underline" to="/portal/companies">Register one in Companies</Link> first.
-              </p>
-            ) : (
               <>
-                <Select value={form.operatorName} onValueChange={(v) => setForm((f) => ({ ...f, operatorName: v }))}>
-                  <SelectTrigger aria-label="Operator company"><SelectValue placeholder="Choose a registered company" /></SelectTrigger>
-                  <SelectContent>
-                    {(companies ?? []).map((c) => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Only registered, approved companies are listed. New company? <Link className="underline" to="/portal/companies">Register it first</Link>.
+                <Label>Operator company *</Label>
+                <p className="rounded-md border p-2 text-xs text-muted-foreground">
+                  No approved company yet. <Link className="underline" to="/portal/companies">Register one in Companies</Link> first.
                 </p>
               </>
+            ) : (
+              <FormField
+                label="Operator company"
+                required
+                id={SITE_IDS.operatorName}
+                error={errors.operatorName}
+                hint={
+                  <>
+                    Only registered, approved companies are listed. New company?{" "}
+                    <Link className="underline" to="/portal/companies">Register it first</Link>.
+                  </>
+                }
+              >
+                {(a11y) => (
+                  <Select
+                    value={form.operatorName}
+                    onValueChange={(v) => {
+                      const next = { ...form, operatorName: v };
+                      setForm(next);
+                      if (attempted) setErrors(validateSite(next));
+                    }}
+                  >
+                    <SelectTrigger {...a11y} aria-label="Operator company"><SelectValue placeholder="Choose a registered company" /></SelectTrigger>
+                    <SelectContent>
+                      {(companies ?? []).map((c) => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+              </FormField>
             )}
           </div>
+          <FormField
+            label="County"
+            required
+            id={SITE_IDS.county}
+            error={errors.county}
+            hint={
+              countyHint ? (
+                <>
+                  Did you mean{" "}
+                  <button
+                    type="button"
+                    className="font-medium text-foreground underline underline-offset-2"
+                    onClick={() => {
+                      const next = { ...form, county: countyHint };
+                      setForm(next);
+                      if (attempted) setErrors(validateSite(next));
+                    }}
+                  >
+                    {countyHint}
+                  </button>
+                  ?
+                </>
+              ) : undefined
+            }
+          >
+            {(a11y) => (
+              <>
+                <Input {...a11y} value={form.county} onChange={set("county")} placeholder="Nimba" list="mg-counties" />
+                <datalist id="mg-counties">
+                  {COUNTIES.map((c) => <option key={c} value={c} />)}
+                </datalist>
+              </>
+            )}
+          </FormField>
           <div className="space-y-1.5">
-            <Label>County *</Label>
-            <Input value={form.county} onChange={set("county")} placeholder="Nimba" list="mg-counties" />
-            <datalist id="mg-counties">
-              {COUNTIES.map((c) => <option key={c} value={c} />)}
-            </datalist>
+            <Label htmlFor="site-district">District</Label>
+            <Input id="site-district" value={form.district} onChange={set("district")} />
           </div>
           <div className="space-y-1.5">
-            <Label>District</Label>
-            <Input value={form.district} onChange={set("district")} />
+            <Label htmlFor="site-community">Community</Label>
+            <Input id="site-community" value={form.community} onChange={set("community")} />
           </div>
           <div className="space-y-1.5">
-            <Label>Community</Label>
-            <Input value={form.community} onChange={set("community")} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Mineral type</Label>
-            <Input value={form.mineralType} onChange={set("mineralType")} placeholder="Gold, iron ore, sand…" />
+            <Label htmlFor="site-mineral">Mineral type</Label>
+            <Input id="site-mineral" value={form.mineralType} onChange={set("mineralType")} placeholder="Gold, iron ore, sand…" />
           </div>
           <div className="space-y-1.5">
             <Label>Map position (optional)</Label>
-            <SiteLocationPicker value={position} onChange={setPosition} disabled={saving} autoLocate />
+            <SiteLocationPicker value={position} onChange={(p) => { setPosition(p); setPositionError(undefined); }} disabled={saving} autoLocate />
+            {positionError && <FieldError>{positionError}</FieldError>}
           </div>
           <div className="space-y-1.5 sm:col-span-2">
-            <Label>Notes</Label>
-            <Input value={form.notes} onChange={set("notes")} />
+            <Label htmlFor="site-notes">Notes</Label>
+            <Input id="site-notes" value={form.notes} onChange={set("notes")} />
           </div>
         </div>
+        {attempted && (Object.values(errors).some(Boolean) || positionError) && (
+          <p role="alert" className="text-sm text-destructive">
+            Some fields need attention — marked above. Nothing has been saved yet.
+          </p>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
           <Button onClick={submit} disabled={saving}>

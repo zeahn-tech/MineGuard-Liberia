@@ -19,7 +19,7 @@ beforeAll(async () => {
   const db = await getDb();
   for (const m of [
     "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql",
-    "0035_profile_settings_photo_deletion.sql",
+    "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql",
   ]) await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
 });
 

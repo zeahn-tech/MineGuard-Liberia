@@ -24,6 +24,7 @@ import {
   uploadWithProgress,
 } from "./supabase";
 import { clearRecovery } from "./recovery";
+import { markDeliberateSignOut, setSignedOutNotice } from "./session-expiry";
 import { validateTemplateSections } from "./template-schema";
 import {
   validateRiskSettings,
@@ -96,7 +97,12 @@ import {
   type SiteBoundary,
   type UserProfile,
   type Company,
+  type ActivityItem,
+  type AdminUserRow,
+  type CompanyOversightRow,
+  type CompanyProfile,
   type CompanySearchResult,
+  type SiteRequest,
   type ImportOutcome,
   type ImportStatus,
   type MyMembership,
@@ -108,6 +114,7 @@ import {
   ROLES,
 } from "./types";
 import type { ImportRow } from "./csv-import";
+import type { SiteStatusInputs } from "./site-status";
 
 // ---------------------------------------------------------------------------
 // QUERY HANDLES — a Convex useQuery-compatible subscription surface
@@ -1680,8 +1687,8 @@ function liveDoc<T>(
 // ---------------------------------------------------------------------------
 
 /** Map Supabase auth errors to the stable message tokens Auth.tsx renders. */
-function authErrorMessage(
-  err: { message?: string } | null | undefined,
+export function authErrorMessage(
+  err: { message?: string; status?: number; code?: string } | null | undefined,
 ): string {
   const m = (err?.message ?? "").toLowerCase();
   if (m.includes("invalid login credentials")) return "INCORRECT_CREDENTIALS";
@@ -1703,6 +1710,17 @@ function authErrorMessage(
   if (m.includes("different from the old password") || m.includes("same_password"))
     return "SAME_PASSWORD";
   if (m.includes("aal2") || m.includes("insufficient_aal")) return "MFA_REQUIRED";
+  // A login that exists but has been closed (account deletion with records kept).
+  if (m.includes("banned") || err?.code === "user_banned") return "ACCOUNT_DISABLED";
+  // The auth service itself failed (e.g. "Database error querying schema"): never
+  // pass its internals on to the screen.
+  if (
+    m.includes("database error") ||
+    m.includes("querying schema") ||
+    err?.code === "unexpected_failure" ||
+    (typeof err?.status === "number" && err.status >= 500)
+  )
+    return "AUTH_SERVICE_ERROR";
   return err?.message ?? "AUTH_FAILED";
 }
 
@@ -1838,17 +1856,41 @@ export async function signInGuest() {
 }
 
 export async function signOut() {
+  markDeliberateSignOut();
   clearRecovery(); // a deliberate sign-out also abandons a pending password reset
+  const leavingUserId = authUserId();
   await supabase.auth.signOut();
   profileCache = null;
   // Shared-device hygiene: remove cached offline data unless unsynced work is
   // still waiting (never destroy field data that has not reached the server).
+  // In-progress report forms follow the same rule as inspection drafts.
   try {
     const m = await import("./offline-queue");
-    await m.wipeOfflineDataIfSynced();
+    const wiped = await m.wipeOfflineDataIfSynced();
+    if (wiped && leavingUserId) {
+      const d = await import("./form-drafts");
+      await d.clearAllFormDrafts(leavingUserId);
+    }
   } catch {
     /* best effort — never block sign-out */
   }
+}
+
+/**
+ * Sign out because the person has been inactive (see session-expiry.ts).
+ *
+ * Unlike signOut(), this deliberately KEEPS everything on the device: the
+ * offline queue, inspection drafts and in-progress report forms. The whole
+ * point is that a timeout must never cost anyone their work; the sign-in
+ * screen says so, and the work is there when they sign back in. (An explicit
+ * "Sign out" still follows the shared-device rule above.)
+ */
+export async function signOutIdle() {
+  setSignedOutNotice("idle");
+  markDeliberateSignOut();
+  clearRecovery();
+  await supabase.auth.signOut();
+  profileCache = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1882,7 +1924,8 @@ type DerivedNotification = {
     | "org_request"
     | "org_decision"
     | "org_role"
-    | "org_status";
+    | "org_status"
+    | "org_site_request";
   /** Deadline notifications are state; the state is part of the stored key so
    *  due-soon → overdue is a NEW (unread, urgent) notification. */
   state?: "overdue" | "soon";
@@ -2222,6 +2265,274 @@ async function legacyCompanyList(): Promise<Company[]> {
 
 export const api = {
   // ----------------------------------------------------------------- users
+  /** Ministry cross-company oversight (migration 0039): numbers are scoped by the database to the caller. */
+  oversight: {
+    list: () =>
+      live<CompanyOversightRow[]>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase.rpc("mg_company_oversight");
+          if (error) throw backendError(error);
+          return ((data ?? []) as AnyRow[]).map((r) => ({
+            organizationId: r.organization_id as string,
+            name: r.name as string,
+            status: ((r.status as CompanyStatus) ?? "approved") as CompanyStatus,
+            sites: Number(r.sites ?? 0),
+            openActions: Number(r.open_actions ?? 0),
+            overdueActions: Number(r.overdue_actions ?? 0),
+            incidents30d: Number(r.incidents_30d ?? 0),
+            lastInspection: r.last_inspection ? Date.parse(r.last_inspection as string) : undefined,
+          }));
+        },
+        ["organizations", "sites", "corrective_actions", "incidents", "inspections"],
+      ),
+  },
+
+  /** Administrators finding and removing people (migration 0039). Every call is re-checked by the database. */
+  adminUsers: {
+    search: async (args: { query: string; offset?: number }): Promise<AdminUserRow[]> => {
+      await requireAdminUser();
+      const { data, error } = await supabase.rpc("mg_admin_user_directory", {
+        p_query: args.query || null,
+        p_limit: 25,
+        p_offset: args.offset ?? 0,
+      });
+      if (error) throw new Error("People could not be loaded.");
+      return ((data ?? []) as AnyRow[]).map((r) => ({
+        userId: r.user_id as string,
+        email: (r.email as string) ?? null,
+        name: (r.name as string) ?? null,
+        role: (r.role as string) ?? undefined,
+        company: (r.company as string) ?? undefined,
+        orgRole: (r.org_role as string) ?? undefined,
+        memberId: (r.member_id as string) ?? undefined,
+        createdAt: Date.parse(r.created_at as string),
+        removed: Boolean(r.removed),
+      }));
+    },
+    blockers: async (args: { userId: string }): Promise<{ code: string; message: string }[]> => {
+      await requireAdminUser();
+      const { data, error } = await supabase.rpc("mg_admin_account_deletion_blockers", { p_target: args.userId });
+      if (error) throw new Error(error.message.replace(/^[A-Z_]+:\s*/, "") || "Could not check.");
+      return (data ?? []) as { code: string; message: string }[];
+    },
+    /** Ends the person's company membership only; the account stays. */
+    removeFromCompany: async (args: { memberId: string }) => {
+      await requireAdminUser();
+      const { error } = await supabase.rpc("mg_revoke_member", { p_member_id: args.memberId });
+      if (error) throw friendlyInviteError(error.message);
+    },
+    /** Re-checks the administrator's password on the server, then removes / anonymizes the account. */
+    deleteAccount: async (args: { userId: string; confirmEmail: string; password: string }): Promise<{ mode: "removed" | "anonymized" }> => {
+      await requireAdminUser();
+      const { data, error } = await supabase.functions.invoke("account-delete", {
+        body: { confirm: "DELETE", targetUserId: args.userId, confirmEmail: args.confirmEmail, password: args.password },
+      });
+      if (error) {
+        let message = "The account could not be removed. Nothing was changed.";
+        try {
+          const ctx = (error as { context?: Response }).context;
+          const parsed = ctx ? ((await ctx.json()) as { message?: string }) : null;
+          if (parsed?.message) message = parsed.message;
+        } catch {
+          /* not JSON */
+        }
+        throw new Error(message);
+      }
+      return { mode: (data as { mode: "removed" | "anonymized" }).mode };
+    },
+  },
+
+  /** Curated activity history for a company, or for one site (migration 0038). */
+  activity: {
+    PAGE: 25,
+    page: async (args: {
+      organizationId: string;
+      siteId?: string;
+      before?: { atRaw: string; id: string };
+    }): Promise<{ items: ActivityItem[]; next: { atRaw: string; id: string } | null }> => {
+      await requireAuthed();
+      const limit = 25;
+      const { data, error } = await supabase.rpc("mg_company_activity", {
+        p_org: args.organizationId,
+        p_site: args.siteId ?? null,
+        p_limit: limit,
+        p_before: args.before?.atRaw ?? null,
+        p_before_id: args.before?.id ?? null,
+      });
+      if (error) throw new Error("The history could not be loaded.");
+      const items = ((data ?? []) as AnyRow[]).map((r) => ({
+        id: r.id as string,
+        atRaw: r.at as string,
+        at: Date.parse(r.at as string),
+        who: r.who as string,
+        subject: r.subject as string,
+        what: r.what as string,
+        detail: (r.detail as string) ?? undefined,
+      }));
+      const last = items[items.length - 1];
+      return { items, next: items.length === limit && last ? { atRaw: last.atRaw, id: last.id } : null };
+    },
+  },
+
+  /** A company's own contact details (migration 0037). */
+  companyProfile: {
+    get: (args: { organizationId: string }) =>
+      live<CompanyProfile | null>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase
+            .from("organizations")
+            .select("id,name,status,contact_email,contact_phone,address,website,description")
+            .eq("id", args.organizationId)
+            .maybeSingle();
+          if (error) throw backendError(error);
+          if (!data) return null;
+          const r = data as AnyRow;
+          return {
+            id: r.id as string,
+            name: r.name as string,
+            status: ((r.status as CompanyStatus) ?? "approved") as CompanyStatus,
+            contactEmail: (r.contact_email as string) ?? undefined,
+            contactPhone: (r.contact_phone as string) ?? undefined,
+            address: (r.address as string) ?? undefined,
+            website: (r.website as string) ?? undefined,
+            description: (r.description as string) ?? undefined,
+          };
+        },
+        ["organizations"],
+      ),
+    update: async (args: {
+      organizationId: string;
+      contactEmail: string;
+      contactPhone: string;
+      address: string;
+      website: string;
+      description: string;
+    }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_update_company_profile", {
+        p_org: args.organizationId,
+        p_contact_email: args.contactEmail,
+        p_contact_phone: args.contactPhone,
+        p_address: args.address,
+        p_website: args.website,
+        p_description: args.description,
+      });
+      if (error) throw new Error(error.message.replace(/^[A-Z_]+:\s*/, "") || "Could not save.");
+    },
+  },
+
+  /** Site registration requests (migration 0037): companies ask, the Ministry decides. */
+  siteRequests: {
+    list: () =>
+      live<SiteRequest[]>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase
+            .from("site_registration_requests")
+            .select("*, organizations(name)")
+            .order("created_at", { ascending: false })
+            .limit(200);
+          if (error) throw backendError(error);
+          return ((data ?? []) as AnyRow[]).map((r) => ({
+            id: r.id as string,
+            organizationId: r.organization_id as string,
+            companyName: ((r.organizations as AnyRow | null)?.name as string) ?? "",
+            name: r.name as string,
+            county: r.county as string,
+            district: (r.district as string) ?? undefined,
+            community: (r.community as string) ?? undefined,
+            mineralType: (r.mineral_type as string) ?? undefined,
+            latitude: r.latitude === null ? undefined : Number(r.latitude),
+            longitude: r.longitude === null ? undefined : Number(r.longitude),
+            notes: (r.notes as string) ?? undefined,
+            status: r.status as SiteRequest["status"],
+            decisionNote: (r.decision_note as string) ?? undefined,
+            siteId: (r.site_id as string) ?? undefined,
+            createdAt: Date.parse(r.created_at as string),
+            decidedAt: r.decided_at ? Date.parse(r.decided_at as string) : undefined,
+          }));
+        },
+        ["site_registration_requests"],
+      ),
+    request: async (args: {
+      organizationId: string;
+      name: string;
+      county: string;
+      district?: string;
+      community?: string;
+      mineralType?: string;
+      latitude?: number;
+      longitude?: number;
+      notes?: string;
+    }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_request_site", {
+        p_org: args.organizationId,
+        p_name: args.name,
+        p_county: args.county,
+        p_district: args.district ?? null,
+        p_community: args.community ?? null,
+        p_mineral: args.mineralType ?? null,
+        p_lat: args.latitude ?? null,
+        p_lng: args.longitude ?? null,
+        p_notes: args.notes ?? null,
+      });
+      if (error) throw new Error(error.message.replace(/^[A-Z_]+:\s*/, "") || "Could not send the request.");
+    },
+    cancel: async (args: { requestId: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_cancel_site_request", { p_id: args.requestId });
+      if (error) throw new Error("This request can no longer be cancelled.");
+    },
+    /** Ministry: approving registers the site through the normal validated flow, then links it. */
+    approve: async (request: SiteRequest) => {
+      await requireAdminUser();
+      const siteId = await api.sites.create({
+        name: request.name,
+        operatorName: request.companyName,
+        county: request.county,
+        district: request.district,
+        community: request.community,
+        mineralType: request.mineralType,
+        latitude: request.latitude,
+        longitude: request.longitude,
+        geoSource: "manual_entry",
+        notes: request.notes,
+      });
+      // The site now exists. Linking it to the request is retried once; if it still fails the
+      // person is told NOT to register the site again (it is already in Mining sites).
+      let linkError: unknown = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const { error } = await supabase.rpc("mg_decide_site_request", {
+          p_id: request.id,
+          p_decision: "approved",
+          p_note: null,
+          p_site: siteId,
+        });
+        linkError = error;
+        if (!error) break;
+      }
+      if (linkError) {
+        throw new Error(
+          `"${request.name}" was registered (find it in Mining sites) but the request could not be marked approved. Do not register it again — reload this page and try Approve once more, or tell an administrator.`,
+        );
+      }
+      return siteId;
+    },
+    reject: async (args: { requestId: string; note: string }) => {
+      await requireAdminUser();
+      const { error } = await supabase.rpc("mg_decide_site_request", {
+        p_id: args.requestId,
+        p_decision: "rejected",
+        p_note: args.note,
+        p_site: null,
+      });
+      if (error) throw new Error(error.message.replace(/^[A-Z_]+:\s*/, "") || "Could not decline the request.");
+    },
+  },
+
   /** The signed-in person's own profile: details, photo, and account deletion (migration 0035). */
   account: {
     updateProfile: async (args: { name: string; jobTitle: string }) => {
@@ -4320,6 +4631,106 @@ export const api = {
 
   // ----------------------------------------------------------------- stats
   stats: {
+    // ------------------------------------------------ Phase 1: site status board
+    // Feed for the National Mining Intelligence Dashboard's site-status board
+    // (src/lib/site-status.ts holds the documented rules). AUTHORIZATION IS
+    // ROW LEVEL SECURITY: every table is read through the caller's own
+    // Postgres session, so a company user receives only their company's
+    // sites and a scoped regulator only their scope — nothing is widened or
+    // re-derived here. DATA MINIMIZATION: only the columns the status rules
+    // need are selected — never descriptions, notes, answers, evidence,
+    // reporter or inspector identities, or community-report contact data.
+    siteStatusFeed: () =>
+      live<SiteStatusInputs>(
+        async () => {
+          const user = await requireAuthed(true);
+          const loadedAt = Date.now();
+          // Unassigned accounts: an honest empty snapshot, no denied queries.
+          if (!user.role)
+            return {
+              sites: [],
+              inspections: [],
+              findings: [],
+              actions: [],
+              incidents: [],
+              loadedAt,
+            };
+          const cols = (table: string, columns: string) =>
+            pagedRows<AnyRow>((from, to) =>
+              supabase
+                .from(table)
+                .select(columns)
+                .order("id", { ascending: true })
+                .range(from, to),
+            );
+          const [sites, inspections, findings, actions, incidents] =
+            await Promise.all([
+              cols(
+                "sites",
+                "id,code,name,operator_name,organization_id,county,district,status,latitude,longitude",
+              ),
+              cols(
+                "inspections",
+                "id,site_id,status,submitted_at,reviewed_at,created_at",
+              ),
+              cols("findings", "id,site_id,severity,status"),
+              cols("corrective_actions", "id,site_id,status,due_at"),
+              cols(
+                "incidents",
+                "id,site_id,severity,status,occurred_at,fatalities,created_at",
+              ),
+            ]);
+          return {
+            loadedAt,
+            sites: sites.map((r) => ({
+              id: r.id as string,
+              code: r.code,
+              name: r.name,
+              operatorName: r.operator_name,
+              organizationId: r.organization_id ?? undefined,
+              county: r.county,
+              district: r.district ?? undefined,
+              registryStatus: r.status,
+              latitude: r.latitude ?? undefined,
+              longitude: r.longitude ?? undefined,
+            })),
+            inspections: inspections.map((r) => ({
+              siteId: r.site_id,
+              status: r.status,
+              submittedAt: toMsOrNull(r.submitted_at) ?? undefined,
+              reviewedAt: toMsOrNull(r.reviewed_at) ?? undefined,
+              createdAt: toMs(r.created_at),
+            })),
+            findings: findings.map((r) => ({
+              siteId: r.site_id,
+              severity: r.severity,
+              status: r.status,
+            })),
+            actions: actions.map((r) => ({
+              siteId: r.site_id,
+              status: r.status,
+              dueAt: toMs(r.due_at),
+            })),
+            incidents: incidents.map((r) => ({
+              siteId: r.site_id,
+              severity: r.severity,
+              status: r.status,
+              occurredAt: toMs(r.occurred_at),
+              fatalities: r.fatalities ?? undefined,
+              createdAt: toMs(r.created_at),
+            })),
+          };
+        },
+        [
+          "sites",
+          "inspections",
+          "findings",
+          "corrective_actions",
+          "incidents",
+        ],
+        { authBound: true, timeoutMs: 60_000 },
+      ),
+
     // ------------------------------------------------ Session 9: trends + report
     // Time-series and per-county trends and the summary report are computed
     // IN SQL (migration 0021, SECURITY INVOKER): every figure is limited to

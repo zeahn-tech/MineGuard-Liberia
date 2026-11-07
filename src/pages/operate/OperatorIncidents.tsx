@@ -35,9 +35,15 @@ import { api } from "@/lib/backend";
 import { newClientRef, enqueueIncidentReport } from "@/lib/offline-queue";
 import { enqueuePendingEvidence } from "@/lib/offline-evidence";
 import type { Incident } from "@/lib/types";
-import { Loader2, Paperclip, Send, X } from "lucide-react";
+import { HeartPulse, Loader2, Paperclip, Send, X } from "lucide-react";
 import { useRef, useState } from "react";
-import { toast } from "sonner";
+import { EmptyState } from "@/components/EmptyState";
+import { FormField } from "@/components/FormField";
+import { useFormDraft } from "@/hooks/use-form-draft";
+import { toastError, toastProblem, toastSuccess } from "@/lib/feedback";
+import { INCIDENT_FIELD_ORDER, validateIncident, type IncidentField } from "@/lib/form-rules";
+import { firstInvalid, focusField, hasErrors, type FieldErrors } from "@/lib/validation";
+import { PageLoading } from "@/components/PageLoading";
 
 const DAY = 86_400_000;
 
@@ -58,20 +64,46 @@ const SEVERITIES: Incident["severity"][] = ["low", "medium", "high", "critical"]
 
 type PendingDoc = { file: File; siteId: string };
 
+function blankOperatorIncident() {
+  return {
+    siteId: "",
+    type: "near_miss" as Incident["type"],
+    severity: "low" as Incident["severity"],
+    description: "",
+    occurredAt: new Date(Date.now() - DAY).toISOString().slice(0, 10),
+    fatalities: "",
+    injured: "",
+  };
+}
+
+const OP_FIELD_IDS: Record<IncidentField, string> = {
+  siteId: "op-site",
+  description: "op-desc",
+  occurredAt: "op-date",
+  fatalities: "op-fatal",
+  injured: "op-inj",
+};
+
 function OperatorIncidentForm({ onDone }: { onDone: () => void }) {
   const sitesQ = useQuery(api.sites.list);
   const report = useMutation(api.records.reportIncident);
   const upload = useMutation(api.evidence.upload);
 
-  const [siteId, setSiteId] = useState<string>("");
-  const [type, setType] = useState<Incident["type"]>("near_miss");
-  const [severity, setSeverity] = useState<Incident["severity"]>("low");
-  const [description, setDescription] = useState("");
-  const [occurredAt, setOccurredAt] = useState<string>(() =>
-    new Date(Date.now() - DAY).toISOString().slice(0, 10),
+  // The written part of the report is kept safe on the device as it is typed
+  // (a timeout, a dropped connection or a closed tab must not lose it). Attached
+  // files can't be kept in a draft, so they are re-added after a restore.
+  const { form, setForm, restoredAt, saveFailed, clearDraft, discardDraft } = useFormDraft(
+    "operator-incident-report",
+    blankOperatorIncident(),
   );
-  const [fatalities, setFatalities] = useState("");
-  const [injured, setInjured] = useState("");
+  const { siteId, type, severity, description, occurredAt, fatalities, injured } = form;
+  const [errors, setErrors] = useState<FieldErrors<IncidentField>>({});
+  const [attempted, setAttempted] = useState(false);
+  const change = (patch: Partial<typeof form>) => {
+    const next = { ...form, ...patch };
+    setForm(next);
+    if (attempted) setErrors(validateIncident(next));
+  };
   const [docs, setDocs] = useState<PendingDoc[]>([]);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -83,11 +115,11 @@ function OperatorIncidentForm({ onDone }: { onDone: () => void }) {
     if (!files) return;
     for (const f of Array.from(files)) {
       if (f.size > 25 * 1024 * 1024) {
-        toast.error(`${f.name} is over the 25MB limit.`);
+        toastProblem({ what: `${f.name} is over the 25 MB limit.`, whose: "Larger files can't be stored with a report.", fix: "Choose a smaller file, or compress it first." });
         continue;
       }
       if (!siteId) {
-        toast.error("Choose the site before attaching documents.");
+        toastProblem({ what: "Choose the site first.", whose: "Documents are stored against a site.", fix: "Pick the site above, then attach your files." });
         return;
       }
       setDocs((d) => [...d, { file: f, siteId }]);
@@ -114,7 +146,7 @@ function OperatorIncidentForm({ onDone }: { onDone: () => void }) {
         ok++;
       } catch (err) {
         console.error("Document upload failed:", err);
-        toast.error(`Document ${d.file.name} failed to upload — attach it from the incident page later.`);
+        toastProblem({ what: `${d.file.name} didn't upload.`, whose: "The report itself was saved.", fix: "Open the incident from the list below and attach the file there." });
       }
     }
     return ok;
@@ -122,8 +154,12 @@ function OperatorIncidentForm({ onDone }: { onDone: () => void }) {
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!siteId || !description.trim()) {
-      toast.error("Site and description are required.");
+    const found = validateIncident(form);
+    setErrors(found);
+    setAttempted(true);
+    if (hasErrors(found)) {
+      const first = firstInvalid(found, INCIDENT_FIELD_ORDER);
+      if (first) focusField(OP_FIELD_IDS[first]);
       return;
     }
     setBusy(true);
@@ -142,7 +178,12 @@ function OperatorIncidentForm({ onDone }: { onDone: () => void }) {
       // Online path: submit directly (clientRef dedupe protects retries).
       const incidentId = await report(args);
       if (docs.length > 0) await uploadDocs(incidentId);
-      toast.success("Incident reported.");
+      toastSuccess({
+        title: "Incident reported.",
+        reassure: "It's saved and attributed to your account. You can follow its status in the list.",
+      });
+      setForm(blankOperatorIncident());
+      clearDraft();
       onDone();
     } catch (err) {
       // OFFLINE PATH: persist to the device queue — nothing silently dropped.
@@ -181,24 +222,34 @@ function OperatorIncidentForm({ onDone }: { onDone: () => void }) {
             });
           }
         } catch (e) {
-          const m = e instanceof Error ? e.message : String(e);
-          toast.error(`NOT saved on this device — ${m}`);
+          toastError(e, { action: "save the report on this device" });
           return; // stay in the form: the data exists only here right now
         }
-        toast.info(
-          `You appear to be offline — the report${docs.length > 0 ? ` and ${docs.length} document(s)` : ""} saved on this device will sync automatically.`,
-        );
+        toastSuccess({
+          title: "Saved on this device.",
+          reassure: `You appear to be offline. The report${docs.length > 0 ? ` and ${docs.length} document${docs.length === 1 ? "" : "s"}` : ""} will be sent automatically when you reconnect — nothing is lost.`,
+        });
+        setForm(blankOperatorIncident());
+        clearDraft();
         onDone();
         return;
       }
       console.error("Incident report failed:", err);
-      toast.error(
-        msg.includes("NOT_FOUND")
-          ? "That site is not visible to your account."
-          : msg.includes("FORBIDDEN")
-            ? "You can only report incidents on your own company's sites."
-            : "Could not submit the report.",
-      );
+      if (msg.includes("NOT_FOUND")) {
+        toastProblem({
+          what: "That site isn't visible to your account.",
+          whose: "It may have been removed or reassigned.",
+          fix: "Choose another site from the list. If it should be there, ask your company administrator.",
+        });
+      } else if (msg.includes("FORBIDDEN")) {
+        toastProblem({
+          what: "You can only report incidents on your own company's sites.",
+          whose: "The site you chose belongs to another company.",
+          fix: "Choose one of your company's sites from the list.",
+        });
+      } else {
+        toastError(err, { action: "submit the incident report" });
+      }
     } finally {
       setBusy(false);
     }
@@ -215,12 +266,24 @@ function OperatorIncidentForm({ onDone }: { onDone: () => void }) {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={submit} className="space-y-3">
+        <form onSubmit={submit} noValidate className="space-y-3">
+          {restoredAt && (
+            <p role="status" className="flex flex-wrap items-center gap-x-2 rounded-sm border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+              <span>
+                Restored your unsaved draft from{" "}
+                {new Date(restoredAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}. Attached
+                files aren't kept in drafts — add them again.
+              </span>
+              <button type="button" className="font-medium text-foreground underline underline-offset-2" onClick={discardDraft}>
+                Start over
+              </button>
+            </p>
+          )}
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="op-site">Site</Label>
-              <Select value={siteId} onValueChange={setSiteId} disabled={busy}>
-                <SelectTrigger id="op-site">
+            <FormField label="Site" required id={OP_FIELD_IDS.siteId} error={errors.siteId}>
+              {(a11y) => (
+              <Select value={siteId} onValueChange={(v) => change({ siteId: v })} disabled={busy}>
+                <SelectTrigger {...a11y}>
                   <SelectValue placeholder="Your sites…" />
                 </SelectTrigger>
                 <SelectContent>
@@ -231,21 +294,22 @@ function OperatorIncidentForm({ onDone }: { onDone: () => void }) {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="op-date">Occurred on</Label>
-              <Input
-                id="op-date"
-                type="date"
-                value={occurredAt}
-                onChange={(e) => setOccurredAt(e.target.value)}
-                disabled={busy}
-                required
-              />
-            </div>
+              )}
+            </FormField>
+            <FormField label="Occurred on" required id={OP_FIELD_IDS.occurredAt} error={errors.occurredAt}>
+              {(a11y) => (
+                <Input
+                  {...a11y}
+                  type="date"
+                  value={occurredAt}
+                  onChange={(e) => change({ occurredAt: e.target.value })}
+                  disabled={busy}
+                />
+              )}
+            </FormField>
             <div className="space-y-1.5">
               <Label htmlFor="op-type">Type</Label>
-              <Select value={type} onValueChange={(v) => setType(v as Incident["type"])} disabled={busy}>
+              <Select value={type} onValueChange={(v) => change({ type: v as Incident["type"] })} disabled={busy}>
                 <SelectTrigger id="op-type">
                   <SelectValue />
                 </SelectTrigger>
@@ -260,7 +324,7 @@ function OperatorIncidentForm({ onDone }: { onDone: () => void }) {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="op-sev">Severity</Label>
-              <Select value={severity} onValueChange={(v) => setSeverity(v as Incident["severity"])} disabled={busy}>
+              <Select value={severity} onValueChange={(v) => change({ severity: v as Incident["severity"] })} disabled={busy}>
                 <SelectTrigger id="op-sev">
                   <SelectValue />
                 </SelectTrigger>
@@ -273,43 +337,45 @@ function OperatorIncidentForm({ onDone }: { onDone: () => void }) {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="op-fatal">Fatalities (if any)</Label>
-              <Input
-                id="op-fatal"
-                type="number"
-                min={0}
-                value={fatalities}
-                onChange={(e) => setFatalities(e.target.value)}
-                placeholder="0"
+            <FormField label="Fatalities (if any)" id={OP_FIELD_IDS.fatalities} error={errors.fatalities}>
+              {(a11y) => (
+                <Input
+                  {...a11y}
+                  type="number"
+                  min={0}
+                  value={fatalities}
+                  onChange={(e) => change({ fatalities: e.target.value })}
+                  placeholder="0"
+                  disabled={busy}
+                />
+              )}
+            </FormField>
+            <FormField label="Injured (if any)" id={OP_FIELD_IDS.injured} error={errors.injured}>
+              {(a11y) => (
+                <Input
+                  {...a11y}
+                  type="number"
+                  min={0}
+                  value={injured}
+                  onChange={(e) => change({ injured: e.target.value })}
+                  placeholder="0"
+                  disabled={busy}
+                />
+              )}
+            </FormField>
+          </div>
+          <FormField label="What happened" required id={OP_FIELD_IDS.description} error={errors.description}>
+            {(a11y) => (
+              <Textarea
+                {...a11y}
+                value={description}
+                onChange={(e) => change({ description: e.target.value })}
+                rows={4}
+                placeholder="Describe the incident factually…"
                 disabled={busy}
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="op-inj">Injured (if any)</Label>
-              <Input
-                id="op-inj"
-                type="number"
-                min={0}
-                value={injured}
-                onChange={(e) => setInjured(e.target.value)}
-                placeholder="0"
-                disabled={busy}
-              />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="op-desc">What happened</Label>
-            <Textarea
-              id="op-desc"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={4}
-              placeholder="Describe the incident factually…"
-              disabled={busy}
-              required
-            />
-          </div>
+            )}
+          </FormField>
 
           {/* Document submission */}
           <div className="space-y-1.5">
@@ -355,7 +421,21 @@ function OperatorIncidentForm({ onDone }: { onDone: () => void }) {
             </p>
           </div>
 
-          <Button type="submit" className="w-full" disabled={busy || !siteId || !description.trim()}>
+          {attempted && Object.values(errors).some(Boolean) && (
+            <p role="alert" className="text-sm text-destructive">
+              {Object.values(errors).filter(Boolean).length === 1
+                ? "One field needs attention"
+                : `${Object.values(errors).filter(Boolean).length} fields need attention`}{" "}
+              — marked above.
+            </p>
+          )}
+          {saveFailed && (
+            <p role="status" className="text-xs text-muted-foreground">
+              This device couldn't keep a draft of this form (its storage may be full or blocked). Submit it now so
+              nothing is lost.
+            </p>
+          )}
+          <Button type="submit" className="w-full" disabled={busy}>
             {busy ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" strokeWidth={1.5} />}
             Submit incident report
           </Button>
@@ -396,12 +476,15 @@ export default function OperatorIncidents() {
       )}
 
       {incidentsQ === undefined && (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Loading…
-        </p>
+        <PageLoading shape="list" label="incidents" />
       )}
       {incidentsQ !== undefined && incidents.length === 0 && (
-        <p className="text-sm text-muted-foreground">No incidents reported.</p>
+        <EmptyState
+          icon={HeartPulse}
+          title="No incidents reported yet"
+          why="Nothing has been reported for your company's sites. When something happens, including a near miss, report it here so it is on record."
+          action={showForm ? undefined : { label: "Report an incident", onClick: () => setShowForm(true) }}
+        />
       )}
 
       <div className="space-y-3">

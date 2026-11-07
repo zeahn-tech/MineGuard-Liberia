@@ -17,6 +17,8 @@ import { useState } from "react";
 import { Navigate, useNavigate } from "react-router";
 import { PublicHeader } from "@/components/PublicHeader";
 import { toast } from "sonner";
+import { PageLoading } from "@/components/PageLoading";
+import { errorSentence } from "@/lib/error-messages";
 
 const ROLE_LABEL: Record<string, string> = {
   company_admin: "Company administrator",
@@ -37,7 +39,7 @@ export default function Invitation() {
   const [pw2, setPw2] = useState("");
   const [pwBusy, setPwBusy] = useState(false);
 
-  if (isLoading) return <p className="p-6 text-sm text-muted-foreground" role="status">Loading…</p>;
+  if (isLoading) return <PageLoading shape="form" label="invitation" className="p-6" />;
   if (!isAuthenticated) return <Navigate to="/auth?returnTo=%2Finvitation" replace />;
 
   async function accept(id: string) {
@@ -48,7 +50,7 @@ export default function Invitation() {
       toast.success("Invitation accepted. Welcome aboard.");
       navigate("/operate", { replace: true });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not accept the invitation.");
+      setError(errorSentence(e, { action: "accept the invitation" }));
     } finally {
       setBusyId(null);
     }
@@ -70,7 +72,7 @@ export default function Invitation() {
       setPw("");
       setPw2("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not create the account.");
+      setError(errorSentence(e, { action: "create your account" }));
     } finally {
       setPwBusy(false);
     }
@@ -87,7 +89,7 @@ export default function Invitation() {
       setPw("");
       setPw2("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save the password.");
+      setError(errorSentence(e, { action: "save your password" }));
     } finally {
       setPwBusy(false);
     }

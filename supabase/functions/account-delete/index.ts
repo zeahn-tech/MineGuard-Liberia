@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { handleAccountDeletion } from "../_shared/account/handler.ts";
+import { handleAccountDeletion, handleAdminAccountRemoval } from "../_shared/account/handler.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": Deno.env.get("INVITE_ALLOWED_ORIGIN") ?? "null",
@@ -49,7 +49,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, opts);
   const verifier = createClient(url, anonKey, opts);
 
-  const result = await handleAccountDeletion(
+  const isAdminMode = typeof (body as { targetUserId?: unknown } | null)?.targetUserId === "string";
+  const run = isAdminMode ? handleAdminAccountRemoval : handleAccountDeletion;
+  const result = await run(
     {
       db,
       verifyPassword: async (email, password) => {

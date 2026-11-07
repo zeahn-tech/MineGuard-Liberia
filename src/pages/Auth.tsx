@@ -20,6 +20,7 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import { useRecoveryState } from "@/hooks/use-recovery";
 import { clearRecovery, dismissRecoveryLinkError } from "@/lib/recovery";
+import { clearSignedOutNotice, peekSignedOutNotice, signedOutCopy } from "@/lib/session-expiry";
 import {
   mfaAal,
   resetPasswordEmail,
@@ -29,6 +30,9 @@ import {
 import { ArrowRight, KeyRound, Loader2, Mail, ShieldCheck, UserX } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
+import { FieldError } from "@/components/ui/field";
+import { confirmProblem, focusField, passwordProblem } from "@/lib/validation";
+import { authFailure } from "@/lib/auth-errors";
 
 interface AuthProps {
   redirectAfterAuth?: string;
@@ -67,6 +71,18 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Controlled so a sign-in failure can offer a one-tap switch to "Create account".
+  const [tab, setTab] = useState<"signin" | "signup">("signin");
+  const [offerSignUp, setOfferSignUp] = useState(false);
+  // Password problems are shown at the field they belong to, per form.
+  const [resetErrors, setResetErrors] = useState<{ password?: string; confirm?: string }>({});
+  const [signUpErrors, setSignUpErrors] = useState<{ password?: string; confirm?: string }>({});
+  // Why the person is here again, when the app (not they) ended the session.
+  // Read purely, cleared once shown, so a refresh does not repeat it.
+  const [signedOut] = useState(peekSignedOutNotice);
+  useEffect(() => {
+    if (signedOut) clearSignedOutNotice();
+  }, [signedOut]);
 
   // Password-recovery mode (deep link from the recovery email) and the
   // "forgot password" request panel are part of this page — Gap #4.
@@ -99,6 +115,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   // (src/lib/backend.ts authErrorMessage) — match on message text.
   const authMessage = (err: unknown, fallback: string) => {
     const msg = err instanceof Error ? err.message : "";
+    // Credentials / closed account / sign-in service failure: shared, tested copy.
+    const failure = authFailure(msg);
+    if (failure) return failure.message;
     if (msg.includes("RECOVERY_EXPIRED"))
       return "Your reset link has expired. Request a new one to continue.";
     if (msg.includes("SAME_PASSWORD"))
@@ -115,14 +134,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       return "The email service has reached its sending limit. Wait an hour and try again, or ask the administrator to confirm your account.";
     if (msg.includes("TOO_MANY_ATTEMPTS"))
       return "Too many attempts — please wait a moment and try again.";
-    if (
-      msg.includes("INCORRECT_CREDENTIALS") ||
-      msg.includes("Incorrect email or password") ||
-      msg.includes("invalid login credentials")
-    )
-      return "Incorrect email or password.";
-    if (msg.includes("No account with that email"))
-      return "No account with that email.";
     if (msg.includes("already exists"))
       return "An account already exists with that email — sign in instead.";
     if (msg.includes("too weak"))
@@ -142,6 +153,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     event.preventDefault();
     setIsLoading(true);
     setError(null);
+    setOfferSignUp(false);
     const fd = new FormData(event.currentTarget);
     try {
       const { mfaRequired: needsMfa } = await signInEmailMfaAware(
@@ -157,6 +169,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     } catch (err) {
       console.error("Sign-in error:", err);
       setError(authMessage(err, "Failed to sign in. Please try again."));
+      setOfferSignUp(Boolean(authFailure(err instanceof Error ? err.message : "")?.offerSignUp));
       setIsLoading(false);
     }
   };
@@ -205,16 +218,15 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     const fd = new FormData(event.currentTarget);
     const pw = String(fd.get("password") ?? "");
-    if (pw.length < 6) {
-      setError("Password must be at least 6 characters.");
+    const pwProblem = passwordProblem(pw);
+    const confirmIssue = pwProblem ? undefined : confirmProblem(pw, String(fd.get("confirm") ?? ""));
+    if (pwProblem || confirmIssue) {
+      setResetErrors({ password: pwProblem, confirm: confirmIssue });
+      focusField(pwProblem ? "np-password" : "np-confirm");
       setIsLoading(false);
       return;
     }
-    if (pw !== String(fd.get("confirm") ?? "")) {
-      setError("Passwords do not match.");
-      setIsLoading(false);
-      return;
-    }
+    setResetErrors({});
     try {
       await updatePassword(pw); // also releases the pending-recovery hold
       setSearchParams({}, { replace: true });
@@ -254,11 +266,15 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     const fd = new FormData(event.currentTarget);
     const password = String(fd.get("password") ?? "");
-    if (password !== String(fd.get("confirm") ?? "")) {
-      setError("Passwords do not match.");
+    const pwProblem = passwordProblem(password);
+    const confirmIssue = pwProblem ? undefined : confirmProblem(password, String(fd.get("confirm") ?? ""));
+    if (pwProblem || confirmIssue) {
+      setSignUpErrors({ password: pwProblem, confirm: confirmIssue });
+      focusField(pwProblem ? "su-password" : "su-confirm");
       setIsLoading(false);
       return;
     }
+    setSignUpErrors({});
     try {
       await signUpEmail(
         String(fd.get("email") ?? "").trim(),
@@ -311,25 +327,32 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <Input
+                    id="np-password"
                     name="password"
                     type="password"
                     placeholder="New password (min. 6 characters)"
                     aria-label="New password"
                     autoComplete="new-password"
-                    minLength={6}
+                    aria-invalid={resetErrors.password ? true : undefined}
+                    aria-describedby={resetErrors.password ? "np-password-error" : undefined}
                     disabled={isLoading}
                     required
                   />
+                  {resetErrors.password && <FieldError id="np-password-error">{resetErrors.password}</FieldError>}
                   <Input
+                    id="np-confirm"
                     name="confirm"
                     type="password"
                     placeholder="Confirm new password"
                     aria-label="Confirm new password"
                     autoComplete="new-password"
+                    aria-invalid={resetErrors.confirm ? true : undefined}
+                    aria-describedby={resetErrors.confirm ? "np-confirm-error" : undefined}
                     disabled={isLoading}
                     required
                   />
-                  {error && <p className="text-sm text-destructive">{error}</p>}
+                  {resetErrors.confirm && <FieldError id="np-confirm-error">{resetErrors.confirm}</FieldError>}
+                  {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
                 </CardContent>
                 <CardFooter className="flex-col gap-2">
                   <Button type="submit" className="w-full" disabled={isLoading}>
@@ -454,7 +477,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 )}
               </div>
             ) : (
-            <Tabs defaultValue="signin">
+            <Tabs value={tab} onValueChange={(v) => { setTab(v as "signin" | "signup"); setError(null); setOfferSignUp(false); }}>
               <CardHeader className="pb-2 text-center">
                 <p className="kicker">Authorized personnel</p>
                 <CardTitle role="heading" aria-level={1} className="display mt-1 text-2xl">
@@ -464,6 +487,15 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   Accounts are provisioned by the program office. All sign-ins
                   are attributed in the audit trail.
                 </CardDescription>
+                {signedOut && (
+                  <div
+                    role="status"
+                    className="mt-3 rounded-sm border border-border bg-muted/50 p-3 text-left text-sm"
+                  >
+                    <p className="font-medium">{signedOutCopy(signedOut).title}</p>
+                    <p className="mt-1 text-muted-foreground">{signedOutCopy(signedOut).body}</p>
+                  </div>
+                )}
               </CardHeader>
               <TabsList className="mx-auto grid w-[calc(100%-3rem)] grid-cols-2">
                 <TabsTrigger value="signin">Sign in</TabsTrigger>
@@ -496,7 +528,21 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       required
                     />
                     {error && (
-                      <p className="text-sm text-destructive">{error}</p>
+                      <p role="alert" className="text-sm text-destructive">{error}</p>
+                    )}
+                    {error && offerSignUp && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => {
+                          setTab("signup");
+                          setError(null);
+                          setOfferSignUp(false);
+                        }}
+                      >
+                        Create an account
+                      </Button>
                     )}
                   </CardContent>
                   <CardFooter className="flex-col gap-2">
@@ -560,26 +606,33 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       required
                     />
                     <Input
+                      id="su-password"
                       name="password"
                       placeholder="Password (min. 6 characters)"
                       type="password"
                       aria-label="Password"
                       autoComplete="new-password"
-                      minLength={6}
+                      aria-invalid={signUpErrors.password ? true : undefined}
+                      aria-describedby={signUpErrors.password ? "su-password-error" : undefined}
                       disabled={isLoading}
                       required
                     />
+                    {signUpErrors.password && <FieldError id="su-password-error">{signUpErrors.password}</FieldError>}
                     <Input
+                      id="su-confirm"
                       name="confirm"
                       placeholder="Confirm password"
                       aria-label="Confirm password"
                       type="password"
                       autoComplete="new-password"
+                      aria-invalid={signUpErrors.confirm ? true : undefined}
+                      aria-describedby={signUpErrors.confirm ? "su-confirm-error" : undefined}
                       disabled={isLoading}
                       required
                     />
+                    {signUpErrors.confirm && <FieldError id="su-confirm-error">{signUpErrors.confirm}</FieldError>}
                     {error && (
-                      <p className="text-sm text-destructive">{error}</p>
+                      <p role="alert" className="text-sm text-destructive">{error}</p>
                     )}
                     <p className="text-[11px] leading-relaxed text-muted-foreground">
                       New accounts start with no platform role. The first staff

@@ -1,6 +1,9 @@
 import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { StaffOnly } from "@/components/StaffOnly";
+import { PageLoading } from "@/components/PageLoading";
+import { EmptyState } from "@/components/EmptyState";
+import { ScrollText } from "lucide-react";
 
 export default function Audit() {
   const entries = useQuery(api.stats.recentAuditLog, {});
@@ -18,11 +21,14 @@ export default function Audit() {
       </header>
 
       {entries === undefined ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">Loading…</p>
+        <PageLoading shape="table" label="audit log" />
       ) : entries.length === 0 ? (
-        <div className="paper p-10 text-center text-sm text-muted-foreground">
-          No audit entries yet.
-        </div>
+        <EmptyState
+          icon={ScrollText}
+          title="No audit entries yet"
+          why="Every sign-in, status change and review in your area is recorded here the moment it happens, and nothing has happened yet."
+          action={{ label: "Open the command center", to: "/portal" }}
+        />
       ) : (
         <div className="scrollbar-hide overflow-x-auto rounded-sm border border-border">
           <table className="w-full text-sm">

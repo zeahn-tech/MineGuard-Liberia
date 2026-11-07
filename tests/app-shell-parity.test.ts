@@ -78,7 +78,7 @@ describe("operator pages keep the standard page gutter", () => {
     expect(read(`src/pages/operate/${file}`)).toContain("p-4 md:p-6");
   });
 
-  test.each(["OperatorTeam.tsx", "OperatorImport.tsx"])(
+  test.each(["OperatorTeam.tsx", "OperatorImport.tsx", "OperatorCompany.tsx", "OperatorSiteRequests.tsx"])(
     "%s: no unpadded root and no unpadded early-return states",
     (file) => {
       const src = read(`src/pages/operate/${file}`);
@@ -136,5 +136,34 @@ describe("public pages share one sticky banner", () => {
     const src = read(file);
     expect(src).toContain("<PublicHeader");
     expect(src).not.toContain('<header className="border-b border-border">');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SHARED PAGES — a page used by more than one shell must look the same in each.
+// The operator shell gives pages no padding of their own (each page owns its
+// gutter); the profile page is shared and has none, so its operator route must
+// supply exactly what the admin shell's <main> supplies.
+// ---------------------------------------------------------------------------
+
+describe("the shared profile page looks the same in the operator shell as in the admin shell", () => {
+  const main = read("src/main.tsx");
+  const adminPad = /<main id="main-content"[^>]*className="[^"]*(px-4 py-6 md:px-8 md:py-8)[^"]*"/.exec(
+    read("src/pages/PortalLayout.tsx"),
+  )?.[1];
+
+  test("the admin shell pads its main area (the reference)", () => {
+    expect(adminPad).toBe("px-4 py-6 md:px-8 md:py-8");
+  });
+
+  test("the operator profile route wraps the page in that same padding", () => {
+    const operate = main.slice(main.indexOf('path="/operate"'));
+    const route = operate.slice(operate.indexOf('path="profile"'), operate.indexOf("/>", operate.indexOf("</div>")) + 2);
+    expect(route).toContain(`className="${adminPad}"`);
+    expect(route).toContain("<ProfileSettings />");
+  });
+
+  test("the registry shell pads its main area too, so its profile route needs no wrapper", () => {
+    expect(read("src/pages/RegistryLayout.tsx")).toContain("px-4 py-6 md:px-8 md:py-8");
   });
 });

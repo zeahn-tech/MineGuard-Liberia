@@ -13,6 +13,7 @@ import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 import { useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import { TREND_METRICS, trendMetricLabel, type TrendBucket, type TrendMetric } from "@/lib/reporting";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const BUCKETS: { key: TrendBucket; label: string }[] = [
   { key: "day", label: "Daily (30 days)" },
@@ -78,7 +79,11 @@ export default function TrendsPanel() {
       </div>
 
       {series === undefined ? (
-        <p className="py-6 text-sm text-muted-foreground">Loading trend…</p>
+        <div role="status" aria-busy="true" className="space-y-2 py-4">
+          <span className="sr-only">Loading trend…</span>
+          <Skeleton className="h-4 w-1/3 motion-reduce:animate-none" aria-hidden="true" />
+          <Skeleton className="h-40 w-full motion-reduce:animate-none" aria-hidden="true" />
+        </div>
       ) : series === null ? (
         <p className="py-6 text-sm text-muted-foreground">No trend data for this account.</p>
       ) : (

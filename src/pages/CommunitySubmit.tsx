@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { useMutation } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
-import { toast } from "sonner";
 import { PublicHeader } from "@/components/PublicHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +15,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ShieldCheck } from "lucide-react";
+import { FormField } from "@/components/FormField";
+import { toastError, toastProblem } from "@/lib/feedback";
+import { COMMUNITY_FIELD_ORDER, validateCommunityReport, type CommunityField } from "@/lib/form-rules";
+import { firstInvalid, focusField, hasErrors, type FieldErrors } from "@/lib/validation";
 
 const CATEGORIES = [
   { value: "suspected_illegal_mining", label: "Suspected illegal mining" },
@@ -32,6 +35,15 @@ const COUNTIES = [
   "River Cess", "River Gee", "Sinoe",
 ];
 
+const COMMUNITY_IDS: Record<CommunityField, string> = {
+  category: "category",
+  county: "county",
+  description: "description",
+  phone: "phone",
+  latitude: "lat",
+  longitude: "lng",
+};
+
 export default function CommunitySubmit() {
   const submit = useMutation(api.records.submitCommunityReport);
   const [category, setCategory] = useState<string>("");
@@ -44,12 +56,25 @@ export default function CommunitySubmit() {
   const [lng, setLng] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ trackingCode: string } | null>(null);
+  const [errors, setErrors] = useState<FieldErrors<CommunityField>>({});
+  const [attempted, setAttempted] = useState(false);
+
+  // Re-check live once the person has tried to submit, so a fixed field clears
+  // its own message straight away.
+  const recheck = (patch: Partial<Record<CommunityField, string>>) => {
+    if (!attempted) return;
+    setErrors(validateCommunityReport({ category, county, description, phone, latitude: lat, longitude: lng, ...patch }));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (busy) return;
-    if (!category || !county || !description.trim()) {
-      toast.error("Category, county and description are required.");
+    const found = validateCommunityReport({ category, county, description, phone, latitude: lat, longitude: lng });
+    setErrors(found);
+    setAttempted(true);
+    if (hasErrors(found)) {
+      const first = firstInvalid(found, COMMUNITY_FIELD_ORDER);
+      if (first) focusField(COMMUNITY_IDS[first]);
       return;
     }
     setBusy(true);
@@ -68,11 +93,17 @@ export default function CommunitySubmit() {
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
-      toast.error(
-        msg.includes("RATE_LIMITED")
-          ? "Too many reports right now — please try again in a minute."
-          : msg || "Submission failed",
-      );
+      if (msg.includes("RATE_LIMITED")) {
+        toastProblem({
+          what: "Too many reports in a short time.",
+          whose: "This is a safety limit, not a fault with your report.",
+          fix: "Wait a minute, then press Submit again — what you typed is still here.",
+        });
+      } else {
+        // Nothing is saved on this device for anonymous reports, so be plain
+        // that it was NOT sent and that the form still holds their words.
+        toastError(err, { action: "send your report" });
+      }
     } finally {
       setBusy(false);
     }
@@ -131,39 +162,41 @@ export default function CommunitySubmit() {
           process, not an enforcement action.
         </p>
 
-        <form onSubmit={handleSubmit} className="paper mt-8 space-y-5 p-6">
-          <div className="space-y-1.5">
-            <Label htmlFor="category">What are you reporting? *</Label>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger id="category">
-                <SelectValue placeholder="Select a category" />
-              </SelectTrigger>
-              <SelectContent>
-                {CATEGORIES.map((c) => (
-                  <SelectItem key={c.value} value={c.value}>
-                    {c.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="county">County *</Label>
-              <Select value={county} onValueChange={setCounty}>
-                <SelectTrigger id="county">
-                  <SelectValue placeholder="Select county" />
+        <form onSubmit={handleSubmit} noValidate className="paper mt-8 space-y-5 p-6">
+          <FormField label="What are you reporting?" required id={COMMUNITY_IDS.category} error={errors.category}>
+            {(a11y) => (
+              <Select value={category} onValueChange={(v) => { setCategory(v); recheck({ category: v }); }}>
+                <SelectTrigger {...a11y}>
+                  <SelectValue placeholder="Select a category" />
                 </SelectTrigger>
                 <SelectContent>
-                  {COUNTIES.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
+                  {CATEGORIES.map((c) => (
+                    <SelectItem key={c.value} value={c.value}>
+                      {c.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-            </div>
+            )}
+          </FormField>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <FormField label="County" required id={COMMUNITY_IDS.county} error={errors.county}>
+              {(a11y) => (
+                <Select value={county} onValueChange={(v) => { setCounty(v); recheck({ county: v }); }}>
+                  <SelectTrigger {...a11y}>
+                    <SelectValue placeholder="Select county" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {COUNTIES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </FormField>
             <div className="space-y-1.5">
               <Label htmlFor="district">District</Label>
               <Input id="district" value={district} onChange={(e) => setDistrict(e.target.value)} />
@@ -174,37 +207,42 @@ export default function CommunitySubmit() {
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="description">What did you observe? *</Label>
-            <Textarea
-              id="description"
-              rows={5}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Describe what you saw, when, and where. Include any landmarks that could help verification."
-              required
-            />
-          </div>
+          <FormField label="What did you observe?" required id={COMMUNITY_IDS.description} error={errors.description}>
+            {(a11y) => (
+              <Textarea
+                {...a11y}
+                rows={5}
+                value={description}
+                onChange={(e) => { setDescription(e.target.value); recheck({ description: e.target.value }); }}
+                placeholder="Describe what you saw, when, and where. Include any landmarks that could help verification."
+              />
+            )}
+          </FormField>
 
           <div className="grid gap-4 md:grid-cols-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="phone">Contact phone (optional)</Label>
-              <Input
-                id="phone"
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+231 …"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="lat">GPS latitude (optional)</Label>
-              <Input id="lat" inputMode="decimal" value={lat} onChange={(e) => setLat(e.target.value)} placeholder="7.4" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="lng">GPS longitude (optional)</Label>
-              <Input id="lng" inputMode="decimal" value={lng} onChange={(e) => setLng(e.target.value)} placeholder="9.5" />
-            </div>
+            <FormField label="Contact phone (optional)" id={COMMUNITY_IDS.phone} error={errors.phone}>
+              {(a11y) => (
+                <Input
+                  {...a11y}
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => { setPhone(e.target.value); recheck({ phone: e.target.value }); }}
+                  placeholder="+231 77 000 0000"
+                />
+              )}
+            </FormField>
+            <FormField label="GPS latitude (optional)" id={COMMUNITY_IDS.latitude} error={errors.latitude}>
+              {(a11y) => (
+                <Input {...a11y} inputMode="decimal" value={lat}
+                  onChange={(e) => { setLat(e.target.value); recheck({ latitude: e.target.value }); }} placeholder="7.4" />
+              )}
+            </FormField>
+            <FormField label="GPS longitude (optional)" id={COMMUNITY_IDS.longitude} error={errors.longitude}>
+              {(a11y) => (
+                <Input {...a11y} inputMode="decimal" value={lng}
+                  onChange={(e) => { setLng(e.target.value); recheck({ longitude: e.target.value }); }} placeholder="-9.5" />
+              )}
+            </FormField>
           </div>
 
           <p className="text-xs leading-relaxed text-muted-foreground">
@@ -220,6 +258,15 @@ export default function CommunitySubmit() {
             </Link>
             .
           </p>
+
+          {attempted && Object.values(errors).some(Boolean) && (
+            <p role="alert" className="text-sm text-destructive">
+              {Object.values(errors).filter(Boolean).length === 1
+                ? "One field needs attention"
+                : `${Object.values(errors).filter(Boolean).length} fields need attention`}{" "}
+              — marked above. Nothing has been sent yet.
+            </p>
+          )}
 
           <Button type="submit" size="lg" disabled={busy}>
             {busy ? "Submitting…" : "Submit report"}

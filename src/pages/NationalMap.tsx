@@ -13,7 +13,16 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
+import { Link } from "react-router";
 import { useQuery } from "@/lib/backend-react";
+import {
+  STATUS_META,
+  STATUS_ORDER,
+  ageText,
+  computeSiteStatuses,
+  type SiteStatusKey,
+  type SiteStatusRow,
+} from "@/lib/site-status";
 import { api, refreshMapFeatures } from "@/lib/backend";
 import { Button } from "@/components/ui/button";
 import type { GeoLayer, GeoVerificationLevel, MapFeature } from "@/lib/types";
@@ -35,6 +44,8 @@ import {
   sameCountyName,
 } from "@/lib/gis";
 import { ConsentTileLayer, MapTilesNotice } from "@/components/ConsentTileLayer";
+import { NoResults } from "@/components/NoResults";
+import { suggestQuery, vocabularyOf } from "@/lib/did-you-mean";
 
 const LEVELS: GeoVerificationLevel[] = ["verified", "unverified", "reported"];
 
@@ -92,6 +103,23 @@ export default function NationalMap() {
     [],
   );
 
+  // Per-site status (Phase 1). Same RLS-scoped feed and documented rules as
+  // the dashboard's site status board; never a "safe" state.
+  const statusFeed = useQuery(api.stats.siteStatusFeed);
+  const statusBySite = useMemo(() => {
+    const m = new Map<string, SiteStatusRow>();
+    if (statusFeed)
+      for (const r of computeSiteStatuses(statusFeed, {
+        now: statusFeed.loadedAt,
+        periodMs: null,
+      }))
+        m.set(r.site.id, r);
+    return m;
+  }, [statusFeed]);
+  const [statusFilter, setStatusFilter] = useState<SiteStatusKey[]>([]);
+  const toggleStatus = (k: SiteStatusKey) =>
+    setStatusFilter((cur) => (cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k]));
+
   const [filters, setFilters] = useState<MapFilters>(NO_FILTERS);
   const [zoom, setZoom] = useState(7);
   const [focus, setFocus] = useState<{ id: string; lat: number; lng: number } | null>(null);
@@ -99,8 +127,16 @@ export default function NationalMap() {
   const counties = useMemo(() => countiesIn(features), [features]);
 
   const visibleFeatures = useMemo(
-    () => applyFilters(features.filter((f) => visibleLayers[f.layer]), filters),
-    [features, visibleLayers, filters],
+    () =>
+      applyFilters(features.filter((f) => visibleLayers[f.layer]), filters).filter(
+        (f) => {
+          if (statusFilter.length === 0) return true;
+          // An active status filter shows site-linked records only.
+          const st = f.siteId ? statusBySite.get(f.siteId)?.status : undefined;
+          return st !== undefined && statusFilter.includes(st);
+        },
+      ),
+    [features, visibleLayers, filters, statusFilter, statusBySite],
   );
 
   const items = useMemo(() => {
@@ -192,6 +228,20 @@ export default function NationalMap() {
     const rank = (f: MapFeature) => (f.verification === "verified" ? 1 : 0);
     return [...visibleFeatures].sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label));
   }, [visibleFeatures]);
+
+  // "Did you mean": words from every loaded feature label, and a corrected search
+  // only when it would really return something under the current layers/filters.
+  const searchVocabulary = useMemo(() => vocabularyOf(features.map((f) => f.label)), [features]);
+  const textSuggestion = useMemo(() => {
+    if (!filters.text.trim() || searchResults.length > 0) return null;
+    const fixed = suggestQuery(filters.text, searchVocabulary);
+    if (!fixed) return null;
+    const hits = applyFilters(
+      features.filter((f) => visibleLayers[f.layer]),
+      { ...filters, text: fixed },
+    );
+    return hits.length > 0 ? fixed : null;
+  }, [filters, searchResults.length, searchVocabulary, features, visibleLayers]);
 
   const toggleCounty = (c: string) =>
     setFilters((p) => ({
@@ -301,12 +351,41 @@ export default function NationalMap() {
               {c}
             </button>
           ))}
-          {(filters.counties.length > 0 || filters.levels.length > 0) && (
-            <button type="button" className="underline" onClick={() => setFilters(NO_FILTERS)}>
+          {(filters.counties.length > 0 || filters.levels.length > 0 || statusFilter.length > 0) && (
+            <button
+              type="button"
+              className="underline"
+              onClick={() => {
+                setFilters(NO_FILTERS);
+                setStatusFilter([]);
+              }}
+            >
               Clear filters
             </button>
           )}
         </div>
+        {statusBySite.size > 0 && (
+          <div className="flex flex-wrap items-center gap-2 text-xs" role="group" aria-label="Site status filter">
+            <span className="text-muted-foreground">Site status:</span>
+            {STATUS_ORDER.map((k) => (
+              <button
+                key={k}
+                type="button"
+                aria-pressed={statusFilter.includes(k)}
+                onClick={() => toggleStatus(k)}
+                className={`rounded-full border px-2.5 py-0.5 ${
+                  statusFilter.includes(k) ? "bg-accent border-ring" : "border-border opacity-70 hover:opacity-100"
+                }`}
+                title={STATUS_META[k].description}
+              >
+                {STATUS_META[k].glyph} {STATUS_META[k].label}
+              </button>
+            ))}
+            {statusFilter.length > 0 && (
+              <span className="text-muted-foreground">Showing site-linked records only.</span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col gap-4 lg:flex-row">
@@ -378,6 +457,9 @@ export default function NationalMap() {
                       ) : (
                         <span className="text-[11px]">{provenanceLine(it.feature)}</span>
                       )}
+                      {!it.cluster && it.feature.layer === "sites" && it.feature.siteId && (
+                        <SiteStatusPopup row={statusBySite.get(it.feature.siteId)} siteId={it.feature.siteId} now={statusFeed?.loadedAt ?? 0} />
+                      )}
                       {!it.cluster && it.feature.layer === "community_reports" && (
                         <>
                           <br />
@@ -412,7 +494,18 @@ export default function NationalMap() {
             />
           </div>
           <ul className="max-h-[45vh] divide-y divide-border overflow-y-auto">
-            {searchResults.length === 0 && (
+            {searchResults.length === 0 && filters.text.trim() !== "" && !loading && (
+              <li className="p-2">
+                <NoResults
+                  query={filters.text.trim()}
+                  suggestion={textSuggestion}
+                  onUseSuggestion={(t) => setFilters((p) => ({ ...p, text: t }))}
+                  onClear={() => setFilters((p) => ({ ...p, text: "" }))}
+                  hint="No feature name contains those words. Check the spelling, or clear the search — your layers and filters may also be hiding it."
+                />
+              </li>
+            )}
+            {searchResults.length === 0 && (filters.text.trim() === "" || loading) && (
               <li className="px-3 py-6 text-center text-xs text-muted-foreground" role="status">
                 {loading
                   ? "Loading map features…"
@@ -480,5 +573,48 @@ export default function NationalMap() {
         position and are never shown as more certain than that position.
       </p>
     </div>
+  );
+}
+
+
+/** Popup summary for a site marker. Status is decision support with the
+ *  documented rules (src/lib/site-status.ts) — never a safety verdict. */
+function SiteStatusPopup({
+  row,
+  siteId,
+  now,
+}: {
+  row: SiteStatusRow | undefined;
+  siteId: string;
+  now: number;
+}) {
+  if (!row) {
+    return (
+      <>
+        <br />
+        <span className="text-[11px]">Status unavailable (still loading or not permitted).</span>
+      </>
+    );
+  }
+  const meta = STATUS_META[row.status];
+  return (
+    <>
+      <br />
+      <span className="text-[11px]">
+        <strong>
+          {meta.glyph} {meta.label}
+        </strong>
+        {row.openCriticalFindings > 0 && ` · ${row.openCriticalFindings} open critical finding(s)`}
+        {row.overdueActions > 0 && ` · ${row.overdueActions} overdue action(s)`}
+        <br />
+        Verified: last approved inspection{" "}
+        {row.lastApprovedInspectionAt === null ? "none on record" : ageText(row.lastApprovedInspectionAt, now)}
+        <br />
+        Not a safety verdict.{" "}
+        <Link to={`/portal/sites/${siteId}`} className="underline">
+          Open site summary
+        </Link>
+      </span>
+    </>
   );
 }

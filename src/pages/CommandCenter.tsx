@@ -10,7 +10,9 @@ import {
 } from "@/lib/offline-queue";
 import { useEffect, useState } from "react";
 import TrendsPanel from "@/components/TrendsPanel";
+import SiteStatusBoard from "@/components/SiteStatusBoard";
 import { ArrowRight, ShieldAlert, TriangleAlert } from "lucide-react";
+import { PageLoading } from "@/components/PageLoading";
 
 // NOTE: the demo-data seed is an explicit admin action ("Load demo data"
 // button in the sidebar). It must NOT auto-run on page mount — an implicit
@@ -63,17 +65,16 @@ export default function CommandCenter() {
   if (!stats) {
     if (!timedOut) {
       return (
-        <div className="py-20 text-center text-sm text-muted-foreground">
-          Loading…
-        </div>
+        <PageLoading shape="cards" label="command center" rows={4} />
       );
     }
     return (
       <div className="py-20 text-center">
-        <p className="display text-lg">The dashboard could not load</p>
+        <p className="display text-lg">The dashboard is taking too long to load</p>
         <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-          The request failed — check your connection and try again. The exact
-          error is logged in the browser console.
+          This is usually a slow or unstable connection, not a problem with
+          your account. Try again, or move to a spot with a better signal. Your
+          saved and queued work is not affected.
         </p>
         <Button
           className="mt-4"
@@ -133,6 +134,8 @@ export default function CommandCenter() {
         <StatCell label="Inspection coverage" value={stats.inspectionCoveragePct} suffix="%" sub="sites with an approved inspection" />
       </div>
 
+      <SiteStatusBoard />
+
       <div className="grid min-w-0 grid-cols-1 gap-8 lg:grid-cols-2">
         {/* Priority sites */}
         <section className="min-w-0">
@@ -142,7 +145,9 @@ export default function CommandCenter() {
           </div>
           {priority.length === 0 ? (
             <p className="py-6 text-sm text-muted-foreground">
-              No elevated-risk sites in your scope.
+              No site has an elevated risk indicator in your scope. This is not a
+              finding that sites are safe — sites with no recent or verified data
+              are listed in the site status board above.
             </p>
           ) : (
             <ul className="divide-y divide-border">

@@ -29,6 +29,13 @@ import { Building2, Loader2, MailPlus, RotateCw, ShieldAlert, XCircle } from "lu
 import { useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
+import { PageLoading } from "@/components/PageLoading";
+import { EmptyState } from "@/components/EmptyState";
+import { FormField } from "@/components/FormField";
+import { errorSentence } from "@/lib/error-messages";
+import { toastSuccess } from "@/lib/feedback";
+import { validateCompanyName, validateInvite } from "@/lib/form-rules";
+import { emailProblem, focusField } from "@/lib/validation";
 
 const STATUS_LABEL: Record<CompanyStatus, string> = {
   pending_review: "Pending review",
@@ -38,10 +45,7 @@ const STATUS_LABEL: Record<CompanyStatus, string> = {
 };
 
 function errMsg(e: unknown): string {
-  if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    return "You're offline — reconnect and try again.";
-  }
-  return e instanceof Error && e.message ? e.message : "Something went wrong. Try again.";
+  return errorSentence(e, { action: "complete that" });
 }
 
 function invitationState(i: CompanyInvitation): { label: string; live: boolean } {
@@ -97,6 +101,7 @@ export function CompanyCard({
   const revoke = useMutation(api.companies.revokeInvitation);
   const setStatus = useMutation(api.companies.setStatus);
   const [email, setEmail] = useState("");
+  const [emailError, setEmailError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<null | "suspended" | "deactivated">(null);
   const [reason, setReason] = useState("");
@@ -106,11 +111,11 @@ export function CompanyCard({
   const activeCount = company.activeMembers;
   const pendingCount = company.pendingRequests;
 
-  async function run<T>(fn: () => Promise<T>, ok: string) {
+  async function run<T>(fn: () => Promise<T>, ok: string, reassure?: string) {
     setBusy(true);
     try {
       await fn();
-      toast.success(ok);
+      toastSuccess({ title: ok, reassure });
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -120,12 +125,17 @@ export function CompanyCard({
 
   async function sendInvite() {
     const address = email.trim();
-    if (!address) return;
+    const problem = validateInvite({ email: address }).email;
+    setEmailError(problem);
+    if (problem) {
+      focusField(`inv-${company.id}`);
+      return;
+    }
     await run(async () => {
       const r = (await invite({ organizationId: company.id, email: address })) as { delivery: string };
       setEmail("");
       return r;
-    }, `Invitation sent to ${email.trim().toLowerCase()}.`);
+    }, `Invitation sent to ${address.toLowerCase()}.`, "They have 7 days to accept. Nothing is granted until they do — you can resend or revoke it below.");
   }
 
   return (
@@ -186,23 +196,29 @@ export function CompanyCard({
         {showActions && (
           <>
         <section aria-label="Nominate an administrator" className="space-y-2">
-          <Label htmlFor={`inv-${company.id}`}>Nominate a company administrator</Label>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Input
-              id={`inv-${company.id}`}
-              type="email"
-              inputMode="email"
-              autoComplete="off"
-              placeholder="representative@company.com"
-              value={email}
-              disabled={!approved || busy}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") void sendInvite(); }}
-            />
-            <Button disabled={!approved || busy || !email.trim()} onClick={() => void sendInvite()}>
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <MailPlus className="size-4" />} Send invitation
-            </Button>
-          </div>
+          <FormField label="Nominate a company administrator" id={`inv-${company.id}`} error={emailError} className="space-y-2">
+            {(a11y) => (
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  {...a11y}
+                  type="email"
+                  inputMode="email"
+                  autoComplete="off"
+                  placeholder="representative@company.com"
+                  value={email}
+                  disabled={!approved || busy}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (emailError) setEmailError(emailProblem(e.target.value));
+                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") void sendInvite(); }}
+                />
+                <Button disabled={!approved || busy} onClick={() => void sendInvite()}>
+                  {busy ? <Loader2 className="size-4 animate-spin" /> : <MailPlus className="size-4" />} Send invitation
+                </Button>
+              </div>
+            )}
+          </FormField>
           <p className="text-xs leading-relaxed text-muted-foreground">
             {approved
               ? "They receive a one-time email link, sign in with that address, and accept. Nothing is granted until they accept. The invitation expires in 7 days."
@@ -263,6 +279,7 @@ export default function Companies() {
   const companies = useQuery(api.companies.list);
   const register = useMutation(api.companies.register);
   const [name, setName] = useState("");
+  const [nameError, setNameError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
 
   if (!user) return null;
@@ -281,11 +298,19 @@ export default function Companies() {
   }
 
   async function add() {
-    if (!name.trim()) return;
+    const problem = validateCompanyName({ name }).name;
+    setNameError(problem);
+    if (problem) {
+      focusField("company-name");
+      return;
+    }
     setBusy(true);
     try {
       await register({ name });
-      toast.success(`${name.trim()} registered and approved.`);
+      toastSuccess({
+        title: `${name.trim()} registered and approved.`,
+        reassure: "Next, nominate its administrator below — they'll receive an email invitation to accept.",
+      });
       setName("");
     } catch (e) {
       toast.error(errMsg(e));
@@ -308,21 +333,33 @@ export default function Companies() {
       <Card>
         <CardHeader><CardTitle className="text-base">Register a company</CardTitle></CardHeader>
         <CardContent className="space-y-2">
-          <Label htmlFor="company-name">Company name</Label>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Input id="company-name" value={name} maxLength={200} placeholder="e.g. ArcelorMittal Liberia"
-              onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void add(); }} />
-            <Button disabled={busy || name.trim().length < 2} onClick={() => void add()}>
-              {busy && <Loader2 className="size-4 animate-spin" />} Register and approve
-            </Button>
-          </div>
+          <FormField label="Company name" id="company-name" error={nameError} className="space-y-2">
+            {(a11y) => (
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input {...a11y} value={name} maxLength={200} placeholder="e.g. ArcelorMittal Liberia"
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    if (nameError) setNameError(validateCompanyName({ name: e.target.value }).name);
+                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") void add(); }} />
+                <Button disabled={busy} onClick={() => void add()}>
+                  {busy && <Loader2 className="size-4 animate-spin" />} Register and approve
+                </Button>
+              </div>
+            )}
+          </FormField>
         </CardContent>
       </Card>
 
       {companies === undefined ? (
-        <p className="text-sm text-muted-foreground" role="status">Loading companies…</p>
+        <PageLoading shape="list" label="companies" />
       ) : companies.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No companies registered yet.</p>
+        <EmptyState
+          icon={Building2}
+          title="No companies registered yet"
+          why="A mining company must be authorized here before it can have sites, staff or an administrator."
+          action={{ label: "Register the first company", onClick: () => focusField("company-name") }}
+        />
       ) : (
         <div className="grid min-w-0 gap-4 lg:grid-cols-2">
           {companies.map((c) => (

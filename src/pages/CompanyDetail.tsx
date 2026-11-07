@@ -14,12 +14,14 @@ import { useQuery } from "@/lib/backend-react";
 import { ChevronLeft, MapPin, ShieldAlert } from "lucide-react";
 import { Link, useParams } from "react-router";
 import { CompanyCard } from "./Companies";
+import { PageLoading } from "@/components/PageLoading";
 
 export default function CompanyDetail() {
   const { companyId } = useParams();
   const { user } = useAuth();
   const companies = useQuery(api.companies.list);
   const sites = useQuery(api.sites.list);
+  const profile = useQuery(api.companyProfile.get, companyId ? { organizationId: companyId } : "skip");
 
   if (!user) return null;
   if (user.role !== "admin") {
@@ -31,7 +33,7 @@ export default function CompanyDetail() {
     );
   }
   if (companies === undefined || sites === undefined) {
-    return <p className="text-sm text-muted-foreground" role="status">Loading company…</p>;
+    return <PageLoading shape="detail" label="company" />;
   }
   const company = companies.find((c) => c.id === companyId);
   if (!company) {
@@ -53,6 +55,24 @@ export default function CompanyDetail() {
       </Link>
 
       <CompanyCard company={company} showActions={false} />
+
+      {profile && (profile.contactEmail || profile.contactPhone || profile.address || profile.website || profile.description) && (
+        <Card className="min-w-0">
+          <CardHeader><CardTitle className="text-base">Contact details</CardTitle></CardHeader>
+          <CardContent>
+            <dl className="grid gap-3 text-sm sm:grid-cols-2">
+              {([["Email", profile.contactEmail], ["Phone", profile.contactPhone], ["Address", profile.address], ["Website", profile.website]] as const)
+                .filter(([, v]) => v)
+                .map(([k, v]) => (
+                  <div key={k} className="min-w-0"><dt className="text-xs text-muted-foreground">{k}</dt><dd className="break-words">{v}</dd></div>
+                ))}
+              {profile.description && (
+                <div className="min-w-0 sm:col-span-2"><dt className="text-xs text-muted-foreground">About</dt><dd className="whitespace-pre-wrap break-words">{profile.description}</dd></div>
+              )}
+            </dl>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="min-w-0">
         <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 space-y-0">
