@@ -231,11 +231,11 @@ const ROLE: Record<string, string | null> = {
   [f.admin]: "admin", [f.opA]: "operator", [f.opB]: "operator",
   [f.county]: "inspector", [f.national]: "supervisor", [f.guest]: null,
 };
-async function ask(user: string, body: unknown, extra: { provider?: ProviderAdapter | null; rateLimitPerHour?: number; db?: ScopedDb } = {}): Promise<HandlerResult> {
+async function ask(user: string, body: unknown, extra: { provider?: ProviderAdapter | null; rateLimitPerHour?: number; db?: ScopedDb; now?: () => Date } = {}): Promise<HandlerResult> {
   __testSetAuthUserId(user);
   edgeIdentity.set(user);
   return handleAiRequest(
-    { db: extra.db ?? createEdgeClient(), caller: { id: user, role: ROLE[user] }, provider: extra.provider ?? null, rateLimitPerHour: extra.rateLimitPerHour },
+    { db: extra.db ?? createEdgeClient(), caller: { id: user, role: ROLE[user] }, provider: extra.provider ?? null, rateLimitPerHour: extra.rateLimitPerHour, now: extra.now },
     body,
   );
 }
@@ -385,12 +385,18 @@ describe("model output is untrusted and cannot touch these capabilities", () => 
     test(`${name}: output is identical to the deterministic result and carries no provider id`, async () => {
       await seed();
       for (const body of [{ capability: "incident_trend_summary", siteId: f.siteA }, { capability: "risk_patterns", siteId: f.siteA }]) {
-        const plain = await ok(f.opA, body);
-        const withModel = await ok(f.opA, body, { provider });
+        // One pinned clock for both calls: the figures use UTC-day windows, so two real-time calls
+        // straddling 00:00 UTC could legitimately differ.
+        const at = new Date();
+        const plain = await ok(f.opA, body, { now: () => at });
+        const withModel = await ok(f.opA, body, { provider, now: () => at });
         expect(withModel.mode).toBe("deterministic");
         expect(withModel.providerId).toBeNull();
         expect(withModel.claims).toEqual(plain.claims);
-        expect(JSON.stringify(withModel)).not.toMatch(/is safe|9999/);
+        // Look for the exact hostile phrases the stub injects. (A bare /9999/ is NOT safe here: the
+        // envelope carries randomly generated UUID citations, and ~1 in 4,000 contains "9999",
+        // which made this test fail on roughly 2-4% of runs.)
+        expect(JSON.stringify(withModel)).not.toMatch(/Ignore previous instructions|This mine is safe|9999 incidents/);
       }
     });
   }
