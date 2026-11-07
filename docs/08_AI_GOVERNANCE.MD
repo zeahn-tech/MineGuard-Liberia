@@ -209,9 +209,41 @@ permission rows, and restore the previous `ai_request_log_capability_check` (lis
 deleting any `safety_guidance` / `jsa_suggestions` log rows (the log is append-only; do this as the
 database owner). Removing only the UI: delete the `safety` and `jsa` routes in `src/main.tsx`.
 
+## Phase 3c — role authority, JSA approval matrix, emergency contacts [IMPLEMENTED]
+
+Migration 0044. Modelled on common practice in safety-management software: the people who do
+the work prepare and submit; a safety authority independent of the preparer reviews; role
+elevation is an administrator act. "Qualified" remains an organisational-role approximation.
+
+| Role (company) | Assign roles | Prepare + submit JSA | Review / approve JSA | Maintain emergency contacts |
+|---|---|---|---|---|
+| Company administrator | **Yes — the only role that can** (site manager, safety officer, worker, onboarding officer); change roles; approve join requests | Yes | Yes, any site of the company, never their own | Whole company and every site |
+| Site manager (assigned to the site) | No | Yes | **Yes**, that site, never their own | That site |
+| Safety officer (assigned to the site) | No | Yes | **Yes**, that site, never their own | That site |
+| Worker (assigned to the site) | No | Yes | No | No (reads) |
+| Onboarding officer | Adds **workers only** (bulk import keeps working) | No | No | No |
+| Ministry staff | No (the registrar still appoints the company administrator) | No | No (read-only via `jsa.read`) | No (reads via `emergency.read`) |
+
+Decision to confirm: an onboarding officer may still add `worker`, the lowest role, which carries
+no approval authority. To make assignment strictly administrator-only, remove the `worker` line in
+`mg_create_org_invitation_core` (0044); bulk worker import would then need an administrator.
+
+Role changes: `mg_set_member_role` is administrator-only, never on yourself, never on an
+administrator. Approving a join request is administrator-only; rejecting is unchanged. Site
+assignment is not a role change and is unchanged (an assigned manager/officer is what makes
+them a reviewer for that site).
+
+**Emergency contacts** are rows in `emergency_contacts` (company-wide or per site), not constants
+in the app. Nothing is seeded; an empty list says so. Members read company-wide plus their
+sites' contacts; the assistant reads them under the caller's own row-level security, only for
+emergency questions (another company's contacts cannot appear; asserted). Removal archives
+(audited) rather than deletes. Numbers are format-checked only; they are not verified as
+reachable, and the UI tells people to confirm they are current.
+
 ### Not built, and why
 - **Sign-off of the reference content.** Needs a named qualified safety professional to review `guidance-content.ts` and record `REVIEW.approvedBy`; until then nothing is labelled approved.
 - **French content.** The field app is bilingual; only English was imported.
+- **Contact verification.** No check that a stored number rings; maintenance is a human duty.
 - **Live model provider.** Still no approved provider, adapter or credential (see Session 8
   list above). Enabling one for narration would send aggregate claim text to that provider and
   needs the data-processing decision recorded there first.

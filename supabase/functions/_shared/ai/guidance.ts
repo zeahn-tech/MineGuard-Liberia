@@ -21,7 +21,7 @@
 import { AiError, type Claim, type ClaimKind } from "./contract.ts";
 import type { Draft } from "./capabilities.ts";
 import { detectInjection } from "./injection.ts";
-import { EMERGENCY_CONTACTS, FIRST_AID, GLOSSARY, IMMEDIATE_ACTIONS, PPE, REVIEW } from "./guidance-content.ts";
+import { FIRST_AID, GLOSSARY, IMMEDIATE_ACTIONS, PPE, REVIEW } from "./guidance-content.ts";
 
 export const MAX_GUIDANCE_QUERY = 300;
 const MAX_RESULTS = 5;
@@ -38,6 +38,15 @@ const REGULATORY = /\b(law|legal|illegal|regulat\w*|compl(y|iance|iant)|statut\w
 const DECLARE_SAFE = /\b(is|are|was|were|declare|certify|confirm|can you say|tell me)\b[^.?]{0,60}\b(safe|safe to (enter|work|proceed)|ok to (enter|work)|cleared?)\b/i;
 const SCOPE_WORDS = /\b(mine|pit|site|area|shaft|tunnel|adit|stope|workings?|bench|level)\b/i;
 
+/** A contact the caller's company has configured (table emergency_contacts, read under the
+ *  caller's own row-level security — never the bundle). */
+export interface SiteContact { id: string; name: string; phone: string; role_label?: string | null }
+
+/** True when the question is about an emergency, so the handler knows to fetch contacts. */
+export function isEmergencyQuery(q: unknown): boolean {
+  return typeof q === "string" && EMERGENCY_WORDS.test(q);
+}
+
 const clip = (s: string, n = 600) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 interface Scored { id: string; score: number; text: string; type: "glossary" | "ppe" | "firstaid" }
@@ -49,7 +58,7 @@ function score(hay: string, toks: string[], weight: number): number {
   return s;
 }
 
-export function safetyGuidance(queryRaw: unknown): Draft {
+export function safetyGuidance(queryRaw: unknown, contacts: SiteContact[] = []): Draft {
   if (typeof queryRaw !== "string" || queryRaw.trim().length === 0) throw new AiError("BAD_REQUEST", "query must be a non-empty string");
   if (queryRaw.length > MAX_GUIDANCE_QUERY) throw new AiError("BAD_REQUEST", `query is limited to ${MAX_GUIDANCE_QUERY} characters`);
 
@@ -80,13 +89,12 @@ export function safetyGuidance(queryRaw: unknown): Draft {
       citations: IMMEDIATE_ACTIONS.map((a) => a.id),
       kind,
     });
-    for (const c of EMERGENCY_CONTACTS) retrieved.add(c.id);
-    claims.push({
-      text: `Contacts listed in the app: ${EMERGENCY_CONTACTS.map((c) => `${c.name} — ${c.number}`).join("; ")}.`,
-      citations: EMERGENCY_CONTACTS.map((c) => c.id),
-      kind,
-    });
     matches.push({ id: "ref:immediate", type: "emergency", title: "Immediate actions and contacts" });
+    if (contacts.length === 0) {
+      notices.push("No emergency contacts have been added for your site yet. Ask your company administrator or site manager to add them. Until then, use your site's own emergency numbers.");
+    } else {
+      notices.push("Emergency contacts shown are maintained by your company. Confirm they are current.");
+    }
     notices.push("In an emergency, follow your site's approved emergency procedure and contact the site emergency number. This assistant does not replace it, raise an alarm, or call anyone.");
   }
 
@@ -133,7 +141,7 @@ export function safetyGuidance(queryRaw: unknown): Draft {
   }
   return {
     claims, retrieved, notices, abstainReason: null,
-    data: { matches, source: REVIEW.source, signedOffBy: REVIEW.approvedBy, signedOffOn: REVIEW.approvedOn },
+    data: { matches, contacts: emergency ? contacts.map((c) => ({ id: c.id, name: c.name, phone: c.phone, label: c.role_label ?? null })) : [], source: REVIEW.source, signedOffBy: REVIEW.approvedBy, signedOffOn: REVIEW.approvedOn },
     injectionFlagged: injection.length > 0,
   };
 }

@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { askAiAssistant, type AiAssistResponse } from "@/lib/ai-assist";
 import { AiFooter, AiHeader, KindBadge, aiFailure } from "@/components/AiOutputNotice";
 import { canReview, explainJsaError, jsaSites, listJsas, newKey, RISK_LEVELS, reviewJsa, saveJsa, submitJsa, type Jsa, type JsaHazard, type JsaSite } from "@/lib/jsa";
+import { EmptyState } from "@/components/EmptyState";
 import { PageLoading } from "@/components/PageLoading";
 import { PPE } from "@/data/safety-reference";
 
@@ -198,7 +199,7 @@ export default function JsaPage() {
       {mode === "list" && sites.length > 0 && <Button onClick={() => setMode("new")}><Plus className="size-4" /> New JSA</Button>}
       {mode === "new" && <Editor sites={sites} onDone={done} />}
       {typeof mode === "object" && mode !== null && "edit" in mode && <Editor sites={sites} existing={mode.edit} onDone={done} />}
-      {mode === "list" && (items.length === 0 ? <p className="text-sm text-muted-foreground">No JSAs to show.</p> : (
+      {mode === "list" && (items.length === 0 ? <EmptyState title="No job safety analyses" why="Prepared JSAs, and any waiting for your review, will be listed here." /> : (
         <ul className="space-y-3">
           {items.map((j) => (
             <li key={j.id} className="space-y-2 border border-border p-3">

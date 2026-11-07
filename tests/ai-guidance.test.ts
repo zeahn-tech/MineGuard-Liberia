@@ -15,7 +15,7 @@ import { AI_LABEL, CAPABILITIES, type AiEnvelope } from "../supabase/functions/_
 import { containsLegalConclusion } from "../supabase/functions/_shared/ai/cite";
 import { MAX_GUIDANCE_QUERY, safetyGuidance, tokens } from "../supabase/functions/_shared/ai/guidance";
 import { GENERAL_QUESTIONS, HAZARD_LIBRARY, jsaSuggestions, MAX_TASK } from "../supabase/functions/_shared/ai/jsa-assist";
-import { EMERGENCY_CONTACTS, FIRST_AID, GLOSSARY, IMMEDIATE_ACTIONS, PPE, REVIEW } from "../supabase/functions/_shared/ai/guidance-content";
+import { FIRST_AID, GLOSSARY, IMMEDIATE_ACTIONS, PPE, REVIEW } from "../supabase/functions/_shared/ai/guidance-content";
 import type { ProviderAdapter } from "../supabase/functions/_shared/ai/provider";
 
 const ROOT = join(import.meta.dir, "..");
@@ -26,8 +26,7 @@ describe("reviewed content", () => {
     expect(PPE.length).toBe(12);
     expect(FIRST_AID.length).toBe(6);
     expect(IMMEDIATE_ACTIONS.length).toBe(5);
-    expect(EMERGENCY_CONTACTS.length).toBe(3);
-    const ids = [...GLOSSARY, ...PPE, ...FIRST_AID, ...EMERGENCY_CONTACTS, ...IMMEDIATE_ACTIONS].map((e) => e.id);
+    const ids = [...GLOSSARY, ...PPE, ...FIRST_AID, ...IMMEDIATE_ACTIONS].map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
   test("records NO sign-off, so nothing may be presented as an approved source", () => {
@@ -67,12 +66,29 @@ describe("safety guidance retrieval", () => {
     expect(d.claims.some((c) => c.text.startsWith("First aid — Burns"))).toBe(true);
     expect(d.notices.join(" ")).toContain("qualified first aider");
   });
-  test("an emergency question returns the immediate actions and contacts, and says it replaces nothing", () => {
+  test("an emergency question returns the immediate actions and says it replaces nothing", () => {
     const d = safetyGuidance("there has been an accident, what do I do");
     expect(d.claims[0].text).toContain("STOP all work");
     expect(d.claims[0].text).toContain("EVACUATE");
-    expect(d.claims[1].text).toContain("112");
     expect(d.notices.join(" ")).toContain("does not replace it");
+  });
+  test("contacts come ONLY from the database rows passed in; none configured says so and invents nothing", () => {
+    const none = safetyGuidance("emergency");
+    expect((none.data as any).contacts).toEqual([]);
+    expect(none.notices.join(" ")).toContain("No emergency contacts have been added");
+    expect(JSON.stringify(none)).not.toMatch(/\b112\b/);
+    const some = safetyGuidance("emergency", [{ id: "c1", name: "Site medic", phone: "+231 77 000 0000", role_label: "First aider" }]);
+    expect((some.data as any).contacts).toEqual([{ id: "c1", name: "Site medic", phone: "+231 77 000 0000", label: "First aider" }]);
+    expect(some.notices.join(" ")).toContain("maintained by your company");
+    // a non-emergency question never carries contacts
+    expect((safetyGuidance("adit", [{ id: "c1", name: "x", phone: "123" }]).data as any).contacts).toEqual([]);
+  });
+  test("no phone number is hard-coded in the bundled content, the assistant or the page", () => {
+    for (const file of ["supabase/functions/_shared/ai/guidance-content.ts", "src/data/safety-reference.ts", "supabase/functions/_shared/ai/guidance.ts", "src/pages/safety/SafetyGuidance.tsx"]) {
+      const src = readFileSync(join(ROOT, file), "utf8");
+      expect(src).not.toMatch(/\b112\b/);
+      expect(src).not.toMatch(/\+?\d[\d ()-]{8,}\d/);
+    }
   });
   test("no match abstains and guesses nothing", () => {
     const d = safetyGuidance("quantum flibbertigibbet");
@@ -233,6 +249,20 @@ describe("through the real handler", () => {
       expect(JSON.stringify(env)).not.toContain("compliant");
       for (const c of env.claims) expect(c.kind).toBe("needs_verification");
     }
+  });
+  test("emergency contacts are read under the caller's own row-level security: never another company's", async () => {
+    const orgOf = async (u: string) => (await adminSql(`select organization_id as o from public.profiles where id = '${u}'`))[0].o as string;
+    const [oa, ob] = [await orgOf(f.opA), await orgOf(f.opB)];
+    expect(oa).not.toBe(ob);
+    await adminSql(`insert into public.emergency_contacts (organization_id, name, phone, role_label, sort_order) values
+      ('${oa}', 'AgriLib medic', '+231 77 111 1111', 'Site medic', 1), ('${ob}', 'OreCo medic', '+231 88 222 2222', 'Site medic', 1)`);
+    const env = (await ask(f.opA, { capability: "safety_guidance", query: "emergency accident" })).body as AiEnvelope;
+    const names = (env.data as any).contacts.map((c: any) => c.name);
+    expect(names).toContain("AgriLib medic");
+    expect(names).not.toContain("OreCo medic");
+    // a non-emergency question does not even read the table
+    const calm = (await ask(f.opA, { capability: "safety_guidance", query: "adit" })).body as AiEnvelope;
+    expect((calm.data as any).contacts).toEqual([]);
   });
   test("no module or bundle exposes a provider secret, and guidance code makes no network call", () => {
     for (const file of ["guidance.ts", "jsa-assist.ts", "guidance-content.ts"]) {
