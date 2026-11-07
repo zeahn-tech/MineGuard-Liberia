@@ -11,6 +11,7 @@ import {
 import { useEffect, useState } from "react";
 import TrendsPanel from "@/components/TrendsPanel";
 import SiteStatusBoard from "@/components/SiteStatusBoard";
+import CommandCenterCharts from "@/components/CommandCenterCharts";
 import { ArrowRight, ShieldAlert, TriangleAlert } from "lucide-react";
 import { PageLoading } from "@/components/PageLoading";
 
@@ -133,6 +134,12 @@ export default function CommandCenter() {
         <StatCell label="Community reports" value={stats.communityReports} sub={`${stats.communityReportsPending} awaiting triage`} />
         <StatCell label="Inspection coverage" value={stats.inspectionCoveragePct} suffix="%" sub="sites with an approved inspection" />
       </div>
+
+      <CommandCenterCharts
+        stats={stats}
+        reports={communityReports}
+        priority={priority.map((r) => ({ label: siteById.get(r.siteId)?.name ?? "Site", value: r.score }))}
+      />
 
       <SiteStatusBoard />
 
