@@ -73,12 +73,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { toastError } from "@/lib/feedback";
+import { canWorkCorrectiveActions } from "@/lib/corrective-actions";
 
 const OPERATOR_NAV = [
   { to: "/operate", label: "Overview", icon: ClipboardList, end: true },
   { to: "/operate/sites", label: "My Sites", icon: Building2 },
   { to: "/operate/findings", label: "Findings", icon: FileCheck2 },
-  { to: "/operate/corrective-actions", label: "Corrective Actions", icon: ShieldCheck },
+  { to: "/operate/corrective-actions", label: "Corrective Actions", icon: ShieldCheck, caOnly: true },
   { to: "/operate/incidents", label: "Incidents", icon: HeartPulse },
   { to: "/operate/emergency", label: "Emergency", icon: Siren },
   { to: "/operate/safety", label: "Safety Guidance", icon: BookOpen },
@@ -129,14 +130,16 @@ export default function OperatorLayout() {
   const membership = useQuery(api.workforce.myMembership);
   const isCompanyAdmin = membership?.orgRole === "company_admin" && membership.memberStatus === "active";
   const isOfficer = membership?.orgRole === "onboarding_officer" && membership.memberStatus === "active";
+  const canWorkCa = canWorkCorrectiveActions(membership);
   const navItems = useMemo(
     () =>
       OPERATOR_NAV.filter((i) => {
         if ("adminOnly" in i && i.adminOnly) return isCompanyAdmin;
         if ("onboardOnly" in i && i.onboardOnly) return isCompanyAdmin || isOfficer;
+        if ("caOnly" in i && i.caOnly) return canWorkCa;
         return true;
       }),
-    [isCompanyAdmin, isOfficer],
+    [isCompanyAdmin, isOfficer, canWorkCa],
   );
   const navigate = useNavigate();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);

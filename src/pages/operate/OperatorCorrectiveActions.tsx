@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { useMutation, useQuery } from "@/lib/backend-react";
 import { api } from "@/lib/backend";
 import type { Severity } from "@/lib/types";
-import { AlertTriangle, CheckCircle2, Download, Loader2, Send } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileCheck2, Loader2, Send, ShieldAlert } from "lucide-react";
 import { useState } from "react";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
@@ -30,6 +30,10 @@ import {
 } from "@/lib/offline-queue";
 import { useNow } from "@/hooks/use-now";
 import { PageLoading } from "@/components/PageLoading";
+import { EmptyState } from "@/components/EmptyState";
+import { useCaAccess } from "@/hooks/use-ca-access";
+import { caCounts, findingsAwaitingAction, isRespondable } from "@/lib/corrective-actions";
+import { Link } from "react-router";
 import { FieldError } from "@/components/ui/field";
 import { toastSuccess } from "@/lib/feedback";
 import { focusField } from "@/lib/validation";
@@ -50,8 +54,26 @@ function severityClasses(sev: string | Severity | undefined): string {
 }
 
 export default function OperatorCorrectiveActions() {
+  const access = useCaAccess();
+  if (access === "loading") return <div className="p-4 md:p-6"><PageLoading shape="list" label="corrective actions" /></div>;
+  if (access === "denied") {
+    return (
+      <div className="p-4 md:p-6">
+        <EmptyState
+          icon={ShieldAlert}
+          title="Corrective actions are for site managers and safety officers"
+          why="Responding to a corrective action is a compliance act, so it is limited to the people who run safety on your sites. Ask your company administrator if you need that role."
+        />
+      </div>
+    );
+  }
+  return <CorrectiveActionsBody />;
+}
+
+function CorrectiveActionsBody() {
   const now = useNow();
   const obligationsQ = useQuery(api.inspections.listMyCorrectiveActions);
+  const findingsQ = useQuery(api.inspections.listMyFindings);
   const respond = useMutation(api.inspections.respondCorrectiveAction);
   const [searchParams] = useSearchParams();
   const siteFilter = searchParams.get("siteId") ?? null;
@@ -63,9 +85,9 @@ export default function OperatorCorrectiveActions() {
 
   const all = obligationsQ ?? [];
   const obligations = siteFilter ? all.filter((o) => o.siteId === siteFilter) : all;
-  const open = obligations.filter((o) => o.status === "open" || o.status === "in_progress");
-  const overdue = open.filter((o) => o.dueAt < now);
-  const submitted = obligations.filter((o) => o.status === "submitted");
+  const counts = caCounts(obligations, now);
+  const siteFindings = (findingsQ ?? []).filter((f) => !siteFilter || f.siteId === siteFilter);
+  const unanswered = findingsAwaitingAction(siteFindings, all);
 
   const submitResponse = async (caId: string) => {
     if (!note.trim()) {
@@ -100,9 +122,11 @@ export default function OperatorCorrectiveActions() {
         setNote("");
       } else if (msg.includes("NOT_FOUND")) {
         toast.error("That obligation is no longer visible to your account.");
+      } else if (msg.includes("FORBIDDEN_ROLE")) {
+        toast.error("Only site managers and safety officers can respond to corrective actions.");
       } else if (msg.includes("FORBIDDEN")) {
         toast.error(
-          "Only the site's operator can respond, and only while the action is open.",
+          "This action can no longer be answered by your company — it may have been escalated or already answered. Refresh to see its current state.",
         );
       } else if (!navigator.onLine || msg.includes("Failed to fetch")) {
         // OFFLINE PATH (operator parity): persist the response to the device
@@ -188,7 +212,7 @@ export default function OperatorCorrectiveActions() {
           <CardContent className="flex items-center gap-3 pt-4">
             <Send className="size-5 text-primary" strokeWidth={1.5} />
             <div>
-              <p className="display text-2xl leading-none">{open.length}</p>
+              <p className="display text-2xl leading-none">{counts.needsResponse}</p>
               <p className="text-xs text-muted-foreground">open — response needed</p>
             </div>
           </CardContent>
@@ -196,12 +220,12 @@ export default function OperatorCorrectiveActions() {
         <Card className="paper rounded-none border-border shadow-none">
           <CardContent className="flex items-center gap-3 pt-4">
             <AlertTriangle
-              className={`size-5 ${overdue.length > 0 ? "text-destructive" : "text-muted-foreground"}`}
+              className={`size-5 ${counts.overdue > 0 ? "text-destructive" : "text-muted-foreground"}`}
               strokeWidth={1.5}
             />
             <div>
-              <p className="display text-2xl leading-none">{overdue.length}</p>
-              <p className="text-xs text-muted-foreground">past deadline</p>
+              <p className="display text-2xl leading-none">{counts.overdue}</p>
+              <p className="text-xs text-muted-foreground">past deadline{counts.escalated > 0 ? ` (${counts.escalated} escalated)` : ""}</p>
             </div>
           </CardContent>
         </Card>
@@ -209,7 +233,7 @@ export default function OperatorCorrectiveActions() {
           <CardContent className="flex items-center gap-3 pt-4">
             <CheckCircle2 className="size-5 text-muted-foreground" strokeWidth={1.5} />
             <div>
-              <p className="display text-2xl leading-none">{submitted.length}</p>
+              <p className="display text-2xl leading-none">{counts.awaitingVerification}</p>
               <p className="text-xs text-muted-foreground">awaiting verification</p>
             </div>
           </CardContent>
@@ -219,15 +243,52 @@ export default function OperatorCorrectiveActions() {
       {obligationsQ === undefined && (
         <PageLoading shape="list" label="corrective actions" />
       )}
-      {obligationsQ !== undefined && obligations.length === 0 && (
-        <p className="text-sm text-muted-foreground">
-          No corrective actions on your sites. Keep it that way.
-        </p>
+      {obligationsQ !== undefined && obligations.length === 0 && unanswered.length === 0 && (
+        <EmptyState
+          icon={CheckCircle2}
+          title="No corrective actions on your sites"
+          why="Corrective actions appear here when the reviewing authority opens one for a finding on your sites."
+        />
+      )}
+
+      {/* Findings the authority has not turned into a corrective action yet:
+          without this the page looked empty while findings existed. */}
+      {unanswered.length > 0 && (
+        <Card className="paper rounded-none border-border shadow-none">
+          <CardContent className="space-y-2 pt-4">
+            <div className="flex items-start gap-2">
+              <FileCheck2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+              <div className="min-w-0">
+                <p className="text-sm font-medium">
+                  {unanswered.length} finding{unanswered.length === 1 ? "" : "s"} waiting for a corrective action
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  The reviewing authority has recorded these but has not opened a corrective action yet, so there is
+                  nothing to respond to. A Respond button appears here as soon as one is opened.
+                </p>
+              </div>
+            </div>
+            <ul className="divide-y divide-border text-sm">
+              {unanswered.map((f) => (
+                <li key={f._id} className="flex flex-wrap items-center gap-2 py-1.5">
+                  <span className={`rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${severityClasses(f.severity)}`}>
+                    {f.severity}
+                  </span>
+                  <span className="min-w-0 flex-1 break-words">{f.title}</span>
+                  <span className="text-xs text-muted-foreground">{f.siteCode} {f.siteName}</span>
+                </li>
+              ))}
+            </ul>
+            <Link to="/operate/findings" className="inline-block text-xs text-primary underline-offset-4 hover:underline">
+              View all findings →
+            </Link>
+          </CardContent>
+        </Card>
       )}
 
       <div className="space-y-3">
         {obligations.map((o) => {
-          const isOpen = o.status === "open" || o.status === "in_progress";
+          const isOpen = isRespondable(o.status);
           const dueMs = o.dueAt - now;
           const overdueNow = isOpen && dueMs < 0;
           return (
