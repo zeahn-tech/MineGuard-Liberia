@@ -153,8 +153,13 @@ describe("deletion: the two outcomes", () => {
     await withRole("postgres", null, async (run) => {
       await run(`insert into auth.users (id, email, raw_user_meta_data) values ('${U1}','leaver@x.test','{"name":"Leaver"}'), ('${U2}','stayer@x.test','{"name":"Stayer"}')`);
       const orgA = (await run("select id from public.organizations where name = 'AgriLib Mining'"))[0].id as string;
+      await run(`insert into auth.users (id, email) values ('${XA}','xa@agrilib.test')`);
       await run("set local role authenticated");
+      // the Ministry appoints the company administrator; roles below that are the administrator's to assign
       await as(run, f.admin);
+      const adminInv = (await run(`select public.mg_create_company_admin_invitation('${orgA}', 'xa@agrilib.test') as id`))[0].id;
+      await as(run, XA);
+      await run(`select public.mg_accept_invitation('${adminInv}')`);
       await run(`select public.mg_create_org_invitation('${orgA}', 'leaver@x.test', 'worker')`);
       await run(`select public.mg_create_org_invitation('${orgA}', 'stayer@x.test', 'worker')`);
       await as(run, U1);

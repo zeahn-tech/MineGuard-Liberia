@@ -48,7 +48,7 @@ async function world<T>(fn: (run: Runner, c: { siteA: string; siteB: string }) =
     if (orgB) await run(`update public.sites set organization_id = '${orgB}' where id = '${f.siteB}'`);
     await run("set local role authenticated");
     const accept = async (uid: string, org: string, email: string, role: string | null) => {
-      await as(run, f.admin);
+      await as(run, role ? XA : f.admin); // roles below administrator are assigned by the company administrator
       const id = role
         ? (await run(`select public.mg_create_org_invitation('${org}', '${email}', '${role}') as id`))[0].id
         : (await run(`select public.mg_create_company_admin_invitation('${org}', '${email}') as id`))[0].id;
