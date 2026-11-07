@@ -40,6 +40,7 @@ Status vocabulary (used in every doc): **IMPLEMENTED** (code + test exist) ·
 | Audit trail & integrity (append-only, server-assigned) | IMPLEMENTED (0009) | `Audit.tsx`; `tests/audit-*.test.ts` |
 | Command-center stats, trends, summary report | IMPLEMENTED (0012, 0014, 0021) | `CommandCenter.tsx`, `Reports.tsx` |
 | Persisted notifications (in-app only) | IMPLEMENTED (0021). Email/push/SMS: NOT IMPLEMENTED — REQUIRES OWNER CONFIRMATION | `NotificationBell.tsx` |
+| Emergency alerts + web push (supplementary aid) | IMPLEMENTED (0040), NOT FIELD-VALIDATED, NOT APPROVED FOR OPERATIONAL USE. Push needs VAPID keys + `emergency-dispatch` deployment — REQUIRES OWNER CONFIRMATION | `docs/21_EMERGENCY_ALERTS.MD` |
 | Operator portal | IMPLEMENTED | `src/pages/operate/*` |
 | AI assistance (server-side, cite-or-abstain, read-only) | IMPLEMENTED as interfaces + deterministic fallback (0020, Edge Function `ai-assist`). **No model provider approved → provider path inactive.** | doc 08; `tests/ai-assist.test.ts` |
 | PWA shell + service worker | IMPLEMENTED; Lighthouse installable checks pass | `public/sw.js`, `manifest.webmanifest` |

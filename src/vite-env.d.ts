@@ -9,6 +9,9 @@ interface ImportMetaEnv {
    *  Privacy pages. Unset → those pages point to the program office that
    *  provides access instead (no address is ever invented). */
   readonly VITE_LEGAL_CONTACT_EMAIL?: string;
+  /** Web Push (VAPID) PUBLIC key for emergency alerts. Unset → the app does not offer to
+   *  enable push notifications and says so; in-app alerts still work while the app is open. */
+  readonly VITE_VAPID_PUBLIC_KEY?: string;
 }
 
 interface ImportMeta {
