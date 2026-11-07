@@ -216,8 +216,11 @@ describe("lifecycle and invariants", () => {
       const mWK = await memberId(run, WK);
       await run(`select public.mg_assign_member_site('${mWK}', '${site2}')`);
       await run(`select public.mg_unassign_member_site('${mWK}', '${site2}')`);
-      const audit = await owner(run, `select action from public.audit_log where entity_type = 'site_assignments' order by created_at`);
-      expect(audit.map((a) => a.action)).toEqual(["site_assignments.insert", "site_assignments.update"]);
+      const audit = await owner(run, `select action from public.audit_log where entity_type = 'site_assignments'`);
+      // Both calls run in ONE transaction, so every audit row has the same created_at (now() is the
+      // transaction start) and the id is a random uuid: row order is undefined. Assert the set of
+      // actions (each recorded exactly once), not their order.
+      expect(audit.map((a) => a.action).sort()).toEqual(["site_assignments.insert", "site_assignments.update"]);
     });
   });
 
