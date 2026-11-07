@@ -10,6 +10,14 @@ const o = ctx.__o;
 const slug = (s) => s.toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const used = new Set();
 const uniq = (p, s) => { let id = `${p}:${slug(s)}`, n = 2; while (used.has(id)) id = `${p}:${slug(s)}-${n++}`; used.add(id); return id; };
+// Remove HTML tags until none remain (a single pass can reassemble "<scr<b>ipt>" into a tag), then drop any
+// stray angle brackets so no markup can survive into the generated content.
+const stripTags = (s) => {
+  let prev;
+  let cur = String(s ?? "");
+  do { prev = cur; cur = cur.replace(/<[^<>]*>/g, ""); } while (cur !== prev);
+  return cur.replace(/[<>]/g, "");
+};
 const clean = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 const glossary = o.GLOSSARY_TERMS.map((t) => ({ id: uniq("ref:glossary", t.term), term: clean(t.term), short: clean(t.short), definition: clean(t.definition), category: clean(t.category) }));
 const ppe = o.PPE_ITEMS.map((p) => ({ id: uniq("ref:ppe", p.name), emoji: p.emoji, name: clean(p.name), description: clean(p.description), when: clean(p.when), mandatory: p.mandatory }));
@@ -21,7 +29,7 @@ const lang = process.argv[3] ? readFileSync(process.argv[3], "utf8") : "";
 const immediate = [1, 2, 3, 4, 5].map((n) => {
   const m = lang.match(new RegExp(`step${n}:\\s*"([^"]+)"`));
   if (!m) throw new Error(`step${n} not found in lang.js`);
-  return { id: `ref:immediate:${n}`, order: n, text: clean(m[1].replace(/<[^>]+>/g, "")) };
+  return { id: `ref:immediate:${n}`, order: n, text: clean(stripTags(m[1])) };
 });
 const J = (v) => JSON.stringify(v, null, 1);
 const out = `// ---------------------------------------------------------------------------
