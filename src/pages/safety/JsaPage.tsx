@@ -5,6 +5,7 @@
 // nothing by itself. All authority is enforced by the database (migration 0043).
 // ---------------------------------------------------------------------------
 import { useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -164,6 +165,8 @@ function ReviewBox({ jsa, onDone }: { jsa: Jsa; onDone: () => void }) {
 export default function JsaPage() {
   const [items, setItems] = useState<Jsa[] | null>(null);
   const [sites, setSites] = useState<JsaSite[] | null>(null);
+  const [sitesFailed, setSitesFailed] = useState(false);
+  const isCompany = useLocation().pathname.startsWith("/operate");
   const [mode, setMode] = useState<"list" | "new" | { edit: Jsa }>("list");
   const [reviewable, setReviewable] = useState<Set<string>>(new Set());
   const [me, setMe] = useState<string | null>(null);
@@ -173,15 +176,19 @@ export default function JsaPage() {
   useEffect(() => {
     let live = true;
     void (async () => {
-      const [list, s] = await Promise.all([listJsas(), jsaSites().catch(() => [] as JsaSite[])]);
+      let sitesFailed = false;
+      const [list, s] = await Promise.all([
+        listJsas(),
+        jsaSites().catch(() => { sitesFailed = true; return [] as JsaSite[]; }),
+      ]);
       const { supabase } = await import("@/lib/supabase");
       const { data } = await supabase.auth.getUser();
       const submittedSites = [...new Set(list.filter((j) => j.status === "submitted").map((j) => j.site_id))];
       const ok = await Promise.all(submittedSites.map(async (id) => ((await canReview(id)) ? id : null)));
-      return { list, s, uid: data.user?.id ?? null, ok: new Set(ok.filter((x): x is string => !!x)) };
+      return { list, s, sitesFailed, uid: data.user?.id ?? null, ok: new Set(ok.filter((x): x is string => !!x)) };
     })().then((r) => {
       if (!live) return;
-      setMe(r.uid); setItems(r.list); setSites(r.s); setReviewable(r.ok);
+      setMe(r.uid); setItems(r.list); setSites(r.s); setSitesFailed(r.sitesFailed); setReviewable(r.ok);
     }, () => { if (live) setLoadErr("JSAs could not be loaded. Nothing has been changed."); });
     return () => { live = false; };
   }, [tick]);
@@ -197,6 +204,19 @@ export default function JsaPage() {
         <p className="text-sm text-muted-foreground">Complete a JSA before starting any high-risk task. A different qualified person must review it. AI can suggest prompts but can never approve anything.</p>
       </header>
       {mode === "list" && sites.length > 0 && <Button onClick={() => setMode("new")}><Plus className="size-4" /> New JSA</Button>}
+      {/* Never hide the way to start a JSA without saying why: company members always see the button, and when
+          it cannot be used the reason is on screen (sites failed to load, or no site is assigned to them). */}
+      {mode === "list" && sites.length === 0 && isCompany && (
+        <div className="space-y-2 border border-border p-3">
+          <Button disabled aria-describedby="jsa-no-sites"><Plus className="size-4" /> New JSA</Button>
+          <p id="jsa-no-sites" role={sitesFailed ? "alert" : "status"} className="text-sm text-muted-foreground">
+            {sitesFailed
+              ? "Your sites could not be loaded, so a new JSA cannot be started right now. Nothing has been changed."
+              : "A JSA is prepared for a site your company has registered and you are assigned to. None is available to you yet — ask your site manager or company administrator to assign you to a site."}
+          </p>
+          {sitesFailed && <Button size="sm" variant="outline" onClick={() => setTick((t) => t + 1)}>Try again</Button>}
+        </div>
+      )}
       {mode === "new" && <Editor sites={sites} onDone={done} />}
       {typeof mode === "object" && mode !== null && "edit" in mode && <Editor sites={sites} existing={mode.edit} onDone={done} />}
       {mode === "list" && (items.length === 0 ? <EmptyState title="No job safety analyses" why="Prepared JSAs, and any waiting for your review, will be listed here." /> : (
