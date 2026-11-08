@@ -203,6 +203,22 @@ function RolelessGate() {
           </span>
         </Link>
         )}
+        {accessClass === "public_user" && (
+          <>
+            <Link to="/account/reports" className="block rounded-md border p-4 text-left text-sm hover:bg-muted/40">
+              <span className="font-medium">My reports</span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                Follow the reports you linked to your account.
+              </span>
+            </Link>
+            <Link to="/account/feedback" className="block rounded-md border p-4 text-left text-sm hover:bg-muted/40">
+              <span className="font-medium">Feedback and questions</span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                Send the Ministry a suggestion or a question and read the answer.
+              </span>
+            </Link>
+          </>
+        )}
         <Link
           to="/report"
           className="block rounded-md border p-4 text-left text-sm hover:bg-muted/40"
@@ -217,6 +233,39 @@ function RolelessGate() {
   );
 }
 
+
+/** Pages for a signed-in PUBLIC account (My reports, Feedback). Routing convenience only: every
+ *  read and write behind these pages is enforced by the database (migrations 0048/0049), so this
+ *  never decides what anyone can access. Guests are sent to sign in, unverified accounts are told
+ *  to verify their e-mail, and company or staff accounts go to their own workspace. */
+export function RequirePublicAccount({ children }: { children: React.ReactNode }) {
+  const { isLoading, isAuthenticated } = useAuth();
+  const accessClass = useQuery(api.account.accessClass, isAuthenticated ? undefined : "skip");
+  const location = useLocation();
+  if (isLoading) return <AuthLoading />;
+  if (!isAuthenticated) return <Navigate to="/auth" state={{ from: location.pathname }} replace />;
+  if (accessClass === undefined) return <AuthLoading />;
+  if (accessClass === "public_user" || accessClass === "restricted") return <>{children}</>;
+  if (accessClass === "staff") return <Navigate to="/portal" replace />;
+  if (accessClass === "company_member") return <Navigate to="/operate" replace />;
+  return (
+    <main className="flex min-h-dvh items-center justify-center bg-background p-6">
+      <div className="w-full max-w-md space-y-3 text-center">
+        <p className="display text-lg">
+          {accessClass === "anonymous_guest" ? "Create an account first" : "Verify your e-mail first"}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          {accessClass === "anonymous_guest"
+            ? "Guests can read public information and send an anonymous report. An account is needed to follow your own reports or send feedback."
+            : "Open the confirmation link we e-mailed you, then come back. Until then you can still send reports anonymously."}
+        </p>
+        <Link to="/report" className="block rounded-md border p-4 text-sm hover:bg-muted/40">
+          Send an anonymous report
+        </Link>
+      </div>
+    </main>
+  );
+}
 
 /** STAFF SECTION GATE — admin / supervisor / inspector only. An operator or
  *  unassigned account hitting any /portal/* staff route is bounced to their

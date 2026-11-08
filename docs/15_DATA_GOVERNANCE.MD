@@ -30,6 +30,21 @@ require the adopting institution. [REQUIRES GOVERNMENT CONFIRMATION]
 - Operators are isolated to their own organization's sites.
 - Staff listing endpoints filter by scope inside the query.
 
+## Public reports and feedback tied to an account [IMPLEMENTED — migration 0049]
+
+- **Anonymous by default.** `submit_community_report` records no owner. A verified public account
+  may opt in (a checkbox on the report form) to link a report to itself; the owner is taken from the
+  session by the server, never from the browser, and cannot be changed afterwards by anyone.
+- **What the owner sees.** Their own reports with category, place, description and status — never the
+  reviewer's triage note or identity. Feedback and questions show the Ministry's answer, never the
+  internal note.
+- **On account deletion** (self-service or administrator removal) the person's reports and messages
+  keep their content but lose the link (`submitter_id` becomes empty), so they no longer count as
+  records the account owns. The profile itself is scrubbed as before. The audit trail still holds the
+  old identifier inside its history text; with the profile scrubbed it no longer identifies anyone.
+- **Who answers feedback.** Ministry administrators and supervisors, through the staff "Public
+  Feedback" screen; every response and status change is audited.
+
 ## Retention & legal hold [PROPOSED]
 
 Retention schedules for evidence, community reports, and audit history depend on

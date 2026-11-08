@@ -6,7 +6,7 @@ import { RouteLoading } from "@/components/RouteLoading";
 import React, { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter, Route, Routes } from "react-router";
-import { RequireRegistrar, RequireStaff } from "@/components/RequireAuth";
+import { RequirePublicAccount, RequireRegistrar, RequireStaff } from "@/components/RequireAuth";
 import "./index.css";
 import { installChunkRecovery } from "@/lib/chunk-recovery";
 import { startInstallPrompt } from "@/lib/install-prompt";
@@ -22,6 +22,9 @@ const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const PortalLayout = lazy(() => import("./pages/PortalLayout.tsx"));
 const CommandCenter = lazy(() => import("./pages/CommandCenter.tsx"));
 const OperatorPortal = lazy(() => import("./pages/OperatorPortal.tsx"));
+const MyReports = lazy(() => import("./pages/account/MyReports.tsx"));
+const MyFeedback = lazy(() => import("./pages/account/MyFeedback.tsx"));
+const FeedbackInbox = lazy(() => import("./pages/FeedbackInbox.tsx"));
 const Companies = lazy(() => import("./pages/Companies.tsx"));
 const RegistryLayout = lazy(() => import("./pages/RegistryLayout.tsx"));
 const CompanyDetail = lazy(() => import("./pages/CompanyDetail.tsx"));
@@ -142,6 +145,10 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/cookies" element={<Cookies />} />
             <Route path="/report" element={<CommunitySubmit />} />
             <Route path="/report/track" element={<CommunityTrack />} />
+            {/* Public User programme (migration 0049): a verified public account's own reports and
+                feedback. Routing convenience only; the database is the access boundary. */}
+            <Route path="/account/reports" element={<RequirePublicAccount><MyReports /></RequirePublicAccount>} />
+            <Route path="/account/feedback" element={<RequirePublicAccount><MyFeedback /></RequirePublicAccount>} />
             <Route path="/voice" element={<VoicePublic />} />
             <Route path="/voice/status" element={<VoiceStatus />} />
 
@@ -238,6 +245,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="environment" element={<Environment />} />
               <Route path="environment/:observationId" element={<ObservationDetail />} />
               <Route path="community" element={<Community />} />
+              <Route path="feedback" element={<FeedbackInbox />} />
               <Route path="audit" element={<Audit />} />
               <Route path="reports" element={<Reports />} />
               <Route path="risk-config" element={<RiskConfig />} />

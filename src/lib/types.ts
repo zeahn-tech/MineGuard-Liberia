@@ -480,7 +480,8 @@ export type ReportCategory =
   | "environmental_damage"
   | "safety_concern"
   | "land_concern"
-  | "unauthorized_activity";
+  | "unauthorized_activity"
+  | "other";
 
 export type ReportStatus =
   | "submitted"
