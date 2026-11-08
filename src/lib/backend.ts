@@ -778,6 +778,18 @@ export type ComplianceListRow = CorrectiveAction & {
   county: string;
 };
 
+/** May the signed-in company member work corrective actions? true / false from
+ *  the database rule (migration 0046); null when the rule is not deployed yet
+ *  (release order) — callers then fall back to the older server checks. */
+async function memberMayWorkCorrectiveActions(): Promise<boolean | null> {
+  const { data, error } = await supabase.rpc("mg_can_work_corrective_actions");
+  if (error) {
+    if (error.code === "PGRST202" || /could not find the function/i.test(error.message ?? "")) return null;
+    throw backendError(error);
+  }
+  return data === true;
+}
+
 async function fetchCompliance(
   user: UserProfile,
 ): Promise<ComplianceListRow[]> {
@@ -1925,7 +1937,8 @@ type DerivedNotification = {
     | "org_decision"
     | "org_role"
     | "org_status"
-    | "org_site_request";
+    | "org_site_request"
+    | "worker_voice";
   /** Deadline notifications are state; the state is part of the stored key so
    *  due-soon → overdue is a NEW (unread, urgent) notification. */
   state?: "overdue" | "soon";
@@ -2731,6 +2744,25 @@ export const api = {
             : null;
         },
         ["organization_members", "organizations"],
+      ),
+
+    /** Display names of the company's active members (migration 0045) — any active member may
+     *  ask; no emails. Release order: before 0045 is applied it yields an empty list. */
+    memberNames: (args: { organizationId: string }) =>
+      live<{ userId: string; name: string | null }[]>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase.rpc("mg_company_member_names", { p_org: args.organizationId });
+          if (error && (error.code === "PGRST202" || /could not find the function/i.test(error.message ?? ""))) {
+            return [];
+          }
+          if (error) throw backendError(error);
+          return ((data ?? []) as AnyRow[]).map((r) => ({
+            userId: r.user_id as string,
+            name: (r.name as string) ?? null,
+          }));
+        },
+        ["organization_members", "profiles"],
       ),
 
     list: (args: { organizationId: string }) =>
@@ -4044,8 +4076,20 @@ export const api = {
       live<ComplianceListRow[]>(async () => {
         const user = await requireAuthed(true);
         if (!user.role) return [];
+        // Company accounts see corrective actions only as a site manager or
+        // safety officer; everyone else gets an empty, honest list.
+        if (user.role === ROLES.OPERATOR && (await memberMayWorkCorrectiveActions()) === false)
+          return [];
         return fetchCompliance(user);
       }, ["corrective_actions", "findings", "sites"]),
+
+    /** May the signed-in company member work corrective actions (migration 0046)?
+     *  null = the rule is not deployed yet; callers fall back to the membership role. */
+    canWorkCorrectiveActions: () =>
+      live<boolean | null>(async () => {
+        await requireAuthed(true);
+        return memberMayWorkCorrectiveActions();
+      }, ["organization_members", "organizations"]),
 
     openCorrectiveAction: async (args: {
       findingId: string;
@@ -4102,11 +4146,15 @@ export const api = {
       const ca = mapCA(data);
       const site = await getSite(ca.siteId);
       if (!site) throw new Error("NOT_FOUND");
-      if (
-        user.role !== ROLES.OPERATOR ||
-        user.operatorName !== site.operatorName
-      )
+      // Tenancy follows the same rule the read path uses (organization id,
+      // legacy name only as a fallback) — a bare name compare refused
+      // companies whose sites are bound by id but carry another spelling.
+      if (user.role !== ROLES.OPERATOR || !canAccessSite(user, site))
         throw new Error("FORBIDDEN");
+      // Only site managers and safety officers may answer (migration 0046);
+      // asked up front so the person gets a clear reason, not a bare refusal.
+      if ((await memberMayWorkCorrectiveActions()) === false)
+        throw new Error("FORBIDDEN_ROLE");
       // Idempotent replay (OFF: mid-sync crash): the server applied this
       // response but the local queue removal was interrupted. Same note on
       // an already-submitted action IS the desired end state — report

@@ -20,6 +20,9 @@ import {
 import { enforceCiteOrAbstain } from "./cite.ts";
 import { detectInjection } from "./injection.ts";
 import { analyzeDocument, executiveBriefing, inspectionPriorities, siteSummary, trendNotes, type Draft } from "./capabilities.ts";
+import { incidentTrendSummary, riskPatterns } from "./insights.ts";
+import { isEmergencyQuery, safetyGuidance, type SiteContact } from "./guidance.ts";
+import { jsaSuggestions } from "./jsa-assist.ts";
 import { executeFilter, parseQuestion, validateFilter, type SearchFilter } from "./filters.ts";
 import { narrate, translateWithProvider, type ProviderAdapter } from "./provider.ts";
 
@@ -28,6 +31,9 @@ export interface HandlerDeps {
   caller: Caller;
   provider: ProviderAdapter | null;
   now?: () => Date;
+  /** Max requests per user per rolling hour, counted from ai_request_log.
+   *  Unset = no limit (unit tests); the Edge Function always sets it. */
+  rateLimitPerHour?: number;
 }
 export interface HandlerResult {
   status: number;
@@ -35,6 +41,9 @@ export interface HandlerResult {
 }
 
 const MAX_QUERY = 500;
+/** Largest request body the handler will look at (characters of JSON). */
+export const MAX_BODY_CHARS = 32_000;
+export const DEFAULT_RATE_LIMIT_PER_HOUR = 60;
 const NARRATABLE: Capability[] = ["site_summary", "trend_notes", "inspection_priorities", "executive_briefing"];
 
 async function nlSearch(deps: HandlerDeps, queryRaw: unknown, now: Date): Promise<Draft & { filter: SearchFilter | null; providerUsed: boolean }> {
@@ -83,6 +92,37 @@ async function nlSearch(deps: HandlerDeps, queryRaw: unknown, now: Date): Promis
   return { claims, data: { entity: res.entity, filter, interpretation, rows: res.rows, truncated: res.truncated }, retrieved, notices, abstainReason: null, filter, providerUsed, injectionFlagged: flagged };
 }
 
+/** Fails CLOSED: if the log cannot be read, the request is refused. */
+async function enforceRateLimit(deps: HandlerDeps, now: Date): Promise<void> {
+  const limit = deps.rateLimitPerHour;
+  if (limit === undefined) return;
+  const since = new Date(now.getTime() - 3_600_000).toISOString();
+  let rows: unknown[] = [];
+  try {
+    const { data, error } = await deps.db.from("ai_request_log").select("id").eq("user_id", deps.caller.id).gte("created_at", since).limit(limit);
+    if (error) throw error;
+    rows = Array.isArray(data) ? data : [];
+  } catch {
+    throw new AiError("RATE_LIMIT_UNAVAILABLE", "Usage limits could not be checked, so the request was not run.");
+  }
+  if (rows.length >= limit) throw new AiError("RATE_LIMITED", `Request limit reached (${limit} per hour). Try again later.`);
+}
+
+/** The caller's own emergency contacts, read under THEIR row-level security (so another
+ *  company's contacts can never appear). Fetched only for emergency questions; any failure
+ *  means "no contacts", never a guess. */
+async function loadContacts(db: ScopedDb): Promise<SiteContact[]> {
+  try {
+    const { data, error } = await db.from("emergency_contacts").select("id, name, phone, role_label, site_id, sort_order")
+      .eq("active", true).order("sort_order", { ascending: true }).limit(20);
+    if (error || !Array.isArray(data)) return [];
+    return (data as Record<string, unknown>[]).filter((r) => typeof r.id === "string" && typeof r.name === "string" && typeof r.phone === "string")
+      .map((r) => ({ id: r.id as string, name: r.name as string, phone: r.phone as string, role_label: typeof r.role_label === "string" ? r.role_label : null }));
+  } catch {
+    return [];
+  }
+}
+
 export async function handleAiRequest(deps: HandlerDeps, body: unknown): Promise<HandlerResult> {
   const started = Date.now();
   const now = (deps.now ?? (() => new Date()))();
@@ -106,6 +146,8 @@ export async function handleAiRequest(deps: HandlerDeps, body: unknown): Promise
   try {
     if (!(CAPABILITIES as readonly string[]).includes(capability)) throw new AiError("BAD_REQUEST", "unknown capability");
     if (!deps.caller.role) throw new AiError("FORBIDDEN", "AI assistance is available to accounts with an assigned role");
+    if (JSON.stringify(b).length > MAX_BODY_CHARS) throw new AiError("BAD_REQUEST", `request is limited to ${MAX_BODY_CHARS} characters`);
+    await enforceRateLimit(deps, now);
 
     let draft: Draft;
     switch (capability) {
@@ -130,6 +172,22 @@ export async function handleAiRequest(deps: HandlerDeps, body: unknown): Promise
         break;
       case "executive_briefing":
         draft = await executiveBriefing(deps.db, now);
+        break;
+      case "incident_trend_summary":
+        draft = await incidentTrendSummary(deps.db, { siteId: b.siteId, days: b.days }, now);
+        filterLog = { siteId: b.siteId ?? null, days: b.days ?? null };
+        break;
+      case "risk_patterns":
+        draft = await riskPatterns(deps.db, { siteId: b.siteId, months: b.months }, now);
+        filterLog = { siteId: b.siteId ?? null, months: b.months ?? null };
+        break;
+      case "safety_guidance":
+        draft = safetyGuidance(b.query, isEmergencyQuery(b.query) ? await loadContacts(deps.db) : []);
+        queryText = typeof b.query === "string" ? b.query : null; // logged as hash + length only
+        break;
+      case "jsa_suggestions":
+        draft = jsaSuggestions({ task: b.task, location: b.location });
+        queryText = typeof b.task === "string" ? b.task : null; // logged as hash + length only
         break;
       case "document_analysis":
         draft = analyzeDocument(b.text);
@@ -164,8 +222,8 @@ export async function handleAiRequest(deps: HandlerDeps, body: unknown): Promise
   } catch (e) {
     if (e instanceof AiError) {
       errorCode = e.code;
-      outcome = e.code === "FORBIDDEN" || e.code === "BAD_REQUEST" ? "refused" : "error";
-      status = e.code === "FORBIDDEN" ? 403 : e.code === "BAD_REQUEST" ? 400 : 502;
+      outcome = e.code === "FORBIDDEN" || e.code === "BAD_REQUEST" || e.code === "RATE_LIMITED" ? "refused" : "error";
+      status = e.code === "FORBIDDEN" ? 403 : e.code === "BAD_REQUEST" ? 400 : e.code === "RATE_LIMITED" ? 429 : e.code === "RATE_LIMIT_UNAVAILABLE" ? 503 : 502;
       errBody = { error: e.code, message: e.message };
     } else {
       errorCode = "INTERNAL";

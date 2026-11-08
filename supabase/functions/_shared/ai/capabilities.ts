@@ -26,14 +26,14 @@ export interface Draft {
   injectionFlagged?: boolean;
 }
 
-type Row = Record<string, unknown>;
+export type Row = Record<string, unknown>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Query = any; // the supabase-js filter builder; structural, shared with the test bridge
-const ROW_CAP = 500;
+export type Query = any; // the supabase-js filter builder; structural, shared with the test bridge
+export const ROW_CAP = 500;
 const CITE_CAP = 25;
 const UUID_STRICT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-async function read(db: ScopedDb, table: string, cols: string, shape?: (q: Query) => Query): Promise<{ rows: Row[]; capped: boolean }> {
+export async function read(db: ScopedDb, table: string, cols: string, shape?: (q: Query) => Query): Promise<{ rows: Row[]; capped: boolean }> {
   let q = db.from(table).select(cols);
   if (shape) q = shape(q);
   q = q.limit(ROW_CAP + 1);
@@ -43,11 +43,11 @@ async function read(db: ScopedDb, table: string, cols: string, shape?: (q: Query
   return { rows: all.slice(0, ROW_CAP), capped: all.length > ROW_CAP };
 }
 
-const idsOf = (rows: Row[]): string[] => rows.map((r) => String(r.id));
-const cite = (ids: string[]): string[] => ids.slice(0, CITE_CAP);
+export const idsOf = (rows: Row[]): string[] => rows.map((r) => String(r.id));
+export const cite = (ids: string[]): string[] => ids.slice(0, CITE_CAP);
 const day = (v: unknown): string => String(v ?? "").slice(0, 10);
 
-function tally(rows: Row[], key: string): [string, number][] {
+export function tally(rows: Row[], key: string): [string, number][] {
   const m = new Map<string, number>();
   for (const r of rows) m.set(String(r[key] ?? "unknown"), (m.get(String(r[key] ?? "unknown")) ?? 0) + 1);
   return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
@@ -56,7 +56,7 @@ const fmt = (t: [string, number][]): string => t.map(([k, n]) => `${k.replace(/_
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 const capNote = (n: number): string => (n > CITE_CAP ? ` (first ${CITE_CAP} cited)` : "");
 
-function assertUuid(v: unknown, name: string): string {
+export function assertUuid(v: unknown, name: string): string {
   if (typeof v !== "string" || !UUID_STRICT.test(v)) throw new AiError("BAD_REQUEST", `${name} must be a UUID`);
   return v.toLowerCase();
 }

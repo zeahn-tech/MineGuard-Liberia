@@ -19,10 +19,19 @@ export type AiCapability =
   | "trend_notes"
   | "inspection_priorities"
   | "executive_briefing"
-  | "document_analysis";
+  | "document_analysis"
+  | "incident_trend_summary"
+  | "risk_patterns"
+  | "safety_guidance"
+  | "jsa_suggestions";
+
+/** approved_source = signed-off reviewed content; general_explanation = not from a reviewed source;
+ *  needs_verification = a qualified safety professional must check it before anyone relies on it. */
+export type AiClaimKind = "approved_source" | "general_explanation" | "needs_verification";
 
 export interface AiClaim {
   text: string;
+  kind?: AiClaimKind;
   /** Record UUIDs (or `span:<start>-<end>` for document analysis). */
   citations: string[];
 }
@@ -47,7 +56,11 @@ export type AiAssistRequest =
   | { capability: "trend_notes"; siteId?: string; months?: number }
   | { capability: "inspection_priorities"; limit?: number }
   | { capability: "executive_briefing" }
-  | { capability: "document_analysis"; text: string };
+  | { capability: "document_analysis"; text: string }
+  | { capability: "incident_trend_summary"; siteId?: string; days?: number }
+  | { capability: "risk_patterns"; siteId?: string; months?: number }
+  | { capability: "safety_guidance"; query: string }
+  | { capability: "jsa_suggestions"; task: string; location?: string };
 
 export async function askAiAssistant<T = unknown>(req: AiAssistRequest): Promise<AiAssistResponse<T>> {
   const { data, error } = await supabase.functions.invoke("ai-assist", { body: req });

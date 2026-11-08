@@ -152,3 +152,100 @@ function has no service-role key):
    throttle) and a retention period for `ai_request_log`.
 7. UI surfaces for the capabilities (the client wrapper `src/lib/ai-assist.ts` exists;
    no page was added in this session).
+
+## Implementation Phase 3 — incident insights [IMPLEMENTED, deterministic]
+
+Extends the Session 8 `ai-assist` function (same handler, log, label, cite-or-abstain and
+no-write guarantees); no competing integration was added.
+
+| Capability | Behaviour |
+|---|---|
+| `incident_trend_summary` | For a chosen period (7–365 days, default 90), optionally one site: incident count versus the preceding equal period (no percentage when there is no baseline; no change figure if a list was capped), categories, severity, findings with the same title recorded two or more times at a site, and corrective actions not yet closed/verified with how many are past due. |
+| `risk_patterns` | Recurrence (same site and category, 3 or more incidents inside 90 days) and rising volume (last 90 days at least double the preceding 90, at least 3, with a non-zero baseline). Requires 10 incidents spanning 90 days within the caller's access, otherwise it abstains with the numbers. Each pattern carries evidence ids, period, limitations, why a review may be appropriate, and "This is not a prediction of an accident." No score is produced. |
+
+Controls: all figures are computed in `_shared/ai/insights.ts`; **no model is called** and
+`narrate()` is not applied to these capabilities, so no incident text leaves the platform.
+Only non-sensitive columns are read (no incident description, reporter, contact or
+anonymous community report). Per-user hourly rate limit counted from `ai_request_log`
+(default 60, `AI_RATE_LIMIT_PER_HOUR`; fails closed if the log cannot be read); request bodies
+are capped at 32,000 characters. Migration 0042 only widens the log's capability CHECK.
+
+## Implementation Phase 3b — safety guidance assistant and JSA assistance [IMPLEMENTED, deterministic]
+
+Follows the owner's clarification (screenshots of the MineGuard field app: Glossary, PPE guide,
+JSA form, Emergency screen). Same `ai-assist` handler, log, label, rate limit and no-write rules.
+
+| Capability | Behaviour |
+|---|---|
+| `safety_guidance` | Retrieval over the bundled reference content: 229 glossary terms, 12 PPE items, 6 first-aid guides, the 5 immediate-action steps and 3 contacts from the field app. Every statement is a verbatim excerpt that cites its entry id. Each carries a provenance `kind`. No match: it abstains and guesses nothing. Asked whether a mine/site/area is safe: it refuses. Legal/regulatory questions: flagged as needing a qualified safety professional; the content states no regulation. Emergency questions return the immediate actions and say that site procedures apply. |
+| `jsa_suggestions` | Matches the task description against a fixed library of 11 hazard categories and returns possible hazards, consequences, controls to consider, further-assessment questions and PPE ids (checked against the PPE guide), plus general questions for every task. Always `needs_verification`; never approved. No match: abstains and says that does not mean the task is hazard free. |
+
+**Provenance (`kind`):** `approved_source` only when `REVIEW.approvedBy` in
+`guidance-content.ts` names a person; `needs_verification` otherwise; `general_explanation`
+exists in the contract for a future approved provider and is never produced today. **As shipped
+the repository records no sign-off, so every statement is shown as needing verification** and the
+UI says why. Filling in `REVIEW` after a qualified person has reviewed the content flips the label
+(regenerate the two copies with `scripts/gen-guidance-content.mjs`; a test fails if they drift).
+The hazard library in `jsa-assist.ts` is general knowledge written for this feature, not reviewed
+content, and is never labelled approved.
+
+**No model, no network.** Neither capability calls a provider, `narrate()` is not applied (safety
+text is not reworded), the task text is matched against a fixed library and never forwarded. The
+request log keeps a hash and length of the question only (asserted).
+
+**JSA workflow (migration 0043; none existed).** `job_safety_analyses`, closed to client writes;
+RPCs `mg_jsa_save` / `mg_jsa_submit` / `mg_jsa_review`. Lifecycle draft -> submitted -> approved |
+rejected. Approval requires a *different* person who is company_admin, or a site_manager /
+safety_officer assigned to the site, and the typed word APPROVE; a CHECK constraint refuses an
+approved row without a distinct reviewer, a trigger freezes submitted/approved content and bans
+deletion, and `ai_assisted` is derived from hazard sources (never settable). No function accepts AI
+as an approver. Approval records review; it does **not** authorise the task. The table stores no
+worker names (profile ids only); Ministry roles get read access via `jsa.read` within their scope.
+"Qualified" is approximated by organisation role: the database cannot verify competence.
+
+**Rollback.** Revert the Phase 3b commit. Migration 0043 is additive: to remove it, drop
+`job_safety_analyses` and the `mg_jsa_*` / `mg_can_*_jsa` functions, delete the `jsa.read`
+permission rows, and restore the previous `ai_request_log_capability_check` (list in 0042) after
+deleting any `safety_guidance` / `jsa_suggestions` log rows (the log is append-only; do this as the
+database owner). Removing only the UI: delete the `safety` and `jsa` routes in `src/main.tsx`.
+
+## Phase 3c — role authority, JSA approval matrix, emergency contacts [IMPLEMENTED]
+
+Migration 0044. Modelled on common practice in safety-management software: the people who do
+the work prepare and submit; a safety authority independent of the preparer reviews; role
+elevation is an administrator act. "Qualified" remains an organisational-role approximation.
+
+| Role (company) | Assign roles | Prepare + submit JSA | Review / approve JSA | Maintain emergency contacts |
+|---|---|---|---|---|
+| Company administrator | **Yes — the only role that can** (site manager, safety officer, worker, onboarding officer); change roles; approve join requests | Yes | Yes, any site of the company, never their own | Whole company and every site |
+| Site manager (assigned to the site) | No | Yes | **Yes**, that site, never their own | That site |
+| Safety officer (assigned to the site) | No | Yes | **Yes**, that site, never their own | That site |
+| Worker (assigned to the site) | No | Yes | No | No (reads) |
+| Onboarding officer | Adds **workers only** (bulk import keeps working) | No | No | No |
+| Ministry staff | No (the registrar still appoints the company administrator) | No | No (read-only via `jsa.read`) | No (reads via `emergency.read`) |
+
+Decision to confirm: an onboarding officer may still add `worker`, the lowest role, which carries
+no approval authority. To make assignment strictly administrator-only, remove the `worker` line in
+`mg_create_org_invitation_core` (0044); bulk worker import would then need an administrator.
+
+Role changes: `mg_set_member_role` is administrator-only, never on yourself, never on an
+administrator. Approving a join request is administrator-only; rejecting is unchanged. Site
+assignment is not a role change and is unchanged (an assigned manager/officer is what makes
+them a reviewer for that site).
+
+**Emergency contacts** are rows in `emergency_contacts` (company-wide or per site), not constants
+in the app. Nothing is seeded; an empty list says so. Members read company-wide plus their
+sites' contacts; the assistant reads them under the caller's own row-level security, only for
+emergency questions (another company's contacts cannot appear; asserted). Removal archives
+(audited) rather than deletes. Numbers are format-checked only; they are not verified as
+reachable, and the UI tells people to confirm they are current.
+
+### Not built, and why
+- **Sign-off of the reference content.** Needs a named qualified safety professional to review `guidance-content.ts` and record `REVIEW.approvedBy`; until then nothing is labelled approved.
+- **French content.** The field app is bilingual; only English was imported.
+- **Contact verification.** No check that a stored number rings; maintenance is a human duty.
+- **Live model provider.** Still no approved provider, adapter or credential (see Session 8
+  list above). Enabling one for narration would send aggregate claim text to that provider and
+  needs the data-processing decision recorded there first.
+- **Retention of `ai_request_log`.** Still an owner decision. The log is append-only and holds
+  hashes, counts and validated arguments only.

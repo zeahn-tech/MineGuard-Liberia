@@ -29,6 +29,7 @@ const ProfileSettings = lazy(() => import("./pages/ProfileSettings.tsx"));
 const Oversight = lazy(() => import("./pages/Oversight.tsx"));
 const AdminUsers = lazy(() => import("./pages/AdminUsers.tsx"));
 const SiteRequests = lazy(() => import("./pages/SiteRequests.tsx"));
+const OperatorAnalytics = lazy(() => import("./pages/operate/OperatorAnalytics.tsx"));
 const OperatorActivity = lazy(() => import("./pages/operate/OperatorActivity.tsx"));
 const OperatorCompany = lazy(() => import("./pages/operate/OperatorCompany.tsx"));
 const OperatorSiteRequests = lazy(() => import("./pages/operate/OperatorSiteRequests.tsx"));
@@ -68,8 +69,15 @@ const OperatorOverview = lazy(() => import("./pages/operate/OperatorOverview.tsx
 const OperatorSites = lazy(() => import("./pages/operate/OperatorSites.tsx").then((m) => ({ default: m.OperatorSites })));
 const OperatorSiteDetail = lazy(() => import("./pages/operate/OperatorSites.tsx").then((m) => ({ default: m.OperatorSiteDetail })));
 const OperatorFindings = lazy(() => import("./pages/operate/OperatorFindings.tsx"));
+const CorrectiveActions = lazy(() => import("./pages/CorrectiveActions.tsx"));
 const OperatorCorrectiveActions = lazy(() => import("./pages/operate/OperatorCorrectiveActions.tsx"));
 const OperatorIncidents = lazy(() => import("./pages/operate/OperatorIncidents.tsx"));
+const VoiceReport = lazy(() => import("./pages/voice/VoiceReport.tsx"));
+const VoicePublic = lazy(() => import("./pages/voice/VoicePublic.tsx"));
+const VoiceStatus = lazy(() => import("./pages/voice/VoiceStatus.tsx"));
+const VoiceReview = lazy(() => import("./pages/voice/VoiceReview.tsx"));
+const SafetyGuidance = lazy(() => import("./pages/safety/SafetyGuidance.tsx"));
+const JsaPage = lazy(() => import("./pages/safety/JsaPage.tsx"));
 const EmergencyConsole = lazy(() => import("./pages/emergency/EmergencyConsole.tsx"));
 const EmergencyAlertPage = lazy(() => import("./pages/emergency/EmergencyAlertPage.tsx"));
 const EmergencyRedirect = lazy(() => import("./pages/emergency/EmergencyRedirect.tsx"));
@@ -134,6 +142,8 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/cookies" element={<Cookies />} />
             <Route path="/report" element={<CommunitySubmit />} />
             <Route path="/report/track" element={<CommunityTrack />} />
+            <Route path="/voice" element={<VoicePublic />} />
+            <Route path="/voice/status" element={<VoiceStatus />} />
 
             {/* COMPANY REGISTRY — the dedicated Ministry registrar's workspace: the
                 companies screen only. Gated by RequireRegistrar (routing); the database
@@ -168,9 +178,14 @@ createRoot(document.getElementById("root")!).render(
               <Route path="incidents" element={<OperatorIncidents />} />
               <Route path="emergency" element={<EmergencyConsole />} />
               <Route path="emergency/:alertId" element={<EmergencyAlertPage />} />
+              <Route path="safety" element={<SafetyGuidance />} />
+              <Route path="jsa" element={<JsaPage />} />
+              <Route path="voice" element={<VoiceReport />} />
+              <Route path="voice-review" element={<VoiceReview />} />
               <Route path="team" element={<OperatorTeam />} />
               <Route path="company" element={<OperatorCompany />} />
               <Route path="activity" element={<OperatorActivity />} />
+              <Route path="analytics" element={<OperatorAnalytics />} />
               <Route path="site-requests" element={<OperatorSiteRequests />} />
               {/* The operator shell leaves each page to own its gutter, but the profile page is
                   shared with the admin and registry shells (whose <main> pads it). Give it the
@@ -203,6 +218,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="companies" element={<Companies />} />
               <Route path="site-requests" element={<SiteRequests />} />
               <Route path="oversight" element={<Oversight />} />
+              <Route path="corrective-actions" element={<CorrectiveActions />} />
               <Route path="users" element={<AdminUsers />} />
               <Route path="companies/:companyId" element={<CompanyDetail />} />
               <Route path="sites" element={<Sites />} />
@@ -216,6 +232,8 @@ createRoot(document.getElementById("root")!).render(
               <Route path="incidents" element={<Incidents />} />
               <Route path="emergency" element={<EmergencyConsole />} />
               <Route path="emergency/:alertId" element={<EmergencyAlertPage />} />
+              <Route path="safety" element={<SafetyGuidance />} />
+              <Route path="jsa" element={<JsaPage />} />
               <Route path="incidents/:incidentId" element={<IncidentDetail />} />
               <Route path="environment" element={<Environment />} />
               <Route path="environment/:observationId" element={<ObservationDetail />} />

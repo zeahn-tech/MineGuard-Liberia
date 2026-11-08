@@ -15,7 +15,12 @@
 
 import { acknowledgeEmergency } from "@/lib/emergency";
 import { EmergencyBanner } from "@/components/emergency/EmergencyBanner";
-import { Siren } from "lucide-react";
+import { Siren,
+  BookOpen,
+  ClipboardCheck,
+  Megaphone,
+  Inbox,
+} from "lucide-react";
 import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,6 +54,7 @@ import { api, refreshAllData } from "@/lib/backend";
 import { useLatest } from "@/lib/use-latest";
 import { useMutation, useQuery } from "@/lib/backend-react";
 import {
+  BarChart3,
   Building2,
   ClipboardList,
   CloudOff,
@@ -69,16 +75,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { toastError } from "@/lib/feedback";
+import { canWorkCorrectiveActions } from "@/lib/corrective-actions";
 
 const OPERATOR_NAV = [
   { to: "/operate", label: "Overview", icon: ClipboardList, end: true },
   { to: "/operate/sites", label: "My Sites", icon: Building2 },
   { to: "/operate/findings", label: "Findings", icon: FileCheck2 },
-  { to: "/operate/corrective-actions", label: "Corrective Actions", icon: ShieldCheck },
+  { to: "/operate/corrective-actions", label: "Corrective Actions", icon: ShieldCheck, caOnly: true },
   { to: "/operate/incidents", label: "Incidents", icon: HeartPulse },
   { to: "/operate/emergency", label: "Emergency", icon: Siren },
+  { to: "/operate/safety", label: "Safety Guidance", icon: BookOpen },
+  { to: "/operate/jsa", label: "Job Safety Analysis", icon: ClipboardCheck },
+  { to: "/operate/voice", label: "Worker Voice", icon: Megaphone },
+  { to: "/operate/voice-review", label: "Voice review", icon: Inbox },
   { to: "/operate/team", label: "Team", icon: Users, adminOnly: true },
   { to: "/operate/site-requests", label: "Site requests", icon: MapPinPlus, adminOnly: true },
+  { to: "/operate/analytics", label: "Safety analytics", icon: BarChart3 },
   { to: "/operate/activity", label: "Activity", icon: History, adminOnly: true },
   { to: "/operate/company", label: "Company profile", icon: Building2 },
   { to: "/operate/import", label: "Import workers", icon: Upload, onboardOnly: true },
@@ -122,14 +134,16 @@ export default function OperatorLayout() {
   const membership = useQuery(api.workforce.myMembership);
   const isCompanyAdmin = membership?.orgRole === "company_admin" && membership.memberStatus === "active";
   const isOfficer = membership?.orgRole === "onboarding_officer" && membership.memberStatus === "active";
+  const canWorkCa = canWorkCorrectiveActions(membership);
   const navItems = useMemo(
     () =>
       OPERATOR_NAV.filter((i) => {
         if ("adminOnly" in i && i.adminOnly) return isCompanyAdmin;
         if ("onboardOnly" in i && i.onboardOnly) return isCompanyAdmin || isOfficer;
+        if ("caOnly" in i && i.caOnly) return canWorkCa;
         return true;
       }),
-    [isCompanyAdmin, isOfficer],
+    [isCompanyAdmin, isOfficer, canWorkCa],
   );
   const navigate = useNavigate();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);

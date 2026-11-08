@@ -48,6 +48,7 @@ export default function Landing() {
             <a href="#capabilities" onClick={sectionJump("capabilities")} className="hover:text-foreground">Capabilities</a>
             <a href="#principles" onClick={sectionJump("principles")} className="hover:text-foreground">Principles</a>
             <Link to="/report" className="hover:text-foreground">Report a concern</Link>
+            <Link to="/voice" className="hover:text-foreground">Worker Voice</Link>
           </nav>
           <div className="flex items-center gap-2">
             {!isLoading && isAuthenticated && (
