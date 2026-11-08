@@ -100,6 +100,15 @@ select migration, applied
     ('0039 oversight + admin user removal',
        exists (select 1 from fns where proname = 'mg_admin_prepare_account_deletion')
        and exists (select 1 from fns where proname = 'mg_company_oversight')),
+    ('0047 no self-service administrator bootstrap',
+       exists (select 1 from pg_trigger where tgname = 'profiles_insert_guard' and not tgisinternal)
+       and exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                    where n.nspname = 'public' and p.proname = 'complete_staff_profile'
+                      and p.prosrc like '%requires a platform role%')),
+    ('0048 public-user identity helpers',
+       exists (select 1 from fns where proname = 'mg_is_public_user')
+       and exists (select 1 from information_schema.columns
+                    where table_schema = 'public' and table_name = 'profiles' and column_name = 'restricted_at')),
     ('0018 boundaries published to Realtime',
        exists (
          select 1 from pg_publication_tables

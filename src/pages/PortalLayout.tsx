@@ -451,13 +451,11 @@ export default function PortalLayout() {
           <DialogHeader>
             <DialogTitle>Complete your staff profile</DialogTitle>
             <DialogDescription>
-              Your access scope. You can also be provisioned by an administrator.
+              Your job title and organization. Your role and access scope are assigned by a
+              program administrator.
             </DialogDescription>
           </DialogHeader>
-          <ProfileForm
-            onDone={() => setShowProfile(false)}
-            defaultScope={user?.scope ?? "national"}
-          />
+          <ProfileForm onDone={() => setShowProfile(false)} />
         </DialogContent>
       </Dialog>
 
@@ -665,10 +663,9 @@ function SeedButton({ onSeed }: { onSeed: () => void }) {
   );
 }
 
-function ProfileForm({ onDone, defaultScope }: { onDone: () => void; defaultScope: string }) {
+function ProfileForm({ onDone }: { onDone: () => void }) {
   const [jobTitle, setJobTitle] = useState("");
   const [organization, setOrganization] = useState("");
-  const [scope, setScope] = useState(defaultScope);
   const [saving, setSaving] = useState(false);
   const complete = useMutation(api.stats.completeProfile);
 
@@ -679,7 +676,6 @@ function ProfileForm({ onDone, defaultScope }: { onDone: () => void; defaultScop
       await complete({
         jobTitle: jobTitle || "Field Officer",
         organization: organization || "MineGuard Program",
-        scope: scope as never,
       });
       toast.success("Profile saved");
       onDone();
@@ -718,17 +714,6 @@ function ProfileForm({ onDone, defaultScope }: { onDone: () => void; defaultScop
       <div className="space-y-1.5">
         <Label htmlFor="pf-org">Organization</Label>
         <Input id="pf-org" value={organization} onChange={(e) => setOrganization(e.target.value)} />
-      </div>
-      <div className="space-y-1.5">
-        <Label>Scope</Label>
-        <Select value={scope} onValueChange={setScope}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="national">National</SelectItem>
-            <SelectItem value="county">County</SelectItem>
-            <SelectItem value="site">Site</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
       <Button className="w-full" onClick={save} disabled={saving}>
         {saving ? (
