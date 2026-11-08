@@ -1,6 +1,6 @@
 # 22 — Worker Voice: named, confidential and anonymous safety reporting
 
-Implementation Phase 4. Migration `0046_worker_voice.sql`. Not applied to production by this change.
+Implementation Phase 4. Migrations `0046_worker_voice.sql` and `0047_worker_voice_decisions.sql` (the owner's five decisions). Neither is applied to production by this change; apply 0046 then 0047.
 
 ## What it is
 
@@ -12,13 +12,20 @@ modes, with the privacy of each described honestly **before** anything sensitive
 |---|---|---|---|
 | Needs sign-in to send | yes | yes | **no** (site code instead) |
 | Identity held | yes | yes, in a separate closed table | **none exists** |
-| Who sees the identity | the report's reviewers | **company administrator only**, with a stated purpose, recorded, count shown to the reporter | nobody (nothing to see) |
+| Who sees the identity | the report's company reviewers, and Ministry staff for the area | **Ministry staff for the area only** (administrators, supervisors, inspectors), with a stated purpose; recorded; count shown to the reporter. **Not** the company's own administrators, managers or safety officers | nobody (nothing to see) |
 | Report content seen by | reviewers | reviewers | reviewers |
 | Follow-up | code, or "my reports" | code, or "my reports" | code only |
 
-Reviewers = the company administrator, and the site manager / safety officers **assigned to that
-site** (not for a report routed to administrators only). The **Ministry has no access** and nothing in
-the app says it does.
+Company reviewers = the company administrator, and the site manager / safety officers **assigned to that
+site** (not for a report routed to administrators only). They triage, assign, message, escalate, promote to
+an incident and close.
+
+**Ministry staff** (administrators, supervisors, inspectors; permission `wv.identity`, limited to their
+jurisdiction by the existing scope rules) can **read** reports, messages and photos for sites in their area
+and **open sender identities** (named; confidential with a purpose). They are not notified, cannot act on a
+report, and cannot see the company's internal reviewer history. This reverses the first version of this
+feature, which gave the Ministry no access; the reporter-facing wording says so before anything is typed.
+No other regulator is involved and nothing says otherwise.
 
 ## Reuse, and why not `incidents`
 
@@ -137,21 +144,66 @@ worker_voice_reports, worker_voice_site_codes;` then drop the `mg_wv_*` function
 `kind = 'worker_voice'` notifications first). Reports are never deleted by the app, so export first if
 they must be kept.
 
-## Decisions and remaining risks
+## The five owner decisions (migration 0047)
 
-1. **Who may open a confidential identity.** Implemented: company administrators, purpose required,
-   recorded. If the policy is different (a named ombuds role, or two-person approval), change
-   `mg_wv_identity`. Note a company administrator can be the subject of a report; there is then no
-   in-app alternative.
-2. **Site code distribution.** Anyone who sees the poster can send an anonymous report. That is the
-   trade-off for needing no account; rotate on abuse.
-3. **Small sites weaken anonymity**; the app says so but cannot fix it.
-4. **Attachments** (see above). Smallest safe design: a separate private bucket, a server-side
-   ingestion function that re-encodes images (dropping metadata), type/size allow-list, scanning, short
-   signed URLs only for reviewers, and no evidence for anonymous reports until that exists.
-5. **No two-way anonymous messaging.** Reviewers can write one update; the reporter cannot reply.
-6. **No push notification** for Worker Voice (in-app only). A push would need the same generic text.
+1. **Confidential identity: Ministry staff only.** `mg_wv_identity`: confidential → in-scope Ministry staff
+   with a purpose of at least 10 characters; the company's administrators, managers and safety officers are
+   refused ("only Ministry staff"). Named → company reviewers or in-scope Ministry staff. Anonymous → nothing
+   exists. A person cannot open their own report. Read access for Ministry staff is what lets them find the
+   report; they have a read-only page at `/portal/voice`.
+2. **Photos (JPEG only, up to 3, under 1 MB each).** The phone re-draws and shrinks the picture (dropping
+   camera, time and location data) and then structurally rewrites the JPEG keeping only picture segments. The
+   server **refuses** the report unless every file passes `mg_wv_jpeg_problem`: only a bare JFIF header (no
+   thumbnail) plus quantization/Huffman/frame/scan segments, at most 4096 px a side, valid start and end, no
+   APPn/COM marker anywhere (including hidden after the scan). Files live in a closed table (no URL exists),
+   are shown to reviewers and in-scope Ministry staff only, as an image, are immutable, and carry a
+   server-computed SHA-256. **Not done:** malware scanning; protection against what the picture shows (faces,
+   name tags, equipment); video and PNG. Reviewers are told photos are not scanned; reporters are told what
+   is and is not removed.
+3. **Site-code controls.** 90-day expiry (a member's next request after expiry issues a new code, and the
+   old poster stops working); a pause switch for anonymous intake that tells people honestly; per-day intake
+   counts (not tied to any report) with an "unusual volume" signal (20 or more in a day and over four times
+   the usual).
+4. **Two-way messaging and push.** The reporter can reply with the follow-up code alone (or from "my reports"
+   if named/confidential); reviewers' messages and the reporter's replies form a thread. Replies are limited
+   (1,000 characters, 10 a day per report, per-source limits, wrong-code guesses limited), blocked once the
+   report is closed, carry an hourly time and no actor, and raise the same generic notification. **Push:**
+   reviewers with a live subscription get a queued push with the fixed payload `{"v":1,"t":"wv"}` (no id, no
+   text); the service worker shows only the generic notice; the `worker-voice-push` function is called by a
+   scheduler holding a shared secret (`supabase/cron/worker-voice-push-sweep.sql`, **not applied by
+   migrations**). Without the scheduler, in-app notifications still work and push does not.
+5. **Small sites** (fewer than 10 people assigned; `mg_wv_small_site_threshold()`): the reporter is warned
+   before sending, the received and occurrence times of confidential/anonymous reports are coarsened to the
+   **day**, and reviewers see a "small site" flag and a reminder not to try to work out who wrote it. This
+   reduces timing correlation; it cannot make a small crew anonymous, and the app says so.
+
+### Additional deployment steps for 0047
+* Apply `0047` after `0046`.
+* Deploy the edge function: `supabase functions deploy worker-voice-push --no-verify-jwt --use-api`; set
+  `WORKER_VOICE_PUSH_SECRET`; reuse the existing `VAPID_*` secrets; then (optionally) schedule the sweep.
+* Ministry staff need nothing: the `wv.identity` permission is granted to admin, supervisor and inspector.
+* Photos travel inside the submit request (base64, up to about 3.2 MB). If your gateway limits request size
+  below that, anonymous reports with three large photos will fail with a clear message.
+
+### Additional rollback for 0047
+Hide: remove the `/portal/voice` route and nav entry. Remove data: drop `worker_voice_messages`,
+`worker_voice_attachments`, `worker_voice_code_usage`, `worker_voice_push_outbox`; drop the columns
+`small_site` (reports) and `anonymous_enabled`, `expires_at` (site codes); delete the `wv.identity`
+permission rows; drop the `mg_wv_*` functions added in 0047 and re-run 0046 to restore its versions.
+
+## Remaining risks and unresolved decisions
+
+1. **Ministry staff can now read every report in their area**, including anonymous and
+   confidential content and photos. That is required for them to open an identity, and it is a larger
+   audience than the company alone. Anyone who objects can narrow it (for example: read only reports for
+   which an identity request has been filed) by changing `mg_wv_ministry_can_read`.
+2. **A confidential identity is no longer reachable by the company at all.** If the company must act on a
+   retaliation concern, it has to go through the Ministry.
+3. **Photos are not virus-scanned**, and their content can identify people.
+4. **Anyone who sees the posted site code can send an anonymous report.** Expiry, pausing and the volume
+   signal reduce the harm; they do not remove it.
+5. **Small sites weaken anonymity** whatever the app does.
+6. **Push is best effort** and needs the scheduler; it can be delayed or blocked by the device.
 7. **Reviewer availability.** If every administrator is the reporter or conflicted, nobody can review.
-8. **Rate buckets** (`wv:*`) are pruned opportunistically on anonymous submissions; add scheduled cleanup
-   if traffic is low.
-9. English only.
+8. **No independent certification** of the anonymity design.
+9. English only. Rate buckets (`wv:*`) are pruned opportunistically.

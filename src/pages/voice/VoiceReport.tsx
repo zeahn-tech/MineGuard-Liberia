@@ -16,10 +16,11 @@ import { EmptyState } from "@/components/EmptyState";
 import { PageLoading } from "@/components/PageLoading";
 import { PublicHeader } from "@/components/PublicHeader";
 import { NotSavedError } from "@/lib/offline-store";
+import { MAX_PHOTOS, preparePhoto, type PreparedPhoto } from "@/lib/voice-image";
 import { jsaSites, type JsaSite } from "@/lib/jsa";
 import {
   formatFollowUpCode, formatSiteCode, MAX_DESCRIPTION, MIN_DESCRIPTION, MODE_INFO, newFollowUpCode, normalizeSiteCode,
-  PERSONAL_INFO_NOTICE, RETALIATION_NOTICE, ROUTING_NOTICE, VOICE_CATEGORIES, VOICE_PREVIOUS, VOICE_URGENCIES,
+  PERSONAL_INFO_NOTICE, PHOTO_NOTICE, replyMine, RETALIATION_NOTICE, ROUTING_NOTICE, siteInfoByCode, siteIsSmall, SMALL_SITE_NOTICE, VOICE_CATEGORIES, VOICE_PREVIOUS, VOICE_URGENCIES,
   type VoiceCategory, type VoiceFields, type VoiceMode, type VoiceUrgency,
 } from "@/lib/voice";
 import { describeItem, enqueue, flushQueue, listQueue, removeFromQueue } from "@/lib/voice-queue";
@@ -96,6 +97,12 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
   const [queue, setQueue] = useState<QueuedReport[]>([]);
   const [mine, setMine] = useState<MyReport[]>([]);
   const [tick, setTick] = useState(0);
+  const [photos, setPhotos] = useState<PreparedPhoto[]>([]);
+  const [photoMsg, setPhotoMsg] = useState<string | null>(null);
+  const [small, setSmall] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [replyTo, setReplyTo] = useState<{ id: string; text: string } | null>(null);
+  const [replyMsg, setReplyMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -114,6 +121,27 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
     return () => { live = false; };
   }, [member, mode, siteId]);
 
+  // before anything is typed: is this a small site, and is anonymous intake paused?
+  useEffect(() => {
+    if (!mode) return;
+    let live = true;
+    if (member && siteId) void siteIsSmall(siteId).then((v) => { if (live) setSmall(v); });
+    else if (!member && normalizeSiteCode(siteCodeText).length === 10) void siteInfoByCode(siteCodeText).then((i) => { if (live) { setSmall(!!i.smallSite); setPaused(!!i.paused); } });
+    return () => { live = false; };
+  }, [member, mode, siteId, siteCodeText]);
+
+  const addPhotos = async (files: FileList | null) => {
+    if (!files) return;
+    setPhotoMsg(null);
+    for (const f of Array.from(files)) {
+      if (photos.length >= MAX_PHOTOS) { setPhotoMsg(`You can attach up to ${MAX_PHOTOS} photos.`); break; }
+      const r = await preparePhoto(f);
+      if (!r.ok) { setPhotoMsg(r.reason); continue; }
+      setPhotos((p) => (p.length >= MAX_PHOTOS ? p : [...p, r.photo]));
+    }
+  };
+  const dropPhoto = (id: string) => setPhotos((p) => { p.filter((x) => x.id === id).forEach((x) => URL.revokeObjectURL(x.previewUrl)); return p.filter((x) => x.id !== id); });
+
   const flush = useCallback(async () => { await flushQueue({ signedIn: member }); setTick((t) => t + 1); }, [member]);
   useEffect(() => {
     const on = () => { void flush(); };
@@ -121,7 +149,7 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
     return () => window.removeEventListener("online", on);
   }, [flush]);
 
-  const reset = () => { setPhase("form"); setReceipt(null); setDescription(""); setOccurred(""); setConcerns(false); setCategory(""); setUrgency(""); setError(null); setTick((t) => t + 1); };
+  const reset = () => { photos.forEach((p) => URL.revokeObjectURL(p.previewUrl)); setPhotos([]); setPhase("form"); setReceipt(null); setDescription(""); setOccurred(""); setConcerns(false); setCategory(""); setUrgency(""); setError(null); setTick((t) => t + 1); };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,7 +167,7 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
     const code = newFollowUpCode();
     setBusy(true);
     try {
-      await enqueue({ id, mode, siteId: mode === "anonymous" ? undefined : siteId, siteCode: mode === "anonymous" ? normalizeSiteCode(siteCodeText) : undefined, fields, code });
+      await enqueue({ id, mode, siteId: mode === "anonymous" ? undefined : siteId, siteCode: mode === "anonymous" ? normalizeSiteCode(siteCodeText) : undefined, fields, attachments: photos.map((p) => p.base64), code });
     } catch (e2) {
       setBusy(false);
       setReceipt({ code, message: e2 instanceof NotSavedError ? "This phone could not save the report, and it has NOT been sent. Free some space or try again." : "The report could not be saved and has NOT been sent. Try again." });
@@ -231,6 +259,27 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
                 </label>
               </section>
 
+              {small && <p role="note" className="border border-amber-500/60 bg-amber-500/5 p-3 text-xs">{SMALL_SITE_NOTICE}</p>}
+              {paused && mode === "anonymous" && <p role="alert" className="border border-destructive/60 p-3 text-sm">Anonymous reporting is paused for this site. You can still send a named or confidential report after signing in, or speak to your safety officer.</p>}
+
+              <section className="space-y-2">
+                <h2 className="text-sm font-medium">Photos (optional)</h2>
+                <p className="text-xs text-muted-foreground">{PHOTO_NOTICE}</p>
+                <Input aria-label="Add photos" type="file" accept="image/*" multiple disabled={photos.length >= MAX_PHOTOS} onChange={(e) => { void addPhotos(e.target.files); e.target.value = ""; }} />
+                {photoMsg && <p role="alert" className="text-xs text-destructive">{photoMsg}</p>}
+                {photos.length > 0 && (
+                  <ul className="flex flex-wrap gap-2">
+                    {photos.map((p) => (
+                      <li key={p.id} className="space-y-1 text-xs">
+                        <img src={p.previewUrl} alt="Photo to attach" className="h-20 w-20 border border-border object-cover" />
+                        <span className="block text-muted-foreground">{Math.round(p.bytes / 1024)} KB</span>
+                        <Button type="button" size="sm" variant="ghost" onClick={() => dropPhoto(p.id)}>Remove</Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
               <section className="space-y-1 border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
                 <p className="flex items-center gap-1 font-medium text-foreground"><ShieldCheck className="size-4" /> Before you send</p>
                 <p>{ROUTING_NOTICE}</p>
@@ -238,7 +287,7 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
               </section>
 
               {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-              <Button type="submit" disabled={busy}>{busy ? "Sending…" : `Send ${MODE_INFO[mode].title.toLowerCase()}`}</Button>
+              <Button type="submit" disabled={busy || (paused && mode === "anonymous")}>{busy ? "Preparing…" : `Send ${MODE_INFO[mode].title.toLowerCase()}`}</Button>
             </>
           )}
         </form>
@@ -272,9 +321,19 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
                 <span className="font-medium">{r.stage}</span> · {r.mode} · received {r.received_on}
                 {r.reporter_update && <span className="block text-muted-foreground">Update{r.reporter_update_on ? ` (${r.reporter_update_on})` : ""}: {r.reporter_update}</span>}
                 {r.mode === "confidential" && <span className="block text-xs text-muted-foreground">Your identity has been opened {r.identity_opened} time{r.identity_opened === 1 ? "" : "s"}.</span>}
+                {r.can_reply && (replyTo?.id === r.id ? (
+                  <span className="mt-1 block space-y-1">
+                    <Textarea aria-label="Your message to the reviewers" value={replyTo.text} maxLength={1000} onChange={(e) => setReplyTo({ id: r.id, text: e.target.value })} />
+                    <span className="flex gap-2">
+                      <Button size="sm" disabled={!replyTo.text.trim()} onClick={() => { void replyMine(r.id, replyTo.text).then(() => { setReplyTo(null); setReplyMsg("Message sent to the reviewers."); }, () => setReplyMsg("The message could not be sent. Nothing was changed.")); }}>Send message</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setReplyTo(null)}>Cancel</Button>
+                    </span>
+                  </span>
+                ) : <Button size="sm" variant="outline" className="mt-1" onClick={() => { setReplyMsg(null); setReplyTo({ id: r.id, text: "" }); }}>Reply to the reviewers</Button>)}
               </li>
             ))}
           </ul>
+          {replyMsg && <p role="status" className="text-xs">{replyMsg}</p>}
           <p className="text-xs text-muted-foreground">Anonymous reports are not listed here, because nothing links them to you. Use your follow-up code.</p>
         </section>
       )}

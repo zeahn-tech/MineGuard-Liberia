@@ -7,10 +7,10 @@ export interface VoiceReportRow {
   id: string; site_id: string; mode: "named" | "confidential" | "anonymous"; category: string; urgency: string;
   description: string; occurred_at: string | null; previously_reported: string; route: "site" | "company_admin";
   status: ReportStatus; triage_severity: string | null; assigned_to: string | null; escalated_at: string | null;
-  linked_incident_id: string | null; duplicate_of: string | null; closure_reason: string | null;
-  reporter_update: string | null; created_at: string;
+  linked_incident_id: string | null; duplicate_of: string | null; closure_reason: string | null; small_site: boolean;
+  reporter_update: string | null; reporter_update_at: string | null; created_at: string;
 }
-export interface MyReport { id: string; received_on: string; mode: string; category: string; stage: string; reporter_update: string | null; reporter_update_on: string | null; identity_opened: number }
+export interface MyReport { id: string; received_on: string; mode: string; category: string; stage: string; reporter_update: string | null; reporter_update_on: string | null; identity_opened: number; can_reply: boolean }
 
 const rpc = async <T = unknown>(fn: string, args?: Record<string, unknown>): Promise<T> => {
   const { data, error } = await supabase.rpc(fn, args);
@@ -39,7 +39,7 @@ export function explainReviewError(e: unknown): string {
   const m = e instanceof Error ? e.message : String(e);
   if (/ALREADY_ESCALATED/.test(m)) return "This report is already with the company administrators. MineGuard has no higher route; use your company procedure or legal channels.";
   if (/PURPOSE_REQUIRED/.test(m)) return "State why the identity is needed (at least 10 characters).";
-  if (/only a company administrator can open/.test(m)) return "Only a company administrator can open a confidential identity.";
+  if (/only Ministry staff/.test(m)) return "Only Ministry staff for this area can open a confidential identity.";
   if (/cannot review a report you sent/.test(m)) return "You sent this report, so you cannot review it.";
   if (/CLOSURE_REASON_REQUIRED/.test(m)) return "Say why the report is being closed (at least 10 characters).";
   if (/backwards/.test(m)) return "A report cannot move back to an earlier stage.";
@@ -49,3 +49,16 @@ export function explainReviewError(e: unknown): string {
   if (/INVALID/.test(m)) return m.replace(/^.*INVALID:\s*/, "");
   return "That could not be completed. Nothing was changed; try again.";
 }
+
+export interface VoiceMessage { seq: number; from_reporter: boolean; body: string; at: string }
+export async function listMessages(reportId: string): Promise<VoiceMessage[]> {
+  const { data, error } = await supabase.from("worker_voice_messages").select("seq, from_reporter, body, at").eq("report_id", reportId).order("seq", { ascending: true }).limit(100);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as VoiceMessage[];
+}
+export interface VoicePhoto { id: string; bytes: number; sha256: string; data: string }
+export const listPhotos = (reportId: string) => rpc<VoicePhoto[]>("mg_wv_attachments", { p_report: reportId });
+export const photoCounts = () => rpc<{ report_id: string; n: number }[]>("mg_wv_attachment_counts");
+export interface CodeInfo { code: string; expiresOn: string; enabled: boolean; today: number; week: number; unusual: boolean }
+export const codeInfo = (siteId: string) => rpc<CodeInfo>("mg_wv_code_info", { p_site: siteId });
+export const setAnonymousEnabled = (siteId: string, enabled: boolean) => rpc("mg_wv_set_anonymous", { p_site: siteId, p_enabled: enabled });

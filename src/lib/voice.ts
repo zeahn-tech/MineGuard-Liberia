@@ -47,17 +47,17 @@ export const MODE_INFO: Record<VoiceMode, { title: string; summary: string; who:
   named: {
     title: "Named report",
     summary: "Your name is attached, like any other safety record.",
-    who: "The people who review this report can see who sent it: the company administrator, and the site manager and safety officers assigned to the site.",
+    who: "The people who review this report can see who sent it: your company's administrator, and the site manager and safety officers assigned to the site. Ministry staff for your area (administrators, supervisors and inspectors) can also read it and see your name.",
     limits: ["You are signed in, so MineGuard's server records show that your account sent a report."],
   },
   confidential: {
     title: "Confidential report",
-    summary: "We keep your identity, but it is hidden from ordinary users and from the site's managers and safety officers.",
-    who: "Only a company administrator can open your identity, and only by stating a purpose. Every opening is recorded, and you can see how many times it was opened. The report itself is read by its reviewers.",
+    summary: "We keep your identity, but your company's own administrators, managers and safety officers cannot open it.",
+    who: "Only Ministry staff for your area (administrators, supervisors and inspectors) can open your identity, and only by stating a purpose. Every opening is recorded, and you can see how many times it was opened. Your company's reviewers read the report itself, without your name.",
     limits: [
       "You are signed in to send it, so MineGuard's server records show that your account sent a report.",
-      "Your identity is protected by access rules, not by being absent: a company administrator can open it.",
-      "The report is shown to reviewers with an hourly time, not an exact one.",
+      "Your identity is protected by access rules, not by being absent: Ministry staff for your area can open it.",
+      "The report is shown to reviewers with an hourly time (a day at a small site), not an exact one.",
     ],
   },
   anonymous: {
@@ -69,6 +69,7 @@ export const MODE_INFO: Record<VoiceMode, { title: string; summary: string; who:
       "Your phone, your network and the internet connection can show that a request was made. Those logs are outside MineGuard's report records and we cannot promise they are never kept.",
       "MineGuard does not store your address, device or browser with the report. A scrambled network key is used briefly to stop spam; it is never linked to a report.",
       "If you save it on this phone before sending, the text is on this phone until it is sent or you delete it.",
+      "Photos can identify you even with hidden data removed: faces, name tags, your own equipment or where you were standing.",
       "No one has independently certified this design.",
     ],
   },
@@ -77,9 +78,13 @@ export const MODE_INFO: Record<VoiceMode, { title: string; summary: string; who:
 export const RETALIATION_NOTICE =
   "MineGuard cannot guarantee protection from retaliation. Protection under your company's procedures and the law must be pursued through the appropriate channels.";
 export const ROUTING_NOTICE =
-  "This report goes to your company's reviewers in MineGuard. It is not sent to the Ministry or to any regulator.";
+  "This report goes to your company's reviewers in MineGuard. Ministry staff for your area (administrators, supervisors and inspectors) can also read it. They are not notified and cannot act on it. It is not sent to any other regulator.";
 export const PERSONAL_INFO_NOTICE =
-  "Describe what is wrong, where, and when. Leave out names, phone numbers, health details and anything about other people that the safety concern does not need. Photos and files cannot be attached in this version.";
+  "Describe what is wrong, where, and when. Leave out names, phone numbers, health details and anything about other people that the safety concern does not need.";
+export const PHOTO_NOTICE =
+  "You can add up to 3 photos. Camera, time and location data is removed on your phone and checked again by MineGuard, which refuses a photo that still carries any. What the picture shows is not removed: avoid faces, name tags and anything that points to you. Photos are shown only to reviewers and Ministry staff for your area, never through a link. They are not scanned for viruses.";
+export const SMALL_SITE_NOTICE =
+  "This is a small site (fewer than 10 people are assigned). Details such as your shift, your equipment or who was present may point to you. Reviewers will see only the day, not the hour. Consider general wording.";
 
 // ---- follow-up code -------------------------------------------------------------------------------
 const HEX = /^[0-9A-F]{24}$/;
@@ -123,6 +128,8 @@ export interface VoiceFields {
   /** true = the concern is about the people who would normally review it */
   concernsReviewer: boolean;
 }
+
+export const MAX_REPLY = 1000;
 export interface QueuedReport {
   id: string;
   mode: VoiceMode;
@@ -131,6 +138,8 @@ export interface QueuedReport {
   /** anonymous: the code posted at the site */
   siteCode?: string;
   fields: VoiceFields;
+  /** base64 JPEGs, already cleaned on the device */
+  attachments?: string[];
   code: string;
   savedAt: string;
   state: "saved_on_device" | "sending" | "needs_attention";
@@ -140,7 +149,7 @@ export interface QueuedReport {
 
 export type SendOutcome =
   | { kind: "received" | "duplicate" }
-  | { kind: "rate_limited" | "invalid_site_code" | "network" | "signed_out" | "forbidden" }
+  | { kind: "rate_limited" | "invalid_site_code" | "anonymous_paused" | "network" | "signed_out" | "forbidden" }
   | { kind: "invalid"; message: string };
 
 function fromRpc(error: { message?: string; code?: string } | null, data: unknown): SendOutcome {
@@ -153,7 +162,7 @@ function fromRpc(error: { message?: string; code?: string } | null, data: unknow
   }
   const r = (data ?? {}) as { status?: string; message?: string };
   switch (r.status) {
-    case "received": case "duplicate": case "rate_limited": case "invalid_site_code": return { kind: r.status };
+    case "received": case "duplicate": case "rate_limited": case "invalid_site_code": case "anonymous_paused": return { kind: r.status };
     case "invalid": return { kind: "invalid", message: r.message ?? "The report could not be accepted." };
     default: return { kind: "network" };
   }
@@ -166,14 +175,14 @@ export async function sendReport(item: QueuedReport): Promise<SendOutcome> {
       const { data, error } = await anonymousClient().rpc("mg_wv_submit_anonymous", {
         p_site_code: normalizeSiteCode(item.siteCode ?? ""), p_category: f.category, p_urgency: f.urgency,
         p_description: f.description, p_occurred: f.occurredAt, p_previously: f.previouslyReported,
-        p_concerns: f.concernsReviewer, p_code: item.code,
+        p_concerns: f.concernsReviewer, p_code: item.code, p_attachments: item.attachments?.length ? item.attachments : null,
       });
       return fromRpc(error, data);
     }
     const { data, error } = await supabase.rpc("mg_wv_submit", {
       p_mode: item.mode, p_site: item.siteId, p_category: f.category, p_urgency: f.urgency,
       p_description: f.description, p_occurred: f.occurredAt, p_previously: f.previouslyReported,
-      p_concerns: f.concernsReviewer, p_code: item.code,
+      p_concerns: f.concernsReviewer, p_code: item.code, p_attachments: item.attachments?.length ? item.attachments : null,
     });
     return fromRpc(error, data);
   } catch {
@@ -181,11 +190,42 @@ export async function sendReport(item: QueuedReport): Promise<SendOutcome> {
   }
 }
 
-export interface FollowUpStatus { found: boolean; status?: string; stage?: string; closed?: boolean; lastChange?: string; update?: string | null; updateOn?: string | null }
+export interface ThreadMessage { from: "you" | "reviewers"; text: string; on: string }
+export interface FollowUpStatus { found: boolean; status?: string; stage?: string; closed?: boolean; lastChange?: string; update?: string | null; updateOn?: string | null; messages?: ThreadMessage[]; canReply?: boolean }
 export async function lookupFollowUp(rawCode: string): Promise<FollowUpStatus> {
   const code = parseFollowUpCode(rawCode);
   if (!code) return { found: false };
   const { data, error } = await anonymousClient().rpc("mg_wv_status", { p_code: code });
   if (error) throw new Error("lookup failed");
   return data as FollowUpStatus;
+}
+
+export type ReplyOutcome = "received" | "rate_limited" | "invalid" | "not_found" | "closed" | "network";
+/** Reply with the follow-up code alone. Sent from the session-less client: nothing identifies the sender. */
+export async function replyWithCode(rawCode: string, text: string): Promise<ReplyOutcome> {
+  const code = parseFollowUpCode(rawCode);
+  if (!code) return "not_found";
+  try {
+    const { data, error } = await anonymousClient().rpc("mg_wv_reply", { p_code: code, p_text: text });
+    if (error) return "network";
+    const st = (data as { status?: string } | null)?.status;
+    return st === "received" || st === "rate_limited" || st === "invalid" || st === "not_found" || st === "closed" ? st : "network";
+  } catch { return "network"; }
+}
+export async function replyMine(reportId: string, text: string): Promise<void> {
+  const { error } = await supabase.rpc("mg_wv_reply_mine", { p_id: reportId, p_text: text });
+  if (error) throw new Error(error.message);
+}
+
+export interface SiteInfo { valid: boolean; smallSite?: boolean; paused?: boolean; status?: string }
+/** What to tell a person about a site before they send, from the posted code. A wrong code counts as a guess. */
+export async function siteInfoByCode(rawCode: string): Promise<SiteInfo> {
+  try {
+    const { data, error } = await anonymousClient().rpc("mg_wv_site_info", { p_site_code: normalizeSiteCode(rawCode) });
+    return error ? { valid: false } : (data as SiteInfo);
+  } catch { return { valid: false }; }
+}
+export async function siteIsSmall(siteId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc("mg_wv_site_small", { p_site: siteId });
+  return !error && data === true;
 }

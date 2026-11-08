@@ -21,7 +21,7 @@ const OTH = "aaaaaaaa-0000-4000-8000-0000000000d1"; // other company's administr
 beforeAll(async () => { f = await getFixture(); });
 beforeEach(async () => {
   const db = await getDb();
-  for (const m of ["0040_emergency_alerts", "0041_emergency_authority_corrections", "0043_jsa_with_human_review", "0044_role_assignment_and_emergency_contacts", "0046_worker_voice"]) {
+  for (const m of ["0040_emergency_alerts", "0041_emergency_authority_corrections", "0043_jsa_with_human_review", "0044_role_assignment_and_emergency_contacts", "0046_worker_voice", "0047_worker_voice_decisions"]) {
     await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", `${m}.sql`), "utf8"));
   }
 });
@@ -240,7 +240,7 @@ describe("anonymous submission", () => {
         expect(await fails(run(`select * from public.${t}`))).toContain("permission denied");
       }
       expect(await fails(run("select public.mg_wv_site_code($1)", [c.siteA]))).toContain("permission denied");
-      expect(await fails(run("select public.mg_wv_insert('anonymous',$1,'other','low','a long enough description',null,'no',false,'0123456789ABCDEF01234567',null)", [c.siteA]))).toContain("permission denied");
+      expect(await fails(run("select public.mg_wv_insert('anonymous',$1,'other','low','a long enough description',null,'no',false,'0123456789ABCDEF01234567',null,null)", [c.siteA]))).toContain("permission denied");
     });
   });
 });
@@ -273,26 +273,32 @@ describe("named and confidential reports", () => {
     });
   });
 
-  test("ordinary site users and managers do NOT gain a confidential identity; only a company administrator, with a purpose, and it is recorded", async () => {
+  test("a confidential identity is opened by MINISTRY staff in scope only, with a purpose, and it is recorded; the company's own people cannot", async () => {
     await world(async (run, c) => {
       await asAuthed(run, WK);
       await submitMember(run, "confidential", c.siteA);
       const id = (await reportIds(run))[0].id as string;
-      for (const who of [SM, SO]) { // reviewers of the report, but not custodians
+      for (const who of [XA, XA2, SM, SO]) { // the company's administrators, manager and safety officer: reviewers, but NOT custodians
+        await asAuthed(run, who);
+        expect(await fails(run("select public.mg_wv_identity($1,'I need to know who this is')", [id]))).toContain("only Ministry staff");
+      }
+      for (const who of [WK2, OTH, SO2]) {
         await asAuthed(run, who);
         expect(await fails(run("select public.mg_wv_identity($1,'I need to know who this is')", [id]))).toContain("FORBIDDEN");
       }
-      for (const who of [WK2, OTH, SO2, f.admin, f.national]) {
-        await asAuthed(run, who);
-        expect(await fails(run("select public.mg_wv_identity($1,'I need to know who this is')", [id]))).toContain("FORBIDDEN");
-      }
-      await asAuthed(run, XA);
+      await asAuthed(run, f.county); // Bomi inspector: siteA is in Bomi
       expect(await fails(run("select public.mg_wv_identity($1)", [id]))).toContain("PURPOSE_REQUIRED");
+      expect(await fails(run("select public.mg_wv_identity($1,'too short')", [id]))).toContain("PURPOSE_REQUIRED");
       const got = (await run("select public.mg_wv_identity($1,'Welfare check requested by the safety committee') as r", [id]))[0].r;
       expect(got).toEqual({ available: true, name: "Wale Worker", jobTitle: null });
-      expect((await owner(run, "select actor_id, detail from public.worker_voice_events where report_id = $1 and event = 'identity_revealed'", [id]))[0]).toEqual({ actor_id: XA, detail: "Welfare check requested by the safety committee" });
-      await asAuthed(run, WK); // the reporter can see how many times it was opened
-      expect((await run("select identity_opened from public.mg_wv_my_reports()"))[0].identity_opened).toBe(1);
+      for (const who of [f.admin, f.national]) { // administrator and supervisor (national scope)
+        await asAuthed(run, who);
+        expect((await run("select (public.mg_wv_identity($1,'Investigating a retaliation complaint')) ->> 'name' as n", [id]))[0].n).toBe("Wale Worker");
+      }
+      expect((await owner(run, "select count(*)::int as n from public.worker_voice_events where report_id = $1 and event = 'identity_revealed'", [id]))[0].n).toBe(3);
+      expect((await owner(run, "select actor_id, detail from public.worker_voice_events where report_id = $1 and event = 'identity_revealed' order by at limit 1", [id]))[0]).toEqual({ actor_id: f.county, detail: "Welfare check requested by the safety committee" });
+      await asAuthed(run, WK); // the reporter sees how many times
+      expect((await run("select identity_opened from public.mg_wv_my_reports()"))[0].identity_opened).toBe(3);
     });
   });
 
@@ -346,8 +352,9 @@ describe("who can see and act on reports", () => {
       const code = await siteCodeFor(run, WK, c.siteA);
       await asAnon(run); await submitAnon(run, code);
       const count = async (who: string) => { await asAuthed(run, who); return (await run("select count(*)::int as n from public.worker_voice_reports"))[0].n as number; };
-      for (const who of [XA, XA2, SM, SO]) expect(await count(who)).toBe(1);
-      for (const who of [WK, WK2, SO2, OTH, f.admin, f.national, f.county]) expect(await count(who)).toBe(0);
+      for (const who of [XA, XA2, SM, SO]) expect(await count(who)).toBe(1); // the company's reviewers
+      for (const who of [f.admin, f.national, f.county]) expect(await count(who)).toBe(1); // Ministry staff whose area covers the site (read-only)
+      for (const who of [WK, WK2, SO2, OTH]) expect(await count(who)).toBe(0);
     });
   });
 
@@ -480,7 +487,7 @@ describe("follow-up by reference code", () => {
       s = (await run("select public.mg_wv_status($1) as r", [r.code]))[0].r;
       expect(s.stage).toBe("Under investigation");
       expect(s.update).toBe("We have inspected the area and barricaded it.");
-      expect(Object.keys(s).sort()).toEqual(["closed", "found", "lastChange", "stage", "update", "updateOn"]);
+      expect(Object.keys(s).sort()).toEqual(["canReply", "closed", "found", "lastChange", "messages", "stage", "update", "updateOn"]);
       const dump = JSON.stringify(s);
       for (const secret of ["critical", "equipment_hazard", SO, SM, "triage", "Pit 3", "severity", "assigned"]) expect(dump).not.toContain(secret);
     });
@@ -597,14 +604,18 @@ describe("notifications and abuse limits", () => {
     });
   });
 
-  test("nothing in the schema accepts attachments in this phase", async () => {
+  test("photo and message tables are closed to every client role", async () => {
     await world(async (run, c) => {
-      const code = await siteCodeFor(run, WK, c.siteA);
+      await asAuthed(run, WK);
+      await submitMember(run, "named", c.siteA);
+      for (const who of [WK, XA, f.admin]) {
+        await asAuthed(run, who);
+        expect(await fails(run("select * from public.worker_voice_attachments"))).toContain("permission denied");
+        expect(await fails(run("select * from public.worker_voice_push_outbox"))).toContain("permission denied");
+        expect(await fails(run("select * from public.worker_voice_code_usage"))).toContain("permission denied");
+      }
       await asAnon(run);
-      const fn = (await owner(run, "select pg_get_function_arguments(oid) as a from pg_proc where proname = 'mg_wv_submit_anonymous'"))[0].a as string;
-      expect(fn).not.toMatch(/file|attach|evidence|url|blob|image/i);
-      expect(await fails(run("insert into storage.objects (bucket_id, name) values ('evidence', 'wv/x.jpg')"))).toBeTruthy();
-      void code;
+      expect(await fails(run("select * from public.worker_voice_messages"))).toContain("permission denied");
     });
   });
 });

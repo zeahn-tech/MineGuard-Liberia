@@ -281,7 +281,32 @@ function emergencyPayload(event) {
   return { id, ev, sev, title: str(d && d.title, 120) };
 }
 
+/* WORKER VOICE PUSH. The payload is the fixed {"v":1,"t":"wv"}: it carries no report id, no mode, no
+ * category and no text, so a lock-screen preview or a captured message reveals nothing about any report.
+ * The wording is the approved generic notice. Tapping it opens the reviewer page (which needs sign-in). */
+function isWorkerVoicePush(event) {
+  try {
+    const d = event.data ? event.data.json() : null;
+    return !!d && d.t === "wv";
+  } catch (e) {
+    return false;
+  }
+}
+
 self.addEventListener("push", (event) => {
+  if (isWorkerVoicePush(event)) {
+    event.waitUntil(
+      self.registration.showNotification("MineGuard", {
+        body: "A safety report requires review. Sign in with your authorized account to access it.",
+        tag: "mg-worker-voice",
+        renotify: true,
+        icon: "./icons/pwa-192.v2.png",
+        badge: "./icons/pwa-192.v2.png",
+        data: { url: "./#/operate/voice-review" },
+      }),
+    );
+    return;
+  }
   const p = emergencyPayload(event);
   const verb =
     p.ev === "updated" ? "Emergency alert UPDATED" :

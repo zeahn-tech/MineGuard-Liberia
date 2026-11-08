@@ -369,6 +369,7 @@ end;
 $mg$;
 
 -- reporter: own named/confidential reports and how often the identity was opened -------------------------
+drop function if exists public.mg_wv_my_reports();   -- 0047 widens the row; keeps re-running this file safe
 create or replace function public.mg_wv_my_reports()
 returns table (id uuid, received_on date, mode text, category text, stage text, reporter_update text, reporter_update_on date, identity_opened integer)
 language sql stable security definer set search_path = public as $mg$

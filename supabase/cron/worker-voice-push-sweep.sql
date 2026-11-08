@@ -1,0 +1,18 @@
+-- OPTIONAL scheduler for Worker Voice push (not applied by migrations).
+-- Without it, reviewers still get the in-app notification and the bell; only the device push is missing.
+-- Requires pg_cron + pg_net (Supabase: Database -> Extensions) and the edge function secret
+-- WORKER_VOICE_PUSH_SECRET. Replace the two placeholders, then run once in the SQL editor.
+-- Every minute it wakes the devices of reviewers with a queued report; rows older than 6 hours are closed
+-- out as "not sent". The push carries no report information at all.
+--
+-- select cron.schedule(
+--   'mineguard-worker-voice-push',
+--   '* * * * *',
+--   $$ select net.http_post(
+--        url     := 'https://<PROJECT-REF>.supabase.co/functions/v1/worker-voice-push',
+--        headers := jsonb_build_object('Content-Type','application/json','x-sweep-secret','<WORKER_VOICE_PUSH_SECRET>'),
+--        body    := '{}'::jsonb,
+--        timeout_milliseconds := 20000) $$);
+--
+-- Stop it:  select cron.unschedule('mineguard-worker-voice-push');
+-- The secret is stored in cron.job: treat that table as sensitive and rotate the secret if it is exposed.

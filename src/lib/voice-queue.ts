@@ -61,7 +61,8 @@ export function flushQueue(opts: { signedIn: boolean; send?: (i: QueuedReport) =
           continue;
         }
         const attention =
-          res.kind === "invalid_site_code" ? "The site code was not accepted. Ask your site for the current code, then edit this report."
+          res.kind === "invalid_site_code" ? "The site code was not accepted. Ask your site for the current code, then send the report again."
+          : res.kind === "anonymous_paused" ? "Anonymous reporting is paused for this site. Use a named or confidential report, or speak to your safety officer."
           : res.kind === "invalid" ? res.message
           : res.kind === "forbidden" ? "Your account is not allowed to send to this site."
           : undefined;

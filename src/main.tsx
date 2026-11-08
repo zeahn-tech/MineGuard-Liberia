@@ -74,6 +74,7 @@ const OperatorIncidents = lazy(() => import("./pages/operate/OperatorIncidents.t
 const VoiceReport = lazy(() => import("./pages/voice/VoiceReport.tsx"));
 const VoicePublic = lazy(() => import("./pages/voice/VoicePublic.tsx"));
 const VoiceStatus = lazy(() => import("./pages/voice/VoiceStatus.tsx"));
+const VoiceMinistry = lazy(() => import("./pages/voice/VoiceMinistry.tsx"));
 const VoiceReview = lazy(() => import("./pages/voice/VoiceReview.tsx"));
 const SafetyGuidance = lazy(() => import("./pages/safety/SafetyGuidance.tsx"));
 const JsaPage = lazy(() => import("./pages/safety/JsaPage.tsx"));
@@ -229,6 +230,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="inspections/:inspectionId" element={<InspectionDetail />} />
               <Route path="incidents" element={<Incidents />} />
               <Route path="emergency" element={<EmergencyConsole />} />
+              <Route path="voice" element={<VoiceMinistry />} />
               <Route path="emergency/:alertId" element={<EmergencyAlertPage />} />
               <Route path="safety" element={<SafetyGuidance />} />
               <Route path="jsa" element={<JsaPage />} />
