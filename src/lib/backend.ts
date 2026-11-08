@@ -1790,6 +1790,38 @@ export async function updatePassword(newPassword: string) {
 
 /** Create the profile row for a fresh account (idempotent; the
  *  on_auth_user_created trigger normally does this first). */
+/** One of an account's own linked reports (migration 0049, mg_my_community_reports). */
+export interface MyReport {
+  id: string;
+  trackingCode: string;
+  category: string;
+  description: string;
+  county: string;
+  district?: string;
+  community?: string;
+  status: string;
+  createdAt: number;
+  reviewedAt?: number;
+}
+
+/** An account's own feedback/inquiry with the Ministry's answer (mg_my_feedback). */
+export interface MyFeedback {
+  id: string;
+  kind: "feedback" | "inquiry";
+  subject: string;
+  message: string;
+  status: string;
+  response?: string;
+  respondedAt?: number;
+  createdAt: number;
+}
+
+/** Reviewer's view of a feedback item (mg_feedback_queue). */
+export interface FeedbackQueueItem extends MyFeedback {
+  submitterId?: string;
+  internalNote?: string;
+}
+
 /** Server-derived session class (migration 0048, mg_my_access_class). */
 export type AccessClass =
   | "none"
@@ -2576,6 +2608,61 @@ export const api = {
         },
         ["profiles", "organization_members"],
       ),
+
+    /** The account's OWN linked reports (migration 0049). Curated columns; no reviewer notes. */
+    myReports: () =>
+      live<MyReport[]>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase.rpc("mg_my_community_reports");
+          if (error) throw backendError(error);
+          return ((data ?? []) as AnyRow[]).map((r) => ({
+            id: r.id as string,
+            trackingCode: r.tracking_code as string,
+            category: r.category as string,
+            description: r.description as string,
+            county: r.county as string,
+            district: (r.district as string | null) ?? undefined,
+            community: (r.community as string | null) ?? undefined,
+            status: r.status as string,
+            createdAt: Date.parse(r.created_at as string),
+            reviewedAt: r.reviewed_at ? Date.parse(r.reviewed_at as string) : undefined,
+          }));
+        },
+        ["community_reports"],
+      ),
+
+    /** The account's own feedback and inquiries, with the Ministry's answers. */
+    myFeedback: () =>
+      live<MyFeedback[]>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase.rpc("mg_my_feedback");
+          if (error) throw backendError(error);
+          return ((data ?? []) as AnyRow[]).map((r) => ({
+            id: r.id as string,
+            kind: r.kind as "feedback" | "inquiry",
+            subject: r.subject as string,
+            message: r.message as string,
+            status: r.status as string,
+            response: (r.response as string | null) ?? undefined,
+            respondedAt: r.responded_at ? Date.parse(r.responded_at as string) : undefined,
+            createdAt: Date.parse(r.created_at as string),
+          }));
+        },
+        ["public_feedback"],
+      ),
+
+    sendFeedback: async (args: { kind: "feedback" | "inquiry"; subject: string; message: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("submit_public_feedback", {
+        p_kind: args.kind,
+        p_subject: args.subject,
+        p_message: args.message,
+      });
+      if (error) throw backendError(error);
+      notifyLocalWrite("public_feedback");
+    },
 
     updateProfile: async (args: { name: string; jobTitle: string }) => {
       await requireAuthed();
@@ -4551,7 +4638,27 @@ export const api = {
       latitude?: number;
       longitude?: number;
       contactPhone?: string;
+      /** Opt-in (migration 0049): a verified public account may link the report to itself so it
+       *  appears under "My reports". The server decides the owner from the session; no id is sent. */
+      linkToAccount?: boolean;
     }) => {
+      if (args.linkToAccount) {
+        await requireAuthed();
+        const { data, error } = await supabase.rpc("submit_my_community_report", {
+          p_category: args.category,
+          p_description: args.description,
+          p_county: args.county,
+          p_district: args.district ?? null,
+          p_community: args.community ?? null,
+          p_latitude: args.latitude ?? null,
+          p_longitude: args.longitude ?? null,
+          p_contact_phone: args.contactPhone ?? null,
+        });
+        if (error) throw backendError(error);
+        notifyLocalWrite("community_reports");
+        const payload = data as { id: string; trackingCode: string };
+        return { id: payload.id, trackingCode: payload.trackingCode };
+      }
       // Rate limiting, tracking mirror and audit are enforced server-side by
       // the security-definer RPC (30 reports/minute cap).
       const { data, error } = await supabase.rpc("submit_community_report", {
@@ -4626,6 +4733,46 @@ export const api = {
         p_note: args.note ?? null,
       });
       if (error) throw backendError(error);
+    },
+
+    /** Ministry reviewers (administrators and supervisors): the public feedback and inquiry queue. */
+    feedbackQueue: () =>
+      live<FeedbackQueueItem[]>(
+        async () => {
+          await requireReviewerUser(true);
+          const { data, error } = await supabase.rpc("mg_feedback_queue", { p_status: null, p_limit: 100 });
+          if (error) throw backendError(error);
+          return ((data ?? []) as AnyRow[]).map((r) => ({
+            id: r.id as string,
+            submitterId: (r.submitter_id as string | null) ?? undefined,
+            kind: r.kind as "feedback" | "inquiry",
+            subject: r.subject as string,
+            message: r.message as string,
+            status: r.status as string,
+            response: (r.response as string | null) ?? undefined,
+            respondedAt: r.responded_at ? Date.parse(r.responded_at as string) : undefined,
+            internalNote: (r.internal_note as string | null) ?? undefined,
+            createdAt: Date.parse(r.created_at as string),
+          }));
+        },
+        ["public_feedback"],
+      ),
+
+    respondFeedback: async (args: {
+      id: string;
+      status: "in_review" | "answered" | "closed";
+      response?: string;
+      internalNote?: string;
+    }) => {
+      await requireReviewerUser();
+      const { error } = await supabase.rpc("mg_respond_feedback", {
+        p_id: args.id,
+        p_status: args.status,
+        p_response: args.response ?? null,
+        p_internal_note: args.internalNote ?? null,
+      });
+      if (error) throw backendError(error);
+      notifyLocalWrite("public_feedback");
     },
 
     // ------------------------------------------------------- notifications

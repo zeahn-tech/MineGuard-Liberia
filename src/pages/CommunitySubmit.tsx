@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router";
-import { useMutation } from "@/lib/backend-react";
+import { useMutation, useQuery } from "@/lib/backend-react";
+import { useAuth } from "@/hooks/use-auth";
+import { Checkbox } from "@/components/ui/checkbox";
 import { api } from "@/lib/backend";
 import { PublicHeader } from "@/components/PublicHeader";
 import { Button } from "@/components/ui/button";
@@ -27,6 +29,7 @@ const CATEGORIES = [
   { value: "safety_concern", label: "Safety concern" },
   { value: "land_concern", label: "Land concern" },
   { value: "unauthorized_activity", label: "Unauthorized activity" },
+  { value: "other", label: "Other mining-related concern" },
 ] as const;
 
 const COUNTIES = [
@@ -46,6 +49,13 @@ const COMMUNITY_IDS: Record<CommunityField, string> = {
 
 export default function CommunitySubmit() {
   const submit = useMutation(api.records.submitCommunityReport);
+  // Linking a report to an account is an explicit, opt-in choice offered only to a VERIFIED public
+  // account (the server decides; this value only shapes what the page offers). Anyone else — and
+  // anyone who leaves the box unticked — reports anonymously exactly as before.
+  const { isAuthenticated } = useAuth();
+  const accessClass = useQuery(api.account.accessClass, isAuthenticated ? undefined : "skip");
+  const canLink = accessClass === "public_user";
+  const [linkToAccount, setLinkToAccount] = useState(false);
   const [category, setCategory] = useState<string>("");
   const [county, setCounty] = useState<string>("");
   const [district, setDistrict] = useState("");
@@ -55,7 +65,7 @@ export default function CommunitySubmit() {
   const [lat, setLat] = useState("");
   const [lng, setLng] = useState("");
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ trackingCode: string } | null>(null);
+  const [result, setResult] = useState<{ trackingCode: string; linked: boolean } | null>(null);
   const [errors, setErrors] = useState<FieldErrors<CommunityField>>({});
   const [attempted, setAttempted] = useState(false);
 
@@ -88,12 +98,19 @@ export default function CommunitySubmit() {
         latitude: lat ? Number(lat) : undefined,
         longitude: lng ? Number(lng) : undefined,
         contactPhone: phone || undefined,
+        linkToAccount: canLink && linkToAccount,
       });
-      setResult(r);
+      setResult({ trackingCode: r.trackingCode, linked: canLink && linkToAccount });
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
-      if (msg.includes("RATE_LIMITED")) {
+      if (msg.includes("DUPLICATE")) {
+        toastProblem({
+          what: "You already sent this report.",
+          whose: "An identical report from your account in the last 24 hours is already on file.",
+          fix: "Open My reports to follow it, or change the description if this is a different concern.",
+        });
+      } else if (msg.includes("RATE_LIMITED")) {
         toastProblem({
           what: "Too many reports in a short time.",
           whose: "This is a safety limit, not a fault with your report.",
@@ -127,6 +144,7 @@ export default function CommunitySubmit() {
             </p>
             <p className="mt-3 text-xs text-muted-foreground">
               Save this code. You can check status at any time without signing in.
+              {result.linked && " This report is also saved under My reports in your account."}
             </p>
           </div>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
@@ -135,6 +153,11 @@ export default function CommunitySubmit() {
                 Track this report
               </Link>
             </Button>
+            {result.linked && (
+              <Button asChild variant="outline">
+                <Link to="/account/reports">My reports</Link>
+              </Button>
+            )}
             <Button asChild variant="outline">
               <Link to="/">Back to home</Link>
             </Button>
@@ -244,6 +267,23 @@ export default function CommunitySubmit() {
               )}
             </FormField>
           </div>
+
+          {canLink && (
+            <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
+              <Checkbox
+                checked={linkToAccount}
+                onCheckedChange={(v) => setLinkToAccount(v === true)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="font-medium">Link this report to my account</span>
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  Lets you follow it under My reports. Leave it unticked to report anonymously —
+                  nothing then connects the report to you.
+                </span>
+              </span>
+            </label>
+          )}
 
           <p className="text-xs leading-relaxed text-muted-foreground">
             By submitting, you confirm the information is accurate to the best of your

@@ -55,6 +55,7 @@ import {
   Map,
   Menu,
   MessageSquareWarning,
+  MessagesSquare,
   RefreshCw,
   ScrollText,
   Scale,
@@ -85,7 +86,7 @@ import { QueueManagerButton } from "@/components/QueueManager";
 import { toast } from "sonner";
 import { toastError, toastSuccess } from "@/lib/feedback";
 
-const NAV: { to: string; label: string; icon: typeof Map; adminOnly?: boolean }[] = [
+const NAV: { to: string; label: string; icon: typeof Map; adminOnly?: boolean; reviewerOnly?: boolean }[] = [
   { to: "/portal", label: "Command Center", icon: LayoutDashboard },
   { to: "/portal/sites", label: "Mining Sites", icon: Landmark },
   { to: "/portal/oversight", label: "Company Oversight", icon: Eye },
@@ -102,6 +103,7 @@ const NAV: { to: string; label: string; icon: typeof Map; adminOnly?: boolean }[
   { to: "/portal/jsa", label: "Job Safety Analysis", icon: ClipboardCheck },
   { to: "/portal/environment", label: "Environment", icon: Leaf },
   { to: "/portal/community", label: "Community Reports", icon: MessageSquareWarning },
+  { to: "/portal/feedback", label: "Public Feedback", icon: MessagesSquare, reviewerOnly: true },
   { to: "/portal/reports", label: "Summary Report", icon: FileText },
   { to: "/portal/audit", label: "Audit Log", icon: ScrollText },
   { to: "/portal/risk-config", label: "Risk Model", icon: Scale },
@@ -294,7 +296,9 @@ export default function PortalLayout() {
     }
   };
 
-  const navItems = NAV.filter((i) => !i.adminOnly || user?.role === "admin");
+  const navItems = NAV.filter(
+    (i) => (!i.adminOnly || user?.role === "admin") && (!i.reviewerOnly || user?.role === "admin" || user?.role === "supervisor"),
+  );
 
   return (
     <div className="min-h-screen bg-background">

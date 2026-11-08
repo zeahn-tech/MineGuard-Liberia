@@ -36,7 +36,7 @@ afterEach(async () => {
     "0025_company_status_membership_invitations.sql",
     "0026_company_workforce.sql",
     "0027_site_scoped_access.sql",
-    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0040_emergency_alerts.sql", "0041_emergency_authority_corrections.sql", "0047_close_admin_bootstrap.sql", "0048_public_user_identity.sql",
+    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0040_emergency_alerts.sql", "0041_emergency_authority_corrections.sql", "0047_close_admin_bootstrap.sql", "0048_public_user_identity.sql", "0049_public_reports_feedback.sql",
   ]) {
     await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
   }
@@ -80,7 +80,7 @@ describe("migrations apply to a clean database", () => {
       // two GIS boundary tables (admin_boundaries, site_boundaries) + 0019's
       // risk_config_versions + 0020's ai_request_log + 0021's notifications.
       // …+ 0025's organization_members and organization_invitations.
-      expect(Number(scalar(tables))).toBe(42); // …0048 adds account_restriction_events; 0037 adds site_registration_requests; 0040 adds six emergency tables; 0043 adds job_safety_analyses; 0044 adds emergency_contacts; 0046 adds four worker_voice_* tables
+      expect(Number(scalar(tables))).toBe(43); // …0049 adds public_feedback; 0048 adds account_restriction_events; 0037 adds site_registration_requests; 0040 adds six emergency tables; 0043 adds job_safety_analyses; 0044 adds emergency_contacts; 0046 adds four worker_voice_* tables
 
       const rls = await one(
         run,
@@ -90,7 +90,7 @@ describe("migrations apply to a clean database", () => {
       // every table above has RLS, including 0015's two boundary tables and
       // 0019's risk_config_versions + 0020's ai_request_log + 0021's notifications
       // …and 0025's two RPC-only tables.
-      expect(Number(scalar(rls))).toBe(42); // 0048: account_restriction_events (RLS, admin read); 0040: six emergency tables, all RLS-closed; 0043: job_safety_analyses; 0044: emergency_contacts; 0046: four worker_voice_* tables, all RLS-closed
+      expect(Number(scalar(rls))).toBe(43); // 0049: public_feedback (RLS, reviewer read); 0048: account_restriction_events (RLS, admin read); 0040: six emergency tables, all RLS-closed; 0043: job_safety_analyses; 0044: emergency_contacts; 0046: four worker_voice_* tables, all RLS-closed
 
       const guards = await one(
         run,
@@ -477,12 +477,12 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
     );
     // 10 domain tables + organizations (0010's integrity stamps).
     // 0025 adds organization_members + organization_invitations.
-    expect(Number(trig.rows[0]?.touch)).toBe(22); // 0029: organization_imports; 0037: site_registration_requests; 0040: five emergency tables; 0043: job_safety_analyses; 0044: emergency_contacts; 0046: four worker_voice_* tables, all RLS-closed
+    expect(Number(trig.rows[0]?.touch)).toBe(23); // 0049: public_feedback; 0029: organization_imports; 0037: site_registration_requests; 0040: five emergency tables; 0043: job_safety_analyses; 0044: emergency_contacts; 0046: four worker_voice_* tables, all RLS-closed
     // …and organizations + site_assignments join the audit trail: exactly one
     // row per mutation, one trigger per table. 0015 adds the two boundary
     // tables (admin_boundaries, site_boundaries) to the trail; 0019 adds
     // risk_config_versions (one audit row per published version).
-    expect(Number(trig.rows[0]?.audit)).toBe(26); // 0040: five emergency tables (push_subscriptions deliberately not audited); 0043: job_safety_analyses; 0044: emergency_contacts; 0046: four worker_voice_* tables, all RLS-closed
+    expect(Number(trig.rows[0]?.audit)).toBe(27); // 0049: public_feedback; 0040: five emergency tables (push_subscriptions deliberately not audited); 0043: job_safety_analyses; 0044: emergency_contacts; 0046: four worker_voice_* tables, all RLS-closed
     // "audit append" (0001) stays gone; only the staff-read policy remains.
     const pol = await db.query<{ n: string }>(
       `select count(*)::text as n from pg_policies
@@ -554,6 +554,7 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
         "emergency_alerts", "emergency_alert_revisions", "emergency_alert_acks",
         "emergency_alert_views", "emergency_alert_deliveries", "push_subscriptions",
         "account_restriction_events", // 0048: administrator read-only history
+        "public_feedback", // 0049: reviewer read-only; every write goes through an RPC
       ]);
       expect(r.a_ins, `authenticated INSERT on ${r.t}`).toBe(!READ_ONLY.has(r.t));
       expect(r.n_ins, `anon must not hold INSERT on ${r.t}`).toBe(false);
@@ -804,6 +805,8 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_emergency_manageable_sites()",
     "mg_emergency_mark_displayed(uuid, integer)",
     "mg_emergency_update(uuid, integer, text, text, text, text, text, text, text, text, text)",
+    // 0049 (Public User Phase C): feedback queue for reviewers
+    "mg_feedback_queue(text, integer)",
     "mg_has_permission(text)",
     "mg_import_apply(uuid, jsonb)",
     "mg_import_check(uuid, jsonb)",
@@ -820,7 +823,10 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_is_staff()",
     "mg_is_verified_public_user()",
     "mg_my_access_class()",
+    // 0049: an account's own reports and feedback
+    "mg_my_community_reports()",
     "mg_my_emergency_alerts()",
+    "mg_my_feedback()",
     "mg_my_membership()",
     "mg_my_pending_invitations()",
     // 0021 (Session 9): notification sync
@@ -835,6 +841,7 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_release_invitation_send(uuid)",
     "mg_request_membership(uuid)",
     "mg_request_site(uuid, text, text, text, text, text, double precision, double precision, text)",
+    "mg_respond_feedback(uuid, text, text, text)",
     "mg_revoke_invitation(uuid)",
     "mg_revoke_member(uuid)",
     // 0019: risk config reader/builder + the (version, as_of) readers that
@@ -864,6 +871,8 @@ describe("GAP-0: function execute surface (0011)", () => {
     "provision_user_by_email(text, text, text, text, text)",
     "refresh_public_stats()",
     "submit_community_report(text, text, text, text, text, text, double precision, double precision, text)",
+    "submit_my_community_report(text, text, text, text, text, double precision, double precision, text)",
+    "submit_public_feedback(text, text, text)",
     "track_community_report(text)",
     "triage_community_report(uuid, text, text)",
   ];
