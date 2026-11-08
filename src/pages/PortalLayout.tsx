@@ -58,6 +58,7 @@ import {
   RefreshCw,
   ScrollText,
   Scale,
+  ShieldCheck,
   ShieldEllipsis,
   UserCog,
 } from "lucide-react";
@@ -94,6 +95,7 @@ const NAV: { to: string; label: string; icon: typeof Map; adminOnly?: boolean }[
   { to: "/portal/users", label: "Users", icon: UsersRound, adminOnly: true },
   { to: "/portal/boundaries", label: "Map Boundaries", icon: Layers, adminOnly: true },
   { to: "/portal/inspections", label: "Field Inspections", icon: FileCheck2 },
+  { to: "/portal/corrective-actions", label: "Corrective Actions", icon: ShieldCheck },
   { to: "/portal/incidents", label: "Incidents", icon: HeartPulse },
   { to: "/portal/emergency", label: "Emergency", icon: Siren },
   { to: "/portal/safety", label: "Safety Guidance", icon: BookOpen },
