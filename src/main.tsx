@@ -69,6 +69,7 @@ const OperatorOverview = lazy(() => import("./pages/operate/OperatorOverview.tsx
 const OperatorSites = lazy(() => import("./pages/operate/OperatorSites.tsx").then((m) => ({ default: m.OperatorSites })));
 const OperatorSiteDetail = lazy(() => import("./pages/operate/OperatorSites.tsx").then((m) => ({ default: m.OperatorSiteDetail })));
 const OperatorFindings = lazy(() => import("./pages/operate/OperatorFindings.tsx"));
+const CorrectiveActions = lazy(() => import("./pages/CorrectiveActions.tsx"));
 const OperatorCorrectiveActions = lazy(() => import("./pages/operate/OperatorCorrectiveActions.tsx"));
 const OperatorIncidents = lazy(() => import("./pages/operate/OperatorIncidents.tsx"));
 const VoiceReport = lazy(() => import("./pages/voice/VoiceReport.tsx"));
@@ -217,6 +218,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="companies" element={<Companies />} />
               <Route path="site-requests" element={<SiteRequests />} />
               <Route path="oversight" element={<Oversight />} />
+              <Route path="corrective-actions" element={<CorrectiveActions />} />
               <Route path="users" element={<AdminUsers />} />
               <Route path="companies/:companyId" element={<CompanyDetail />} />
               <Route path="sites" element={<Sites />} />
