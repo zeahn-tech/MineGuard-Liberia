@@ -76,6 +76,7 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { toastError } from "@/lib/feedback";
 import { canWorkCorrectiveActions } from "@/lib/corrective-actions";
+import { reviewerSites } from "@/lib/voice-review";
 
 const OPERATOR_NAV = [
   { to: "/operate", label: "Overview", icon: ClipboardList, end: true },
@@ -87,7 +88,7 @@ const OPERATOR_NAV = [
   { to: "/operate/safety", label: "Safety Guidance", icon: BookOpen },
   { to: "/operate/jsa", label: "Job Safety Analysis", icon: ClipboardCheck },
   { to: "/operate/voice", label: "Worker Voice", icon: Megaphone },
-  { to: "/operate/voice-review", label: "Voice review", icon: Inbox },
+  { to: "/operate/voice-review", label: "Voice review", icon: Inbox, voiceReviewOnly: true },
   { to: "/operate/team", label: "Team", icon: Users, adminOnly: true },
   { to: "/operate/site-requests", label: "Site requests", icon: MapPinPlus, adminOnly: true },
   { to: "/operate/analytics", label: "Safety analytics", icon: BarChart3 },
@@ -135,15 +136,27 @@ export default function OperatorLayout() {
   const isCompanyAdmin = membership?.orgRole === "company_admin" && membership.memberStatus === "active";
   const isOfficer = membership?.orgRole === "onboarding_officer" && membership.memberStatus === "active";
   const canWorkCa = canWorkCorrectiveActions(membership);
+  // "Voice review" is for the people the DATABASE lets review Worker Voice reports (company administrators, and the
+  // site manager / safety officers assigned to a site). Unknown until the server answers, so it stays hidden until then.
+  // The menu is a courtesy; the review functions and row-level security refuse everyone else regardless.
+  const [canReviewVoice, setCanReviewVoice] = useState(false);
+  const membershipKey = membership ? `${membership.orgRole}:${membership.memberStatus}` : null;
+  useEffect(() => {
+    if (!membershipKey) return;
+    let live = true;
+    void reviewerSites().then((s) => { if (live) setCanReviewVoice(s.length > 0); }, () => { if (live) setCanReviewVoice(false); });
+    return () => { live = false; };
+  }, [membershipKey]);
   const navItems = useMemo(
     () =>
       OPERATOR_NAV.filter((i) => {
+        if ("voiceReviewOnly" in i && i.voiceReviewOnly) return canReviewVoice;
         if ("adminOnly" in i && i.adminOnly) return isCompanyAdmin;
         if ("onboardOnly" in i && i.onboardOnly) return isCompanyAdmin || isOfficer;
         if ("caOnly" in i && i.caOnly) return canWorkCa;
         return true;
       }),
-    [isCompanyAdmin, isOfficer, canWorkCa],
+    [isCompanyAdmin, isOfficer, canWorkCa, canReviewVoice],
   );
   const navigate = useNavigate();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);

@@ -185,6 +185,10 @@ export default function VoiceReview() {
 
   if (failed) return <p role="alert" className="p-4 text-sm">Reports could not be loaded. Nothing has been changed.</p>;
   if (!rows) return <PageLoading shape="list" label="worker voice reports" />;
+  // The database returns no sites to someone who is not a reviewer. Say so plainly instead of showing an empty queue.
+  if (sites.length === 0 && rows.length === 0) {
+    return <div className="p-4"><EmptyState title="Reviewer access required" why="Worker Voice reports are reviewed by your company administrators, and by the site manager and safety officers assigned to the site. To raise a concern yourself, use Worker Voice." /></div>;
+  }
   const shown = rows.filter((r) => filter === "all" || r.status !== "closed");
   const siteName = (id: string) => sites.find((s) => s.id === id)?.name ?? "Your site";
 
