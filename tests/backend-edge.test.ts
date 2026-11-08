@@ -776,15 +776,24 @@ describe("stats and users", () => {
     );
   });
 
-  test("completeProfile: self-service authorized path writes fields; anonymous UNAUTHENTICATED", async () => {
-    // Use the guest account (role-less) so no bootstrap side effects occur.
+  test("completeProfile: role holders write job title/organization only; role-less FORBIDDEN; anonymous UNAUTHENTICATED", async () => {
+    // Role-less account (a registered public user): staff profile completion is refused (0047).
     asGuest();
-    await api.stats.completeProfile({ jobTitle: "Field Officer", organization: "Edge Org", scope: "county", county: "Nimba" });
-    const p = await adminSql(`select job_title, organization, profile_complete from public.profiles where id = '${f.guest}'`);
+    const gBefore = await adminSql(`select job_title, organization, profile_complete, role, scope, county from public.profiles where id = '${f.guest}'`);
+    await expectError(() => api.stats.completeProfile({ jobTitle: "Field Officer", organization: "Edge Org" }), "FORBIDDEN");
+    const g = await adminSql(`select job_title, organization, profile_complete, role, scope, county from public.profiles where id = '${f.guest}'`);
+    expect(g[0]).toEqual(gBefore[0]); // nothing written
+    expect(g[0].role).toBeNull();
+
+    // An administrator-assigned county inspector completes their own profile; scope/county untouched.
+    asCounty();
+    const before = await adminSql(`select scope, county from public.profiles where id = '${f.county}'`);
+    await api.stats.completeProfile({ jobTitle: "Field Officer", organization: "Edge Org" });
+    const p = await adminSql(`select job_title, organization, profile_complete, scope, county from public.profiles where id = '${f.county}'`);
     expect(p[0].job_title).toBe("Field Officer");
     expect(p[0].profile_complete).toBe(true);
-    // Restore.
-    await adminSql(`update public.profiles set job_title = null, organization = null, profile_complete = false, scope = null, county = null where id = '${f.guest}'`);
+    expect({ scope: p[0].scope, county: p[0].county }).toEqual(before[0]);
+    await adminSql(`update public.profiles set job_title = null, organization = null where id = '${f.county}'`);
 
     asAnon();
     await expectError(
