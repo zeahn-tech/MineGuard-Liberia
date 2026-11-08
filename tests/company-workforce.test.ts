@@ -24,7 +24,7 @@ beforeAll(async () => {
     "0025_company_status_membership_invitations.sql",
     "0026_company_workforce.sql",
     "0027_site_scoped_access.sql",
-    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql",
+    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0047_close_admin_bootstrap.sql",
   ]) {
     await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", m), "utf8"));
   }
@@ -128,7 +128,7 @@ describe("membership requests", () => {
   test("typing a name grants nothing; a request is pending until a company administrator approves", async () => {
     await world(async (run, { orgA }) => {
       await as(run, W1);
-      await run("select public.complete_staff_profile('x','y','operator',null,'AgriLib Mining')");
+      expect(await fails(run("select public.complete_staff_profile('x','y','operator',null,'AgriLib Mining')"))).toMatch(/FORBIDDEN/);
       expect((await run("select role, organization_id from public.profiles where id = auth.uid()"))[0]).toMatchObject({ role: null, organization_id: null });
       const req = (await run(`select public.mg_request_membership('${orgA}') as id`))[0].id;
       expect((await run(`select public.mg_request_membership('${orgA}') as id`))[0].id).toBe(req); // retry-safe
@@ -223,7 +223,7 @@ describe("role changes and revocation", () => {
       expect((await run("select id from public.sites")).length).toBe(0);
       expect((await run("select id from public.incidents")).length).toBe(0);
       // and the revoked person cannot re-bind by name
-      await run("select public.complete_staff_profile('x','y','operator',null,'AgriLib Mining')");
+      expect(await fails(run("select public.complete_staff_profile('x','y','operator',null,'AgriLib Mining')"))).toMatch(/FORBIDDEN/);
       expect((await run("select organization_id from public.profiles where id = auth.uid()"))[0].organization_id).toBeNull();
       expect((await run("select id from public.sites")).length).toBe(0);
     });

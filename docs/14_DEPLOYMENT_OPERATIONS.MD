@@ -178,6 +178,27 @@ Procedure:
 After the first admin exists, further roles are managed in the app itself
 (Users page → set role), not in SQL.
 
+### There is no self-service first administrator [CHANGED — migration 0047, Public User programme Phase A]
+
+Before 0047, the first account to complete a staff profile — or to update its own
+profile role — while **no profile held a role** silently became administrator. With
+public registration open that is unacceptable, so it was removed (it also worked for
+anonymous guest sessions). Consequences:
+
+- A fresh install or a **restored database with zero administrators stays inert**:
+  nobody can claim admin from the app. The only way to create the first administrator
+  is the owner running `supabase/maintenance/promote_to_admin.sql` (above), which runs
+  as a non-API role and is recorded by the profile audit trigger.
+- **Before applying 0047 to production, and after any restore**, run the read-only
+  `supabase/checks/admin_present.sql`. If it reports `NO ADMINISTRATOR`, run the
+  promotion script first (otherwise no one can assign roles afterwards).
+- Ministry / inspection staff no longer self-onboard. An administrator assigns the role
+  (Users page, `provision_user_by_email`); only then does the person complete their
+  job title and organization. Scope and county are set by the administrator, never by
+  the user.
+- Emergency rollback (re-opens the bootstrap — avoid):
+  `supabase/maintenance/rollback_0047_reopens_admin_bootstrap.sql`.
+
 ## Phones, weak connections, and "Still loading your account" [HARDENED 2026-10-13]
 
 **Reproduced** in a real browser (headless Chromium, phone viewport, the built
@@ -385,7 +406,7 @@ deploy job never ran and the broken state persisted.
 
 1. Typecheck + tests green in CI (both workflows enforce this).
 2. Production Supabase project live with all migrations applied.
-3. First admin account bootstrapped; then all other roles assigned through
+3. First admin created by the owner with `promote_to_admin.sql` (no self-service bootstrap since 0047); then all other roles assigned through
    the admin UI (`provisionByEmail` requires the target to have signed in
    once).
 4. **Demo seeder disabled in production builds** — implemented + CI-verified

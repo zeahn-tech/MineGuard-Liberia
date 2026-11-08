@@ -165,31 +165,24 @@ function NoRoleScreen() {
   );
 }
 
-const STAFF_ONBOARDING_KEY = "mg.onboarding.staff.v1";
-
 /** A role-less account reaching a staff route. (1) A waiting company invitation
- *  wins: go accept it. (2) Otherwise ask which kind of account this is — staff
- *  continue into the existing staff onboarding (which also bootstraps the very
- *  first administrator), company people are sent to join / accept an invitation.
+ *  wins: go accept it. (2) Otherwise show a neutral notice. There is deliberately NO
+ *  "I am Ministry staff" self-onboarding choice any more (migration 0047): Ministry and
+ *  inspection staff receive their role from an administrator before they can complete a
+ *  staff profile, and company people join through an invitation or a membership request.
  *  Convenience only: the server decides what any account can actually do. */
-function RolelessGate({ children }: { children: ReactNode }) {
+function RolelessGate() {
   const invitations = useQuery(api.companies.myInvitations);
-  const [staff, setStaff] = useState(() => {
-    try {
-      return sessionStorage.getItem(STAFF_ONBOARDING_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
   if (invitations === undefined) return <AuthLoading />;
   if (invitations.length > 0) return <Navigate to="/invitation" replace />;
-  if (staff) return <>{children}</>;
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background p-6">
       <div className="w-full max-w-md space-y-3 text-center">
-        <p className="display text-lg">Welcome to MineGuard Liberia</p>
+        <p className="display text-lg">Your account is registered</p>
         <p className="text-sm text-muted-foreground">
-          Your account has no role yet. Which describes you?
+          It has no platform role yet, so there is no workspace to open here. Ministry and
+          inspection staff are given their role by a program administrator; company staff
+          join through an invitation or a membership request.
         </p>
         <Link
           to="/join"
@@ -200,23 +193,15 @@ function RolelessGate({ children }: { children: ReactNode }) {
             Accept an invitation or ask your company to add you.
           </span>
         </Link>
-        <button
-          type="button"
-          className="block w-full rounded-md border p-4 text-left text-sm hover:bg-muted/40"
-          onClick={() => {
-            try {
-              sessionStorage.setItem(STAFF_ONBOARDING_KEY, "1");
-            } catch {
-              /* private mode: the choice just isn't remembered */
-            }
-            setStaff(true);
-          }}
+        <Link
+          to="/report"
+          className="block rounded-md border p-4 text-left text-sm hover:bg-muted/40"
         >
-          <span className="font-medium">I am Ministry or inspection staff</span>
+          <span className="font-medium">Report a mining concern</span>
           <span className="mt-1 block text-xs text-muted-foreground">
-            Continue to staff onboarding; the program office assigns your role.
+            Anyone can submit a safety or environmental concern and track it.
           </span>
-        </button>
+        </Link>
       </div>
     </main>
   );
@@ -245,9 +230,9 @@ export function RequireStaff({ children }: { children: ReactNode }) {
   }
 
   if (!user?.role) {
-    // No role yet: a company invitee must never be dropped into the staff portal
-    // (that onboarding is for Ministry / inspection staff). See RolelessGate.
-    return <RolelessGate>{children}</RolelessGate>;
+    // No role yet: a company invitee must never be dropped into the staff portal.
+    // See RolelessGate.
+    return <RolelessGate />;
   }
 
   if (user?.role && !isStaffRole(user.role)) {

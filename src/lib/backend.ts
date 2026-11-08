@@ -5122,21 +5122,16 @@ export const api = {
     completeProfile: async (args: {
       jobTitle: string;
       organization: string;
-      scope?: Scope;
-      county?: string;
-      operatorName?: string;
     }) => {
       await requireAuthed();
+      // Only for accounts an administrator has already given a platform role
+      // (migration 0047). Scope, county and company are never sent: the server ignores
+      // them and an administrator assigns them.
       const { error } = await supabase.rpc("complete_staff_profile", {
         p_job_title: args.jobTitle,
         p_organization: args.organization,
-        p_scope: args.scope ?? "national",
-        p_county: args.county ?? null,
-        p_operator_name: args.operatorName ?? null,
       });
       if (error) throw backendError(error);
-      // Role/scope may have changed (first-admin bootstrap) — re-derive all
-      // auth-bound subscriptions.
       bumpProfileVersion();
     },
   },
