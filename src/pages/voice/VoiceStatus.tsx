@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PublicHeader } from "@/components/PublicHeader";
-import { lookupFollowUp, parseFollowUpCode, type FollowUpStatus } from "@/lib/voice";
+import { lookupFollowUp, parseAnyFollowUpCode, type FollowUpStatus } from "@/lib/voice";
 
 export default function VoiceStatus() {
   const [raw, setRaw] = useState("");
@@ -17,7 +17,7 @@ export default function VoiceStatus() {
   const look = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null); setRes(null);
-    if (!parseFollowUpCode(raw)) return setErr("That does not look like a follow-up code. It starts with WV and has 24 letters and numbers.");
+    if (!parseAnyFollowUpCode(raw)) return setErr("That does not look like a follow-up code. It starts with WV (company report) or MV (Ministry report) and has 24 letters and numbers.");
     setBusy(true);
     try { setRes(await lookupFollowUp(raw)); }
     catch { setErr("The check could not be completed. Nothing was changed. Try again when you are connected."); }
@@ -34,7 +34,7 @@ export default function VoiceStatus() {
         </header>
         <form onSubmit={look} className="space-y-2">
           <Label htmlFor="wv-code">Follow-up code</Label>
-          <Input id="wv-code" value={raw} onChange={(e) => setRaw(e.target.value)} autoComplete="off" autoCapitalize="characters" placeholder="WV-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" />
+          <Input id="wv-code" value={raw} onChange={(e) => setRaw(e.target.value)} autoComplete="off" autoCapitalize="characters" placeholder="WV-XXXX-… or MV-XXXX-…" />
           <Button type="submit" disabled={busy || !raw.trim()}>{busy ? "Checking…" : "Check"}</Button>
         </form>
         {err && <p role="alert" className="text-sm">{err}</p>}
@@ -50,7 +50,7 @@ export default function VoiceStatus() {
         )}
         <section className="space-y-1 border border-border p-3 text-xs text-muted-foreground">
           <p className="font-medium text-foreground">What you can and cannot see here</p>
-          <p>You can see the stage and any update the reviewers chose to write for you.</p>
+          <p>You can see the stage and any update the reviewers chose to write for you. This works for reports to your company (WV codes) and to the Ministry (MV codes).</p>
           <p>You cannot see the reviewers&apos; notes, who is handling it, how it was rated, evidence or witnesses. Those stay inside the investigation.</p>
           <p>Anyone who has your code can see this page for your report, so keep it private.</p>
         </section>

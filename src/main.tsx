@@ -79,6 +79,7 @@ const VoiceReport = lazy(() => import("./pages/voice/VoiceReport.tsx"));
 const VoicePublic = lazy(() => import("./pages/voice/VoicePublic.tsx"));
 const VoiceStatus = lazy(() => import("./pages/voice/VoiceStatus.tsx"));
 const VoiceReview = lazy(() => import("./pages/voice/VoiceReview.tsx"));
+const MinistryVoiceReview = lazy(() => import("./pages/voice/MinistryVoiceReview.tsx"));
 const SafetyGuidance = lazy(() => import("./pages/safety/SafetyGuidance.tsx"));
 const JsaPage = lazy(() => import("./pages/safety/JsaPage.tsx"));
 const EmergencyConsole = lazy(() => import("./pages/emergency/EmergencyConsole.tsx"));
@@ -246,6 +247,8 @@ createRoot(document.getElementById("root")!).render(
               <Route path="environment/:observationId" element={<ObservationDetail />} />
               <Route path="community" element={<Community />} />
               <Route path="feedback" element={<FeedbackInbox />} />
+              {/* Worker Voice → Ministry (0050): reviewers only; the database is the access boundary */}
+              <Route path="voice-ministry" element={<MinistryVoiceReview />} />
               <Route path="audit" element={<Audit />} />
               <Route path="reports" element={<Reports />} />
               <Route path="risk-config" element={<RiskConfig />} />

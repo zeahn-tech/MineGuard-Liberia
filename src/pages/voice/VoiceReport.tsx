@@ -2,7 +2,9 @@
 // WORKER VOICE — report form. Two doors onto the same form:
 //   /operate/voice  signed-in members: named, confidential or anonymous
 //   /voice          no account: anonymous only, with the code posted at the site
-// The privacy choice comes FIRST, in plain words, before anything sensitive is typed. Status is
+// The audience comes first (the company's own reviewers, or the Ministry), then the privacy choice,
+// in plain words, before anything sensitive is typed. The two audiences are separate channels
+// (migrations 0046 and 0050): a Ministry report is never visible to the company. Status is
 // honest: "saved on this device" is never presented as "received".
 // ---------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
@@ -18,18 +20,22 @@ import { PublicHeader } from "@/components/PublicHeader";
 import { NotSavedError } from "@/lib/offline-store";
 import { jsaSites, type JsaSite } from "@/lib/jsa";
 import {
-  formatFollowUpCode, formatSiteCode, MAX_DESCRIPTION, MIN_DESCRIPTION, MODE_INFO, newFollowUpCode, normalizeSiteCode,
+  formatFollowUpCode, formatSiteCode, MAX_DESCRIPTION, MIN_DESCRIPTION, MINISTRY_CATEGORIES, MINISTRY_EMERGENCY_NOTICE,
+  MINISTRY_GROUP_LABEL, MINISTRY_MODE_INFO, MINISTRY_ROUTING_NOTICE, MODE_INFO, newFollowUpCode, normalizeSiteCode,
   PERSONAL_INFO_NOTICE, RETALIATION_NOTICE, ROUTING_NOTICE, VOICE_CATEGORIES, VOICE_PREVIOUS, VOICE_URGENCIES,
-  type VoiceCategory, type VoiceFields, type VoiceMode, type VoiceUrgency,
+  type MinistryCategory, type VoiceCategory, type VoiceChannel, type VoiceFields, type VoiceMode, type VoiceUrgency,
 } from "@/lib/voice";
 import { describeItem, enqueue, flushQueue, listQueue, removeFromQueue } from "@/lib/voice-queue";
 import { myVoiceReports, siteCode, type MyReport } from "@/lib/voice-review";
+import { myMinistryReports } from "@/lib/ministry-voice-review";
 import type { QueuedReport } from "@/lib/voice";
 
 type Phase = "form" | "received" | "saved" | "attention" | "not_saved";
 
-function ModeCard({ mode, chosen, onChoose }: { mode: VoiceMode; chosen: boolean; onChoose: () => void }) {
-  const i = MODE_INFO[mode];
+const infoFor = (channel: VoiceChannel, mode: VoiceMode) => (channel === "ministry" ? MINISTRY_MODE_INFO : MODE_INFO)[mode];
+
+function ModeCard({ channel, mode, chosen, onChoose }: { channel: VoiceChannel; mode: VoiceMode; chosen: boolean; onChoose: () => void }) {
+  const i = infoFor(channel, mode);
   return (
     <label className={`block cursor-pointer space-y-1 border p-3 text-sm ${chosen ? "border-primary bg-primary/5" : "border-border"}`}>
       <span className="flex items-center gap-2">
@@ -48,14 +54,14 @@ function ModeCard({ mode, chosen, onChoose }: { mode: VoiceMode; chosen: boolean
   );
 }
 
-function Receipt({ phase, code, message, onAgain }: { phase: Phase; code: string; message: string | null; onAgain: () => void }) {
+function Receipt({ phase, code, message, channel, onAgain }: { phase: Phase; code: string; message: string | null; channel: VoiceChannel; onAgain: () => void }) {
   const [copied, setCopied] = useState(false);
-  const shown = formatFollowUpCode(code);
+  const shown = formatFollowUpCode(code, channel);
   const heading = phase === "received" ? "Received by MineGuard" : phase === "saved" ? "Saved on this device. Not yet received." : phase === "attention" ? "Saved on this device. It needs a change." : "Not saved";
   return (
     <section className="space-y-3 border border-border p-4" aria-live="polite">
       <h2 className="text-lg font-semibold">{heading}</h2>
-      {phase === "received" && <p className="text-sm">Your report reached MineGuard and is waiting for review by your company&apos;s reviewers.</p>}
+      {phase === "received" && <p className="text-sm">{channel === "ministry" ? "Your report reached MineGuard and is waiting for review by Ministry reviewers. Your company cannot see it." : "Your report reached MineGuard and is waiting for review by your company\u2019s reviewers."}</p>}
       {phase === "saved" && <p className="text-sm">{message ?? "MineGuard has not received it yet."} It will be sent when you are connected. Do not rely on it until this page says Received.</p>}
       {phase === "attention" && <p className="text-sm">{message}</p>}
       {phase === "not_saved" && <p className="text-sm">{message}</p>}
@@ -83,7 +89,9 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
   const [sites, setSites] = useState<JsaSite[] | null>(member ? null : []);
   const [siteId, setSiteId] = useState("");
   const [siteCodeText, setSiteCodeText] = useState("");
-  const [category, setCategory] = useState<VoiceCategory | "">("");
+  const [channel, setChannel] = useState<VoiceChannel>("company");
+  const ministry = channel === "ministry";
+  const [category, setCategory] = useState<VoiceCategory | MinistryCategory | "">("");
   const [urgency, setUrgency] = useState<VoiceUrgency | "">("");
   const [description, setDescription] = useState("");
   const [occurred, setOccurred] = useState("");
@@ -94,14 +102,18 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
   const [phase, setPhase] = useState<Phase>("form");
   const [receipt, setReceipt] = useState<{ code: string; message: string | null } | null>(null);
   const [queue, setQueue] = useState<QueuedReport[]>([]);
-  const [mine, setMine] = useState<MyReport[]>([]);
+  const [mine, setMine] = useState<(MyReport & { channel: VoiceChannel })[]>([]);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
     let live = true;
     void (async () => {
-      const [q, s, m] = await Promise.all([listQueue(), member ? jsaSites().catch(() => [] as JsaSite[]) : Promise.resolve([] as JsaSite[]), member ? myVoiceReports().catch(() => [] as MyReport[]) : Promise.resolve([] as MyReport[])]);
-      return { q, s, m };
+      const [q, s, m, mm] = await Promise.all([
+        listQueue(), member ? jsaSites().catch(() => [] as JsaSite[]) : Promise.resolve([] as JsaSite[]),
+        member ? myVoiceReports().catch(() => [] as MyReport[]) : Promise.resolve([] as MyReport[]),
+        member ? myMinistryReports().catch(() => [] as MyReport[]) : Promise.resolve([] as MyReport[]),
+      ]);
+      return { q, s, m: [...m.map((x) => ({ ...x, channel: "company" as const })), ...mm.map((x) => ({ ...x, channel: "ministry" as const }))] };
     })().then((r) => { if (live) { setQueue(r.q); setSites(r.s); setMine(r.m); if (r.s.length === 1) setSiteId((x) => x || r.s[0].id); } });
     return () => { live = false; };
   }, [member, tick]);
@@ -122,11 +134,13 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
   }, [flush]);
 
   const reset = () => { setPhase("form"); setReceipt(null); setDescription(""); setOccurred(""); setConcerns(false); setCategory(""); setUrgency(""); setError(null); setTick((t) => t + 1); };
+  const chooseChannel = (c: VoiceChannel) => { setChannel(c); setCategory(""); setConcerns(false); };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     if (!mode) return setError("Choose how you want to report first.");
+    if (!category || !(ministry ? MINISTRY_CATEGORIES : VOICE_CATEGORIES).some((c) => c.value === category)) return setError("Choose a category.");
     if (member && !siteId) return setError("Choose the site.");
     if (mode === "anonymous" && normalizeSiteCode(siteCodeText).length !== 10) return setError("Enter the 10-character site code posted at your site.");
     if (!category) return setError("Choose a category.");
@@ -134,12 +148,12 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
     const text = description.trim();
     if (text.length < MIN_DESCRIPTION) return setError(`Describe the concern in at least ${MIN_DESCRIPTION} characters.`);
     if (text.length > MAX_DESCRIPTION) return setError(`Please keep it under ${MAX_DESCRIPTION} characters.`);
-    const fields: VoiceFields = { category, urgency, description: text, occurredAt: occurred ? new Date(occurred).toISOString() : null, previouslyReported: previous, concernsReviewer: concerns };
+    const fields: VoiceFields = { category, urgency, description: text, occurredAt: occurred ? new Date(occurred).toISOString() : null, previouslyReported: previous, concernsReviewer: ministry ? false : concerns };
     const id = crypto.randomUUID();
     const code = newFollowUpCode();
     setBusy(true);
     try {
-      await enqueue({ id, mode, siteId: mode === "anonymous" ? undefined : siteId, siteCode: mode === "anonymous" ? normalizeSiteCode(siteCodeText) : undefined, fields, code });
+      await enqueue({ id, channel, mode, siteId: mode === "anonymous" ? undefined : siteId, siteCode: mode === "anonymous" ? normalizeSiteCode(siteCodeText) : undefined, fields, code });
     } catch (e2) {
       setBusy(false);
       setReceipt({ code, message: e2 instanceof NotSavedError ? "This phone could not save the report, and it has NOT been sent. Free some space or try again." : "The report could not be saved and has NOT been sent. Try again." });
@@ -159,15 +173,27 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
     <div className="mx-auto max-w-2xl space-y-4 p-4">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold">Worker Voice</h1>
-        <p className="text-sm text-muted-foreground">Raise a safety concern: an unsafe condition, a near miss, an equipment or maintenance hazard, an unsafe procedure, or an action that is still not done.</p>
+        <p className="text-sm text-muted-foreground">Raise a concern: to your company about an unsafe condition, near miss, equipment hazard or unsafe procedure, or to the Ministry about a company&apos;s labour practices, unsafe work practices or work habits.</p>
       </header>
       {member && sites === null && <PageLoading shape="form" label="the report form" />}
-      {phase !== "form" && receipt ? <Receipt phase={phase} code={receipt.code} message={receipt.message} onAgain={reset} /> : (member && sites === null ? null : (
+      {phase !== "form" && receipt ? <Receipt phase={phase} code={receipt.code} message={receipt.message} channel={channel} onAgain={reset} /> : (member && sites === null ? null : (
         <form onSubmit={submit} className="space-y-4">
           <fieldset className="space-y-2">
-            <legend className="text-sm font-medium">1. How do you want to report?</legend>
+            <legend className="text-sm font-medium">1. Who should receive this?</legend>
+            <label className={`block cursor-pointer space-y-1 border p-3 text-sm ${!ministry ? "border-primary bg-primary/5" : "border-border"}`}>
+              <span className="flex items-center gap-2"><input type="radio" name="wv-channel" checked={!ministry} onChange={() => chooseChannel("company")} /><span className="font-medium">My company</span></span>
+              <span className="block text-muted-foreground">A safety concern for your company&apos;s administrators, and the site manager and safety officers assigned to the site, to act on.</span>
+            </label>
+            <label className={`block cursor-pointer space-y-1 border p-3 text-sm ${ministry ? "border-primary bg-primary/5" : "border-border"}`}>
+              <span className="flex items-center gap-2"><input type="radio" name="wv-channel" checked={ministry} onChange={() => chooseChannel("ministry")} /><span className="font-medium">The Ministry</span></span>
+              <span className="block text-muted-foreground">Report bad labour practices, unsafe work practices or bad work habits by a company, so government can act. Your company cannot see it.</span>
+            </label>
+          </fieldset>
+
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium">2. How do you want to report?</legend>
             {(member ? (["named", "confidential", "anonymous"] as VoiceMode[]) : (["anonymous"] as VoiceMode[])).map((m) => (
-              <ModeCard key={m} mode={m} chosen={mode === m} onChoose={() => setMode(m)} />
+              <ModeCard key={m} channel={channel} mode={m} chosen={mode === m} onChoose={() => setMode(m)} />
             ))}
             {!member && <p className="text-xs text-muted-foreground">This page needs no account. To send a named or confidential report, <Link className="underline" to="/auth">sign in</Link> and use Worker Voice in your company workspace.</p>}
           </fieldset>
@@ -175,7 +201,7 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
           {mode && (
             <>
               <section className="space-y-2">
-                <h2 className="text-sm font-medium">2. Where?</h2>
+                <h2 className="text-sm font-medium">3. Where?</h2>
                 {member && (sites ?? []).length === 0 ? (
                   <EmptyState title="No site available to report to" why="You need to be a member of a company site to report from here. Ask your company administrator." />
                 ) : member ? (
@@ -194,12 +220,18 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
               </section>
 
               <section className="space-y-3">
-                <h2 className="text-sm font-medium">3. What is the concern?</h2>
+                <h2 className="text-sm font-medium">4. What is the concern?</h2>
                 <div className="space-y-1">
                   <Label htmlFor="wv-cat">Category</Label>
                   <select id="wv-cat" className="h-9 w-full border border-input bg-background px-2 text-sm" value={category} onChange={(e) => setCategory(e.target.value as VoiceCategory)}>
                     <option value="">Choose a category</option>
-                    {VOICE_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                    {ministry
+                      ? (["labour", "safety", "conduct", "other"] as const).map((g) => (
+                          <optgroup key={g} label={MINISTRY_GROUP_LABEL[g]}>
+                            {MINISTRY_CATEGORIES.filter((c) => c.group === g).map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                          </optgroup>
+                        ))
+                      : VOICE_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                   </select>
                 </div>
                 <div className="space-y-1">
@@ -208,7 +240,7 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
                     <option value="">Choose urgency</option>
                     {VOICE_URGENCIES.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
                   </select>
-                  {urgency === "critical" && <p className="text-xs">If someone is in danger right now, follow your site&apos;s emergency procedure first. This form is not an alarm.</p>}
+                  {urgency === "critical" && <p className="text-xs">{ministry ? MINISTRY_EMERGENCY_NOTICE : "If someone is in danger right now, follow your site\u2019s emergency procedure first. This form is not an alarm."}</p>}
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="wv-desc">What is happening?</Label>
@@ -225,20 +257,20 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
                     <label key={p.value} className="flex items-center gap-2 text-sm"><input type="radio" name="wv-prev" checked={previous === p.value} onChange={() => setPrevious(p.value)} /> {p.label}</label>
                   ))}
                 </fieldset>
-                <label className="flex items-start gap-2 text-sm">
+                {!ministry && <label className="flex items-start gap-2 text-sm">
                   <input type="checkbox" className="mt-1" checked={concerns} onChange={(e) => setConcerns(e.target.checked)} />
                   <span>This concerns the site manager or safety officer who would normally review it. <span className="block text-xs text-muted-foreground">It will go to company administrators only. If it concerns a company administrator, MineGuard has no higher route: use your company procedure or the legal channels open to you.</span></span>
-                </label>
+                </label>}
               </section>
 
               <section className="space-y-1 border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
                 <p className="flex items-center gap-1 font-medium text-foreground"><ShieldCheck className="size-4" /> Before you send</p>
-                <p>{ROUTING_NOTICE}</p>
+                <p>{ministry ? MINISTRY_ROUTING_NOTICE : ROUTING_NOTICE}</p>
                 <p>{RETALIATION_NOTICE}</p>
               </section>
 
               {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-              <Button type="submit" disabled={busy}>{busy ? "Sending…" : `Send ${MODE_INFO[mode].title.toLowerCase()}`}</Button>
+              <Button type="submit" disabled={busy}>{busy ? "Sending…" : `Send ${infoFor(channel, mode).title.toLowerCase()}`}</Button>
             </>
           )}
         </form>
@@ -250,7 +282,7 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
           <ul className="space-y-2">
             {queue.map((q) => (
               <li key={q.id} className="space-y-1 text-sm">
-                <p><span className="font-medium">{MODE_INFO[q.mode].title}</span> · saved {new Date(q.savedAt).toLocaleString()}</p>
+                <p><span className="font-medium">{infoFor(q.channel ?? "company", q.mode).title}</span> · saved {new Date(q.savedAt).toLocaleString()}</p>
                 <p className="text-muted-foreground">{describeItem(q)}</p>
                 <div className="flex gap-2">
                   {q.state !== "needs_attention" && <Button size="sm" variant="outline" onClick={() => { void flush(); }}>Try to send now</Button>}
@@ -269,7 +301,7 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
           <ul className="space-y-2 text-sm">
             {mine.map((r) => (
               <li key={r.id}>
-                <span className="font-medium">{r.stage}</span> · {r.mode} · received {r.received_on}
+                <span className="font-medium">{r.stage}</span> · {r.channel === "ministry" ? "to the Ministry" : "to your company"} · {r.mode} · received {r.received_on}
                 {r.reporter_update && <span className="block text-muted-foreground">Update{r.reporter_update_on ? ` (${r.reporter_update_on})` : ""}: {r.reporter_update}</span>}
                 {r.mode === "confidential" && <span className="block text-xs text-muted-foreground">Your identity has been opened {r.identity_opened} time{r.identity_opened === 1 ? "" : "s"}.</span>}
               </li>

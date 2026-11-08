@@ -192,7 +192,7 @@ export default function VoiceReview() {
     <div className="mx-auto max-w-3xl space-y-4 p-4">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold">Worker Voice review</h1>
-        <p className="text-sm text-muted-foreground">Safety reports sent to your company. Treat every report as credible until it is assessed, whether it is named, confidential or anonymous. Do not try to work out who sent an anonymous report.</p>
+        <p className="text-sm text-muted-foreground">Safety reports sent to your company. Treat every report as credible until it is assessed, whether it is named, confidential or anonymous. Do not try to work out who sent an anonymous report. Reports that workers choose to send to the Ministry are a separate channel and are not shown here.</p>
       </header>
       <SiteCodes sites={sites} />
       <div className="flex gap-2">
