@@ -3,7 +3,7 @@
 // Regression for: complete_staff_profile() let any signed-in user re-point
 // their company binding by typing a company name. All sessions roll back.
 // ---------------------------------------------------------------------------
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { asUser, getDb, getFixture } from "./helpers/pglite-db";
@@ -11,27 +11,12 @@ import { asUser, getDb, getFixture } from "./helpers/pglite-db";
 let f: Awaited<ReturnType<typeof getFixture>>;
 beforeAll(async () => {
   f = await getFixture();
-  // Other files re-apply older migrations on the shared DB; assert the real end state.
+  // Other files re-apply older migrations on the shared DB; assert the real end state
+  // (0047 replaces 0024's complete_staff_profile: role holders only, no privilege fields).
   const db = await getDb();
-  await db.exec(
-    readFileSync(join(import.meta.dir, "..", "supabase", "migrations", "0024_self_service_tenant_lockdown.sql"), "utf8"),
-  );
-});
-
-// This file re-applies 0024 on the shared database so it can assert 0024's own behaviour. That
-// overwrites the guard function that migration 0025 later replaced (the version that honours the
-// transaction-local mg.org_assign flag set by trusted RPCs). Restore the real end state, or every
-// test file that runs after this one in the same process sees the stale guard and fails with
-// FORBIDDEN_TENANT_CHANGE. (File order differs between machines, so this only showed up in CI.)
-afterAll(async () => {
-  const db = await getDb();
-  const m25 = readFileSync(
-    join(import.meta.dir, "..", "supabase", "migrations", "0025_company_status_membership_invitations.sql"),
-    "utf8",
-  );
-  const guard = m25.match(/create or replace function public\.mg_guard_profile_self_tenant\(\)[\s\S]*?\$mg\$;/);
-  if (!guard) throw new Error("0025 guard definition not found");
-  await db.exec(guard[0]);
+  for (const m of ["0047_close_admin_bootstrap.sql", "0048_public_user_identity.sql"]) {
+    await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", m), "utf8"));
+  }
 });
 
 async function denied(p: Promise<unknown>): Promise<string> {
@@ -57,9 +42,10 @@ describe("0024 self-service tenant lockdown", () => {
     });
   });
 
-  test("role-less user cannot bind to a company by typing its name", async () => {
+  test("role-less user cannot bind to a company by typing its name (and cannot complete a staff profile at all)", async () => {
     await asUser(f.guest, async (run) => {
-      await run("select public.complete_staff_profile('x','y','operator',null,'AgriLib Mining')");
+      const msg = await denied(run("select public.complete_staff_profile('x','y','operator',null,'AgriLib Mining')"));
+      expect(msg).toMatch(/FORBIDDEN/);
       const me = await run("select operator_name, organization_id from public.profiles where id = auth.uid()");
       expect(me[0].operator_name).toBeNull();
       expect(me[0].organization_id).toBeNull();
@@ -101,11 +87,25 @@ describe("0024 self-service tenant lockdown", () => {
     });
   });
 
-  test("first-admin bootstrap still works only when no admin exists", async () => {
+  test("0047: complete_staff_profile never creates an administrator or stores a scope, even with NO admin", async () => {
     await asUser(f.guest, async (run) => {
-      await run("select public.complete_staff_profile('x','y','county','Bomi')");
-      const me = await run("select role from public.profiles where id = auth.uid()");
-      expect(me[0].role).toBeNull(); // an admin already exists in the fixture
+      await run("set local role postgres");
+      await run("update public.profiles set role = null, scope = null, county = null");
+      await run("set local role authenticated");
+      await run(`select set_config('request.jwt.claims', '{"sub":"${f.guest}","role":"authenticated"}', true)`);
+      const msg = await denied(run("select public.complete_staff_profile('x','y','national')"));
+      expect(msg).toMatch(/FORBIDDEN/);
+      const me = await run("select role, scope, county, profile_complete from public.profiles where id = auth.uid()");
+      expect(me[0]).toEqual({ role: null, scope: null, county: null, profile_complete: false });
+    });
+  });
+
+  test("0047: a role holder completes only job title and organization — scope, county and company stay as assigned", async () => {
+    await asUser(f.county, async (run) => {
+      const before = await run("select role, scope, county, operator_name, organization_id from public.profiles where id = auth.uid()");
+      await run("select public.complete_staff_profile('Chief Inspector','Ministry','national','Nimba','OreCo Liberia')");
+      const after = await run("select role, scope, county, operator_name, organization_id, job_title, organization, profile_complete from public.profiles where id = auth.uid()");
+      expect(after[0]).toMatchObject({ ...before[0], job_title: "Chief Inspector", organization: "Ministry", profile_complete: true });
     });
   });
 });

@@ -310,10 +310,9 @@ insert into auth.users (id, email, raw_user_meta_data) values
   ('${IDS.national}','erin@mineguard.test', '{"name":"Erin Supervisor"}'),
   ('${IDS.guest}',  'frank@guest.test',     '{"name":"Frank Guest"}');
 
--- 2. First-admin bootstrap through the real user-facing path: an
---    authenticated account claiming admin while NO profile has a role yet.
-set local role authenticated;
-set local request.jwt.claims = '${adminClaims}';
+-- 2. First administrator, provisioned the ONLY way production allows since migration
+--    0047: by the project owner as a non-API role (supabase/maintenance/promote_to_admin.sql).
+--    There is no self-service bootstrap through the authenticated role any more.
 update public.profiles
    set role = 'admin', scope = 'national', profile_complete = true,
        job_title = 'Director', organization = 'MineGuard Liberia'

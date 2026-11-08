@@ -1,6 +1,6 @@
 # 22 — Worker Voice: named, confidential and anonymous safety reporting
 
-Implementation Phase 4. Migrations `0046_worker_voice.sql` and `0047_worker_voice_decisions.sql` (the owner's five decisions). Neither is applied to production by this change; apply 0046 then 0047.
+Implementation Phase 4. Migrations `0046_worker_voice.sql` and `0049_worker_voice_decisions.sql` (the owner's five decisions). Neither is applied to production by this change; apply 0046 then 0049.
 
 ## What it is
 
@@ -144,7 +144,7 @@ worker_voice_reports, worker_voice_site_codes;` then drop the `mg_wv_*` function
 `kind = 'worker_voice'` notifications first). Reports are never deleted by the app, so export first if
 they must be kept.
 
-## The five owner decisions (migration 0047)
+## The five owner decisions (migration 0049)
 
 1. **Confidential identity: Ministry staff only.** `mg_wv_identity`: confidential → in-scope Ministry staff
    with a purpose of at least 10 characters; the company's administrators, managers and safety officers are
@@ -177,19 +177,19 @@ they must be kept.
    **day**, and reviewers see a "small site" flag and a reminder not to try to work out who wrote it. This
    reduces timing correlation; it cannot make a small crew anonymous, and the app says so.
 
-### Additional deployment steps for 0047
-* Apply `0047` after `0046`.
+### Additional deployment steps for 0049
+* Apply `0049` after `0046`.
 * Deploy the edge function: `supabase functions deploy worker-voice-push --no-verify-jwt --use-api`; set
   `WORKER_VOICE_PUSH_SECRET`; reuse the existing `VAPID_*` secrets; then (optionally) schedule the sweep.
 * Ministry staff need nothing: the `wv.identity` permission is granted to admin, supervisor and inspector.
 * Photos travel inside the submit request (base64, up to about 3.2 MB). If your gateway limits request size
   below that, anonymous reports with three large photos will fail with a clear message.
 
-### Additional rollback for 0047
+### Additional rollback for 0049
 Hide: remove the `/portal/voice` route and nav entry. Remove data: drop `worker_voice_messages`,
 `worker_voice_attachments`, `worker_voice_code_usage`, `worker_voice_push_outbox`; drop the columns
 `small_site` (reports) and `anonymous_enabled`, `expires_at` (site codes); delete the `wv.identity`
-permission rows; drop the `mg_wv_*` functions added in 0047 and re-run 0046 to restore its versions.
+permission rows; drop the `mg_wv_*` functions added in 0049 and re-run 0046 to restore its versions.
 
 ## Remaining risks and unresolved decisions
 

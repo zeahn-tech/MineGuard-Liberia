@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// worker-voice-push — Supabase Edge Function (Worker Voice, migration 0047).
+// worker-voice-push — Supabase Edge Function (Worker Voice, migration 0049).
 // Wakes reviewers' devices with a FIXED generic payload. Called only by a scheduler holding a shared
 // secret (supabase/cron/worker-voice-push-sweep.sql); there is no user-facing entry point and no JWT.
 //     supabase functions deploy worker-voice-push --no-verify-jwt --use-api

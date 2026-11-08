@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // WORKER VOICE — photos. JPEG only, up to 3, each under ~900 KB, hidden data removed ON THE PHONE
-// and checked again by the server (migration 0047), which refuses anything with metadata.
+// and checked again by the server (migration 0049), which refuses anything with metadata.
 //
 // What this removes: EXIF (camera, time, GPS), XMP, ICC profiles, comments, embedded thumbnails, any
 // APPn/COM segment. What it cannot remove: what the picture itself shows (faces, name tags, signs,

@@ -86,13 +86,14 @@ insert into auth.users (id, email, raw_user_meta_data) values
 insert into auth.mfa_factors (id, user_id, friendly_name, secret, status)
   values ('${EDGE_IDS.mfaFactor}', '${EDGE_IDS.county}', 'County phone', 'JBSWY3DPEHPK3PXP', 'verified');
 
--- First-admin bootstrap through the real user-facing path.
-set local role authenticated;
-set local request.jwt.claims = '{"sub":"${EDGE_IDS.admin}","role":"authenticated"}';
+-- First administrator, provisioned as the project owner would (migration 0047 removed the
+-- self-service bootstrap; supabase/maintenance/promote_to_admin.sql is the real path).
 update public.profiles
    set role = 'admin', scope = 'national', profile_complete = true,
        job_title = 'Director', organization = 'MineGuard Liberia'
  where id = '${EDGE_IDS.admin}';
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"${EDGE_IDS.admin}","role":"authenticated"}';
 -- Companies are registered, not typed (migration 0033).
 select public.mg_register_company('AgriLib Mining');
 select public.mg_register_company('OreCo Liberia');

@@ -1790,6 +1790,18 @@ export async function updatePassword(newPassword: string) {
 
 /** Create the profile row for a fresh account (idempotent; the
  *  on_auth_user_created trigger normally does this first). */
+/** Server-derived session class (migration 0048, mg_my_access_class). */
+export type AccessClass =
+  | "none"
+  | "anonymous_guest"
+  | "unregistered"
+  | "public_user"
+  | "public_user_unverified"
+  | "restricted"
+  | "company_member"
+  | "staff"
+  | "unknown";
+
 export async function ensureProfileDoc() {
   const uid = authUserId();
   if (!uid) return;
@@ -2548,6 +2560,23 @@ export const api = {
 
   /** The signed-in person's own profile: details, photo, and account deletion (migration 0035). */
   account: {
+    /** What the SERVER classifies this session as (migration 0048). For routing and copy only —
+     *  every protected action is enforced by RLS / RPC checks, never by this value. "unknown"
+     *  means the database has not received 0048 yet (release order). */
+    accessClass: () =>
+      live<AccessClass>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase.rpc("mg_my_access_class");
+          if (error && (error.code === "PGRST202" || /could not find the function/i.test(error.message ?? ""))) {
+            return "unknown" as AccessClass;
+          }
+          if (error) throw backendError(error);
+          return ((data as string | null) ?? "none") as AccessClass;
+        },
+        ["profiles", "organization_members"],
+      ),
+
     updateProfile: async (args: { name: string; jobTitle: string }) => {
       await requireAuthed();
       const { error } = await supabase.rpc("mg_update_my_profile", {
@@ -5122,21 +5151,16 @@ export const api = {
     completeProfile: async (args: {
       jobTitle: string;
       organization: string;
-      scope?: Scope;
-      county?: string;
-      operatorName?: string;
     }) => {
       await requireAuthed();
+      // Only for accounts an administrator has already given a platform role
+      // (migration 0047). Scope, county and company are never sent: the server ignores
+      // them and an administrator assigns them.
       const { error } = await supabase.rpc("complete_staff_profile", {
         p_job_title: args.jobTitle,
         p_organization: args.organization,
-        p_scope: args.scope ?? "national",
-        p_county: args.county ?? null,
-        p_operator_name: args.operatorName ?? null,
       });
       if (error) throw backendError(error);
-      // Role/scope may have changed (first-admin bootstrap) — re-derive all
-      // auth-bound subscriptions.
       bumpProfileVersion();
     },
   },
