@@ -173,17 +173,26 @@ function NoRoleScreen() {
  *  Convenience only: the server decides what any account can actually do. */
 function RolelessGate() {
   const invitations = useQuery(api.companies.myInvitations);
+  const accessClass = useQuery(api.account.accessClass);
   if (invitations === undefined) return <AuthLoading />;
   if (invitations.length > 0) return <Navigate to="/invitation" replace />;
+  if (accessClass === undefined) return <AuthLoading />;
+  const guest = accessClass === "anonymous_guest";
+  const restricted = accessClass === "restricted";
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background p-6">
       <div className="w-full max-w-md space-y-3 text-center">
-        <p className="display text-lg">Your account is registered</p>
-        <p className="text-sm text-muted-foreground">
-          It has no platform role yet, so there is no workspace to open here. Ministry and
-          inspection staff are given their role by a program administrator; company staff
-          join through an invitation or a membership request.
+        <p className="display text-lg">
+          {guest ? "You are browsing as a guest" : restricted ? "This account is restricted" : "Your account is registered"}
         </p>
+        <p className="text-sm text-muted-foreground">
+          {guest
+            ? "Guests can read public information and submit an anonymous report. Create an account to manage a profile and follow your own reports."
+            : restricted
+              ? "Public features are paused for this account. Contact the Ministry program office if you think this is a mistake."
+              : "It has no platform role yet, so there is no workspace to open here. Ministry and inspection staff are given their role by a program administrator; company staff join through an invitation or a membership request."}
+        </p>
+        {!guest && !restricted && (
         <Link
           to="/join"
           className="block rounded-md border p-4 text-left text-sm hover:bg-muted/40"
@@ -193,6 +202,7 @@ function RolelessGate() {
             Accept an invitation or ask your company to add you.
           </span>
         </Link>
+        )}
         <Link
           to="/report"
           className="block rounded-md border p-4 text-left text-sm hover:bg-muted/40"
