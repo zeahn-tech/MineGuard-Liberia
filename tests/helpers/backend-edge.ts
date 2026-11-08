@@ -103,6 +103,12 @@ update public.profiles set role = 'operator', scope = 'operator',
        operator_name = 'OreCo Liberia', county = 'Grand Cape Mount',
        profile_complete = true
  where id = '${EDGE_IDS.opB}';
+-- Corrective actions are answered by safety officers / site managers only (0046):
+-- the fixture's company operators hold that role, as a real company's would.
+reset role;
+update public.organization_members set org_role = 'safety_officer'
+ where user_id in ('${EDGE_IDS.opA}', '${EDGE_IDS.opB}');
+set local role authenticated;
 update public.profiles set role = 'inspector', scope = 'county',
        county = 'Bomi', profile_complete = true, job_title = 'County Inspector'
  where id = '${EDGE_IDS.county}';
@@ -686,6 +692,7 @@ const RPC_SPECS: Record<string, RpcSpec> = {
   evidence_url: { fn: "evidence_url", args: ["p_evidence_id", "p_ttl_seconds"] },
   refresh_public_stats: { fn: "refresh_public_stats", args: [] },
   mg_command_center_stats: { fn: "mg_command_center_stats", args: [] },
+  mg_can_work_corrective_actions: { fn: "mg_can_work_corrective_actions", args: [] },
   // SEC-4 v2 (migration 0014): scale surfaces — SECURITY INVOKER aggregation
   // and keyset pages. Named args only (PostgREST named-notation contract).
   // 0019 (RSK-1/2): both take the optional (version, as_of) config selectors.

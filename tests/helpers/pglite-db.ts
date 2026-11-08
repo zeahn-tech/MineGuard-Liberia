@@ -337,6 +337,12 @@ update public.profiles set role = 'operator', scope = 'operator',
        operator_name = 'OreCo Liberia', county = 'Grand Cape Mount',
        profile_complete = true
  where id = '${IDS.opB}';
+-- Corrective actions are answered by safety officers / site managers only (0046):
+-- the fixture's company operators hold that role, as a real company's would.
+reset role;
+update public.organization_members set org_role = 'safety_officer'
+ where user_id in ('${IDS.opA}', '${IDS.opB}');
+set local role authenticated;
 update public.profiles set role = 'inspector', scope = 'county',
        county = 'Bomi', profile_complete = true, job_title = 'County Inspector'
  where id = '${IDS.county}';

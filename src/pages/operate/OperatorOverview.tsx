@@ -28,6 +28,8 @@ import { Link } from "react-router";
 import { useNow } from "@/hooks/use-now";
 import { PageLoading } from "@/components/PageLoading";
 import { EmptyState } from "@/components/EmptyState";
+import { useCaAccess } from "@/hooks/use-ca-access";
+import { caCounts, findingsAwaitingAction, isRespondable } from "@/lib/corrective-actions";
 
 const DAY = 86_400_000;
 
@@ -43,11 +45,13 @@ export default function OperatorOverview() {
 
   const obligations = obligationsQ ?? [];
   const findings = findingsQ ?? [];
-  const openCAs = obligations.filter(
-    (o) => o.status === "open" || o.status === "in_progress",
-  );
-  const overdue = openCAs.filter((o) => o.dueAt < now);
-  const awaiting = obligations.filter((o) => o.status === "submitted");
+  const caAccess = useCaAccess();
+  const showCa = caAccess === "allowed";
+  const openCAs = obligations
+    .filter((o) => isRespondable(o.status))
+    .sort((a, b) => a.dueAt - b.dueAt);
+  const counts = caCounts(obligations, now);
+  const unanswered = findingsAwaitingAction(findings, obligations);
   const openFindings = findings.filter(
     (f) => f.status === "open" || f.status === "acknowledged",
   );
@@ -89,36 +93,42 @@ export default function OperatorOverview() {
 
       {/* Counters */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {showCa && (
         <Card className="paper rounded-none border-border shadow-none">
           <CardContent className="flex items-center gap-3 pt-4">
             <ClipboardList className="size-5 text-primary" strokeWidth={1.5} />
             <div>
-              <p className="display text-2xl leading-none">{openCAs.length}</p>
+              <p className="display text-2xl leading-none">{counts.needsResponse}</p>
               <p className="text-xs text-muted-foreground">open corrective actions</p>
             </div>
           </CardContent>
         </Card>
+        )}
+        {showCa && (
         <Card className="paper rounded-none border-border shadow-none">
           <CardContent className="flex items-center gap-3 pt-4">
             <AlertTriangle
-              className={`size-5 ${overdue.length > 0 ? "text-destructive" : "text-muted-foreground"}`}
+              className={`size-5 ${counts.overdue > 0 ? "text-destructive" : "text-muted-foreground"}`}
               strokeWidth={1.5}
             />
             <div>
-              <p className="display text-2xl leading-none">{overdue.length}</p>
+              <p className="display text-2xl leading-none">{counts.overdue}</p>
               <p className="text-xs text-muted-foreground">past deadline</p>
             </div>
           </CardContent>
         </Card>
+        )}
+        {showCa && (
         <Card className="paper rounded-none border-border shadow-none">
           <CardContent className="flex items-center gap-3 pt-4">
             <CheckCircle2 className="size-5 text-muted-foreground" strokeWidth={1.5} />
             <div>
-              <p className="display text-2xl leading-none">{awaiting.length}</p>
+              <p className="display text-2xl leading-none">{counts.awaitingVerification}</p>
               <p className="text-xs text-muted-foreground">awaiting verification</p>
             </div>
           </CardContent>
         </Card>
+        )}
         <Card className="paper rounded-none border-border shadow-none">
           <CardContent className="flex items-center gap-3 pt-4">
             <FileCheck2 className="size-5 text-muted-foreground" strokeWidth={1.5} />
@@ -131,6 +141,7 @@ export default function OperatorOverview() {
       </div>
 
       {/* Most urgent obligations — the operator's actionable list */}
+      {showCa && (
       <Card className="paper rounded-none border-border shadow-none">
         <CardHeader className="pb-2">
           <p className="kicker">Do next</p>
@@ -145,7 +156,9 @@ export default function OperatorOverview() {
           )}
           {obligationsQ !== undefined && openCAs.length === 0 && (
             <p className="text-sm text-muted-foreground">
-              Nothing open — no action needed right now.
+              {unanswered.length > 0
+                ? `Nothing to answer yet — ${unanswered.length} finding${unanswered.length === 1 ? " is" : "s are"} waiting for the reviewing authority to open a corrective action.`
+                : "Nothing open — no action needed right now."}
             </p>
           )}
           {openCAs.slice(0, 5).map((o) => {
@@ -184,6 +197,8 @@ export default function OperatorOverview() {
           )}
         </CardContent>
       </Card>
+      )}
+
 
       {/* Own sites quick glance */}
       <Card className="paper rounded-none border-border shadow-none">
