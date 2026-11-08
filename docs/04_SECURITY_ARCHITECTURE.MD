@@ -67,6 +67,35 @@ URL stays valid until expiry after a permission change — closing even that
 requires a fetch-time proxy (edge infrastructure deliberately not added).
 Verified by `tests/evidence-url.test.ts` and live (docs/11).
 
+## Public users, guests and restriction [IMPLEMENTED — migrations 0047/0048, Public User programme Phases A–B]
+
+MineGuard has no `public_user` role value. The public is the role-less, registered state
+(`profiles.role IS NULL`), and the **database** decides who counts:
+
+| Session class (`mg_my_access_class()`) | Meaning |
+|---|---|
+| `anonymous_guest` | Supabase anonymous sign-in (JWT `is_anonymous`, no e-mail). Read-only public information and the anonymous report flow. |
+| `public_user` / `public_user_unverified` | Registered, e-mail present (and confirmed for `public_user`), undeleted, no role, no **active** company membership (a pending request does not count), not restricted. |
+| `restricted` | A public account the Ministry restricted (`profiles.restricted_at`); public account features are paused. |
+| `company_member` / `staff` | Holds an operator role or active membership / a platform role. Never a public user. |
+
+Policies and RPCs for public features use `mg_is_public_user()` / `mg_is_verified_public_user()`
+(call as `(select public.mg_is_public_user())` so Postgres evaluates them once per
+statement); the UI uses `mg_my_access_class()` **only** for routing and wording — every
+action is enforced by RLS / RPC checks. Anonymous guests cannot register push
+subscriptions or edit a profile; restricted accounts cannot register push subscriptions.
+
+Administrators restrict or release an abusive **public** account with
+`mg_set_account_restriction(user, restricted, reason)` (reason 10–500 characters). Staff and
+company accounts are refused (they are managed by role and membership removal). The reason
+and actor are kept in the administrator-only `account_restriction_events`; the account
+holder's own profile row carries only the timestamp. There is no screen for this yet; an
+administrator calls the RPC (SQL editor or API) until one is built.
+
+Nobody can become administrator by registering: see "There is no self-service first
+administrator" in `14_DEPLOYMENT_OPERATIONS.MD`. Rollbacks: `supabase/maintenance/rollback_0047_*.sql`
+(re-opens the bootstrap) and `rollback_0048_*.sql`.
+
 ## Known gaps [PLANNED / REQUIRES GOVERNMENT CONFIRMATION]
 
 0. **Privileged-RPC execute surface is intent, not guarantee, on old lineages.**

@@ -36,7 +36,7 @@ afterEach(async () => {
     "0025_company_status_membership_invitations.sql",
     "0026_company_workforce.sql",
     "0027_site_scoped_access.sql",
-    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0040_emergency_alerts.sql", "0041_emergency_authority_corrections.sql", "0047_close_admin_bootstrap.sql",
+    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0040_emergency_alerts.sql", "0041_emergency_authority_corrections.sql", "0047_close_admin_bootstrap.sql", "0048_public_user_identity.sql",
   ]) {
     await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
   }
@@ -80,7 +80,7 @@ describe("migrations apply to a clean database", () => {
       // two GIS boundary tables (admin_boundaries, site_boundaries) + 0019's
       // risk_config_versions + 0020's ai_request_log + 0021's notifications.
       // …+ 0025's organization_members and organization_invitations.
-      expect(Number(scalar(tables))).toBe(41); // …0037 adds site_registration_requests; 0040 adds six emergency tables; 0043 adds job_safety_analyses; 0044 adds emergency_contacts; 0046 adds four worker_voice_* tables
+      expect(Number(scalar(tables))).toBe(42); // …0048 adds account_restriction_events; 0037 adds site_registration_requests; 0040 adds six emergency tables; 0043 adds job_safety_analyses; 0044 adds emergency_contacts; 0046 adds four worker_voice_* tables
 
       const rls = await one(
         run,
@@ -90,7 +90,7 @@ describe("migrations apply to a clean database", () => {
       // every table above has RLS, including 0015's two boundary tables and
       // 0019's risk_config_versions + 0020's ai_request_log + 0021's notifications
       // …and 0025's two RPC-only tables.
-      expect(Number(scalar(rls))).toBe(41); // 0040: six emergency tables, all RLS-closed; 0043: job_safety_analyses; 0044: emergency_contacts; 0046: four worker_voice_* tables, all RLS-closed
+      expect(Number(scalar(rls))).toBe(42); // 0048: account_restriction_events (RLS, admin read); 0040: six emergency tables, all RLS-closed; 0043: job_safety_analyses; 0044: emergency_contacts; 0046: four worker_voice_* tables, all RLS-closed
 
       const guards = await one(
         run,
@@ -553,6 +553,7 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
         // 0040: emergency alerts are written only through self-authorizing RPCs
         "emergency_alerts", "emergency_alert_revisions", "emergency_alert_acks",
         "emergency_alert_views", "emergency_alert_deliveries", "push_subscriptions",
+        "account_restriction_events", // 0048: administrator read-only history
       ]);
       expect(r.a_ins, `authenticated INSERT on ${r.t}`).toBe(!READ_ONLY.has(r.t));
       expect(r.n_ins, `anon must not hold INSERT on ${r.t}`).toBe(false);
@@ -812,8 +813,13 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_incidents_page(timestamp with time zone, uuid, integer)",
     "mg_inspections_page(timestamp with time zone, uuid, integer)",
     "mg_is_admin()",
+    // 0048 (Public User Phase B): identity helpers + administrator restriction of public accounts
+    "mg_is_anonymous()",
+    "mg_is_public_user()",
     "mg_is_reviewer()",
     "mg_is_staff()",
+    "mg_is_verified_public_user()",
+    "mg_my_access_class()",
     "mg_my_emergency_alerts()",
     "mg_my_membership()",
     "mg_my_pending_invitations()",
@@ -839,6 +845,7 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_risk_scores(integer, timestamp with time zone)",
     "mg_role()",
     "mg_search_companies(text)",
+    "mg_set_account_restriction(uuid, boolean, text)",
     "mg_set_company_status(uuid, text, text)",
     "mg_set_member_role(uuid, text)",
     "mg_set_my_avatar(boolean)",
@@ -975,6 +982,9 @@ describe("GAP-0: function execute surface (0011)", () => {
     const PUBLIC_FLOWS = new Set(["submit_community_report", "refresh_public_stats", "track_community_report"]);
     const HELPERS = new Set([
       "mg_any_profile_role",
+      "mg_is_anonymous",
+      "mg_is_public_user",
+      "mg_is_verified_public_user",
       "mg_can_access_site",
       "mg_can_access_site_row",
       "mg_has_permission",
