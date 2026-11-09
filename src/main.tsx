@@ -25,6 +25,12 @@ const OperatorPortal = lazy(() => import("./pages/OperatorPortal.tsx"));
 const MyReports = lazy(() => import("./pages/account/MyReports.tsx"));
 const MyFeedback = lazy(() => import("./pages/account/MyFeedback.tsx"));
 const FeedbackInbox = lazy(() => import("./pages/FeedbackInbox.tsx"));
+const PublicHub = lazy(() => import("./pages/public/PublicHub.tsx"));
+const PublicGlossary = lazy(() => import("./pages/public/PublicGlossary.tsx"));
+const PublicSafety = lazy(() => import("./pages/public/PublicSafety.tsx"));
+const PublicNotices = lazy(() => import("./pages/public/PublicNotices.tsx"));
+const AccountHome = lazy(() => import("./pages/account/AccountHome.tsx"));
+const ContentAdmin = lazy(() => import("./pages/ContentAdmin.tsx"));
 const Companies = lazy(() => import("./pages/Companies.tsx"));
 const RegistryLayout = lazy(() => import("./pages/RegistryLayout.tsx"));
 const CompanyDetail = lazy(() => import("./pages/CompanyDetail.tsx"));
@@ -148,6 +154,17 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/report/track" element={<CommunityTrack />} />
             {/* Public User programme (migration 0049): a verified public account's own reports and
                 feedback. Routing convenience only; the database is the access boundary. */}
+            {/* Public information area (Phase D): approved, published content only; open to everyone. */}
+            <Route path="/public" element={<PublicHub />} />
+            <Route path="/public/glossary" element={<PublicGlossary />} />
+            <Route path="/public/safety" element={<PublicSafety />} />
+            <Route path="/public/notices" element={<PublicNotices />} />
+            <Route path="/account" element={<RequirePublicAccount><AccountHome /></RequirePublicAccount>} />
+            <Route
+              path="/account/profile"
+              element={<RequirePublicAccount><div className="mx-auto max-w-3xl px-4 py-6 md:px-8 md:py-8"><ProfileSettings /></div></RequirePublicAccount>}
+            />
+            <Route path="/account/security" element={<RequirePublicAccount><Security /></RequirePublicAccount>} />
             <Route path="/account/reports" element={<RequirePublicAccount><MyReports /></RequirePublicAccount>} />
             <Route path="/account/feedback" element={<RequirePublicAccount><MyFeedback /></RequirePublicAccount>} />
             <Route path="/voice" element={<VoicePublic />} />
@@ -247,6 +264,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="environment/:observationId" element={<ObservationDetail />} />
               <Route path="community" element={<Community />} />
               <Route path="feedback" element={<FeedbackInbox />} />
+              <Route path="content" element={<ContentAdmin />} />
               {/* Worker Voice → Ministry (0050): reviewers only; the database is the access boundary */}
               <Route path="voice-ministry" element={<MinistryVoiceReview />} />
               <Route path="audit" element={<Audit />} />

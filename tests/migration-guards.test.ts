@@ -125,7 +125,7 @@ describe("supabase/checks/migration_state.sql (the read-only 'what is applied?' 
     const db = await wrongProject();
     const res = await db.query(check);
     const state = stateOf(res.rows as Array<{ migration: string; applied: boolean }>);
-    expect(Object.keys(state)).toEqual(["0001", "0010", "0012", "0013", "0014", "0015", "0016", "0018", "0019", "0021", "0024", "0025", "0026", "0027", "0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0047", "0048", "0049"]);
+    expect(Object.keys(state)).toEqual(["0001", "0010", "0012", "0013", "0014", "0015", "0016", "0018", "0019", "0021", "0024", "0025", "0026", "0027", "0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0047", "0048", "0049", "0051"]);
     expect(Object.values(state).every((v) => v === false)).toBe(true);
     await db.close();
   });
@@ -135,7 +135,7 @@ describe("supabase/checks/migration_state.sql (the read-only 'what is applied?' 
     expect(stateOf(rows)).toEqual({
       "0001": true, "0010": true, "0012": true, "0013": true,
       "0014": true, "0015": true, "0016": true, "0018": true, "0019": true, "0021": true,
-      "0024": true, "0025": true, "0026": true, "0027": true, "0028": true, "0029": true, "0030": true, "0031": true, "0032": true, "0033": true, "0034": true, "0035": true, "0036": true, "0037": true, "0038": true, "0039": true, "0047": true, "0048": true, "0049": true,
+      "0024": true, "0025": true, "0026": true, "0027": true, "0028": true, "0029": true, "0030": true, "0031": true, "0032": true, "0033": true, "0034": true, "0035": true, "0036": true, "0037": true, "0038": true, "0039": true, "0047": true, "0048": true, "0049": true, "0051": true,
     });
   });
 

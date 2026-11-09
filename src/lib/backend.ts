@@ -662,11 +662,10 @@ function keysetPages<T>(
   })();
 }
 
-async function refreshPublicStats() {
-  const { error } = await supabase.rpc("refresh_public_stats");
-  if (error)
-    console.warn("[backend] publicStats refresh skipped:", error.message);
-}
+/** Retired (migration 0051): the live, all-company public counts are no longer published, so there
+ *  is nothing to refresh. Public figures are now approved "statistics" content. Kept as a no-op so
+ *  the write paths that called it stay unchanged. */
+async function refreshPublicStats(): Promise<void> {}
 
 // ---------------------------------------------------------------------------
 // SEC-4 v2 — full-feed fetchers (the live lists and the keyset pages'
@@ -1790,6 +1789,88 @@ export async function updatePassword(newPassword: string) {
 
 /** Create the profile row for a fresh account (idempotent; the
  *  on_auth_user_created trigger normally does this first). */
+/** Approved public content (migration 0051). */
+export type PublicContentKind = "glossary_term" | "safety_guidance" | "announcement" | "statistics";
+export type ContentStatus = "draft" | "pending_review" | "approved" | "published" | "archived";
+
+export interface PublicContentItem {
+  id: string;
+  kind: PublicContentKind;
+  slug: string;
+  language: string;
+  title: string;
+  summary?: string;
+  body: string;
+  category?: string;
+  data?: { items: { label: string; value: number; as_of: string }[] };
+  version: number;
+  publishedAt?: number;
+}
+
+export interface ContentListItem {
+  id: string;
+  kind: PublicContentKind;
+  slug: string;
+  language: string;
+  title: string;
+  summary?: string;
+  category?: string;
+  status: ContentStatus;
+  version: number;
+  authorName?: string;
+  editedByName?: string;
+  source?: string;
+  publishAt?: number;
+  expiresAt?: number;
+  publishedAt?: number;
+  createdAt: number;
+}
+
+export interface ContentDetail {
+  id: string;
+  kind: PublicContentKind;
+  slug: string;
+  language: string;
+  title: string;
+  summary: string | null;
+  body: string;
+  category: string | null;
+  data: { items: { label: string; value: number; as_of: string }[] } | null;
+  status: ContentStatus;
+  version: number;
+  source: string | null;
+  publishAt: string | null;
+  expiresAt: string | null;
+  publishedAt: string | null;
+  authorId: string | null;
+  editedBy: string | null;
+  events: {
+    action: string;
+    from: string | null;
+    to: string | null;
+    note: string | null;
+    checks: Record<string, boolean> | null;
+    at: string;
+    actor: string;
+  }[];
+}
+
+function mapPublicContent(r: AnyRow): PublicContentItem {
+  return {
+    id: r.id as string,
+    kind: r.kind as PublicContentKind,
+    slug: r.slug as string,
+    language: r.language as string,
+    title: r.title as string,
+    summary: (r.summary as string | null) ?? undefined,
+    body: (r.body as string) ?? "",
+    category: (r.category as string | null) ?? undefined,
+    data: (r.data as PublicContentItem["data"] | null) ?? undefined,
+    version: Number(r.version),
+    publishedAt: r.published_at ? Date.parse(r.published_at as string) : undefined,
+  };
+}
+
 /** One of an account's own linked reports (migration 0049, mg_my_community_reports). */
 export interface MyReport {
   id: string;
@@ -2591,6 +2672,128 @@ export const api = {
   },
 
   /** The signed-in person's own profile: details, photo, and account deletion (migration 0035). */
+  /** Approved public content (migration 0051). Readable by anyone — no session needed — and only the
+   *  PUBLISHED, in-date rows with the public columns; the database grants nothing else. Text only:
+   *  bodies are rendered as plain paragraphs, never as HTML. */
+  publicContent: {
+    list: (kind: PublicContentKind) =>
+      live<PublicContentItem[]>(
+        async () => {
+          const { data, error } = await supabase
+            .from("public_content")
+            .select("id,kind,slug,language,title,summary,body,category,data,version,published_at")
+            .eq("kind", kind)
+            .order("title", { ascending: true })
+            .limit(1000);
+          if (error) throw backendError(error);
+          return ((data ?? []) as AnyRow[]).map(mapPublicContent);
+        },
+        ["public_content"],
+        { authBound: false },
+      ),
+  },
+
+  /** Ministry content workflow (permissions content.author / content.review / content.publish are
+   *  checked by the database on every call). */
+  content: {
+    list: (args?: { status?: string; kind?: PublicContentKind }) =>
+      live<ContentListItem[]>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase.rpc("mg_content_list", {
+            p_status: args?.status ?? null,
+            p_kind: args?.kind ?? null,
+            p_limit: 500,
+          });
+          if (error) throw backendError(error);
+          return ((data ?? []) as AnyRow[]).map((r) => ({
+            id: r.id as string,
+            kind: r.kind as PublicContentKind,
+            slug: r.slug as string,
+            language: r.language as string,
+            title: r.title as string,
+            summary: (r.summary as string | null) ?? undefined,
+            category: (r.category as string | null) ?? undefined,
+            status: r.status as ContentStatus,
+            version: Number(r.version),
+            authorName: (r.author_name as string | null) ?? undefined,
+            editedByName: (r.edited_by_name as string | null) ?? undefined,
+            source: (r.source as string | null) ?? undefined,
+            publishAt: r.publish_at ? Date.parse(r.publish_at as string) : undefined,
+            expiresAt: r.expires_at ? Date.parse(r.expires_at as string) : undefined,
+            publishedAt: r.published_at ? Date.parse(r.published_at as string) : undefined,
+            createdAt: Date.parse(r.created_at as string),
+          }));
+        },
+        ["public_content"],
+      ),
+
+    get: async (id: string): Promise<ContentDetail> => {
+      await requireAuthed();
+      const { data, error } = await supabase.rpc("mg_content_get", { p_id: id });
+      if (error) throw backendError(error);
+      return data as ContentDetail;
+    },
+
+    save: async (args: {
+      id?: string;
+      kind: PublicContentKind;
+      slug: string;
+      title: string;
+      summary?: string;
+      body: string;
+      category?: string;
+      data?: { items: { label: string; value: number; as_of: string }[] };
+      publishAt?: number;
+      expiresAt?: number;
+      source?: string;
+    }) => {
+      await requireAuthed();
+      const { data, error } = await supabase.rpc("mg_content_save", {
+        p_id: args.id ?? null,
+        p_kind: args.kind,
+        p_slug: args.slug,
+        p_title: args.title,
+        p_summary: args.summary ?? null,
+        p_body: args.body,
+        p_category: args.category ?? null,
+        p_data: args.data ?? null,
+        p_publish_at: args.publishAt ? new Date(args.publishAt).toISOString() : null,
+        p_expires_at: args.expiresAt ? new Date(args.expiresAt).toISOString() : null,
+        p_language: "en",
+        p_source: args.source ?? null,
+      });
+      if (error) throw backendError(error);
+      notifyLocalWrite("public_content");
+      return data as string;
+    },
+
+    transition: async (args: {
+      id: string;
+      to: ContentStatus;
+      note?: string;
+      checks?: { accuracy: boolean; completeness: boolean; confidentiality: boolean };
+    }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_content_transition", {
+        p_id: args.id,
+        p_to: args.to,
+        p_note: args.note ?? null,
+        p_checks: args.checks ?? null,
+      });
+      if (error) throw backendError(error);
+      notifyLocalWrite("public_content");
+    },
+
+    revise: async (id: string) => {
+      await requireAuthed();
+      const { data, error } = await supabase.rpc("mg_content_revise", { p_id: id });
+      if (error) throw backendError(error);
+      notifyLocalWrite("public_content");
+      return data as string;
+    },
+  },
+
   account: {
     /** What the SERVER classifies this session as (migration 0048). For routing and copy only —
      *  every protected action is enforced by RLS / RPC checks, never by this value. "unknown"
@@ -5205,26 +5408,6 @@ export const api = {
         if (error) throw backendError(error);
         return (data ?? []).map(mapAudit);
       }, ["audit_log"]),
-
-    publicStats: () =>
-      liveDoc<{
-        sites: number;
-        inspections: number;
-        incidents: number;
-        communityReports: number;
-      }>(
-        () => ({ table: "meta", column: "key", value: "public_stats" }),
-        (r) => {
-          const v = (r.value ?? {}) as Record<string, unknown>;
-          return {
-            sites: Number(v.sites ?? 0),
-            inspections: Number(v.inspections ?? 0),
-            incidents: Number(v.incidents ?? 0),
-            communityReports: Number(v.communityReports ?? 0),
-          };
-        },
-        { authBound: false },
-      ),
 
     listUsers: () =>
       live<UserProfile[]>(async () => {
