@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Public User programme — Phase D (migration 0050): approved public content, the publication
+// Public User programme — Phase D (migration 0051): approved public content, the publication
 // lifecycle (draft -> pending_review -> approved -> published -> archived), four-eyes review,
 // the glossary draft seed, and the retirement of live anonymous statistics.
 // Real Postgres (PGlite) with the production migrations; every session rolls back.
@@ -21,7 +21,7 @@ beforeAll(async () => {
     "0047_close_admin_bootstrap.sql",
     "0048_public_user_identity.sql",
     "0049_public_reports_feedback.sql",
-    "0050_public_content.sql",
+    "0051_public_content.sql",
   ]) {
     await db.exec(read(`supabase/migrations/${m}`));
   }
@@ -80,7 +80,7 @@ async function publish(run: Runner, o: Parameters<typeof save>[1]) {
 }
 const visible = async (run: Runner, where = "true") => (await run(`select slug, version from public.public_content where ${where} order by slug, version`)) as { slug: string; version: number }[];
 
-describe("0050: what the public can and cannot read", () => {
+describe("0051: what the public can and cannot read", () => {
   test("anyone — no session, guest, public user, operator, inspector — sees only PUBLISHED rows (not draft, pending, approved or archived)", async () => {
     await withRole("postgres", null, async (run) => {
       await world(run);
@@ -173,7 +173,7 @@ describe("0050: what the public can and cannot read", () => {
   });
 });
 
-describe("0050: the lifecycle", () => {
+describe("0051: the lifecycle", () => {
   test("a normal publication leaves a complete, attributed history; a revision replaces the old version when published", async () => {
     await withRole("postgres", null, async (run) => {
       await world(run);
@@ -321,7 +321,7 @@ describe("0050: the lifecycle", () => {
   });
 });
 
-describe("0050: who may do what", () => {
+describe("0051: who may do what", () => {
   test("inspectors, operators, public users and guests have no content permissions at all", async () => {
     await withRole("postgres", null, async (run) => {
       await world(run);
@@ -356,7 +356,7 @@ describe("0050: who may do what", () => {
   });
 });
 
-describe("0050: validation", () => {
+describe("0051: validation", () => {
   test("statistics must be well-formed figures; other kinds carry none", async () => {
     await withRole("postgres", null, async (run) => {
       await world(run);
@@ -390,7 +390,7 @@ describe("0050: validation", () => {
   });
 });
 
-describe("0050: the glossary is prepared as drafts and nothing is published", () => {
+describe("0051: the glossary is prepared as drafts and nothing is published", () => {
   const SEED = () => read("supabase/seeds/public_glossary_drafts.sql");
   // the seed carries its own begin/commit; inside a test transaction run only its statements
   const loadSeed = async () => (await getDb()).exec(SEED().replace(/^(begin|commit);$/gm, ""));
@@ -442,7 +442,7 @@ describe("0050: the glossary is prepared as drafts and nothing is published", ()
   });
 });
 
-describe("0050: live anonymous statistics are retired", () => {
+describe("0051: live anonymous statistics are retired", () => {
   test("anonymous callers cannot read meta; staff still can; non-staff signed-in users cannot", async () => {
     await withRole("anon", null, async (run) => {
       expect(await denied(run("select * from public.meta"))).toMatch(/permission denied/i);
@@ -477,7 +477,7 @@ describe("0050: live anonymous statistics are retired", () => {
   });
 });
 
-describe("0050: existing roles are unaffected", () => {
+describe("0051: existing roles are unaffected", () => {
   test("operators, inspectors and supervisors keep their access; reports and feedback still work", async () => {
     await withRole("authenticated", { sub: f.opA, role: "authenticated" }, async (run) => {
       expect((await run("select id from public.sites")).length).toBeGreaterThan(0);
@@ -495,7 +495,7 @@ describe("0050: existing roles are unaffected", () => {
   });
 });
 
-describe("0050: source contracts", () => {
+describe("0051: source contracts", () => {
   test("public pages render content as plain text — no raw HTML anywhere", () => {
     for (const p of [
       "src/components/ContentText.tsx",
@@ -527,7 +527,7 @@ describe("0050: source contracts", () => {
     expect(m).toContain('path="content"');
   });
   test("the migration grants no table writes, no anon function access, and publishes nothing", () => {
-    const m = read("supabase/migrations/0050_public_content.sql").replace(/--[^\n]*/g, "");
+    const m = read("supabase/migrations/0051_public_content.sql").replace(/--[^\n]*/g, "");
     expect(m).not.toMatch(/\bgrant\s+(insert|update|delete|all)\b/i);
     expect(m).not.toMatch(/grant execute[^;]*to anon/i);
     expect(m).not.toMatch(/'published'\s*,\s*now\(\)/);

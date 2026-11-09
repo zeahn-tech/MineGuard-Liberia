@@ -185,6 +185,10 @@ export default function VoiceReview() {
 
   if (failed) return <p role="alert" className="p-4 text-sm">Reports could not be loaded. Nothing has been changed.</p>;
   if (!rows) return <PageLoading shape="list" label="worker voice reports" />;
+  // The database returns no sites to someone who is not a reviewer. Say so plainly instead of showing an empty queue.
+  if (sites.length === 0 && rows.length === 0) {
+    return <div className="p-4"><EmptyState title="Reviewer access required" why="Worker Voice reports are reviewed by your company administrators, and by the site manager and safety officers assigned to the site. To raise a concern yourself, use Worker Voice." /></div>;
+  }
   const shown = rows.filter((r) => filter === "all" || r.status !== "closed");
   const siteName = (id: string) => sites.find((s) => s.id === id)?.name ?? "Your site";
 
@@ -192,7 +196,7 @@ export default function VoiceReview() {
     <div className="mx-auto max-w-3xl space-y-4 p-4">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold">Worker Voice review</h1>
-        <p className="text-sm text-muted-foreground">Safety reports sent to your company. Treat every report as credible until it is assessed, whether it is named, confidential or anonymous. Do not try to work out who sent an anonymous report.</p>
+        <p className="text-sm text-muted-foreground">Safety reports sent to your company. Treat every report as credible until it is assessed, whether it is named, confidential or anonymous. Do not try to work out who sent an anonymous report. Reports that workers choose to send to the Ministry are a separate channel and are not shown here.</p>
       </header>
       <SiteCodes sites={sites} />
       <div className="flex gap-2">

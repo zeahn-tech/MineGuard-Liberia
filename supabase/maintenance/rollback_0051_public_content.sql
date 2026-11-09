@@ -1,5 +1,5 @@
 -- ===========================================================================
--- ROLLBACK of migration 0050 (approved public content).
+-- ROLLBACK of migration 0051 (approved public content).
 -- LOSES all public_content rows and their review history (drafts, approvals, published content).
 -- Export first if they matter:  select * from public.public_content;  select * from public.public_content_events;
 -- It also RESTORES the anonymous live statistics (meta readable by everyone) — re-opening the

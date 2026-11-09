@@ -1,4 +1,4 @@
-# 23 — Public content, the public area and the account dashboard [IMPLEMENTED — migration 0050]
+# 24 — Public content, the public area and the account dashboard [IMPLEMENTED — migration 0051]
 
 Part of the Public User programme (Phase D). Rule: **the public reads only what the Ministry explicitly
 approved and published.** Nothing is public because it exists in the app, an API or the frontend.
@@ -59,8 +59,8 @@ qualified review (first-aid steps are medical guidance).
   accounts to `/account`. This is routing only; the database decides access.
 
 ## Rollout (nothing here is applied automatically)
-1. Apply 0047 → 0048 → 0049 → 0050 in order (see `14_DEPLOYMENT_OPERATIONS.MD` for the 0047 prerequisites).
+1. Apply 0047 → 0048 → 0049 → 0050 (Worker Voice → Ministry, separate work) → 0051 in order (see `14_DEPLOYMENT_OPERATIONS.MD` for the 0047 prerequisites).
 2. Optional: run `supabase/seeds/public_glossary_drafts.sql` once as the project owner.
 3. Reviewers review, approve and publish. Until something is published the public pages show honest empty states.
-4. Rollback: `supabase/maintenance/rollback_0050_public_content.sql` (loses all content and history, and
+4. Rollback: `supabase/maintenance/rollback_0051_public_content.sql` (loses all content and history, and
    re-opens the anonymous live statistics).

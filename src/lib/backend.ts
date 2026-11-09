@@ -662,7 +662,7 @@ function keysetPages<T>(
   })();
 }
 
-/** Retired (migration 0050): the live, all-company public counts are no longer published, so there
+/** Retired (migration 0051): the live, all-company public counts are no longer published, so there
  *  is nothing to refresh. Public figures are now approved "statistics" content. Kept as a no-op so
  *  the write paths that called it stay unchanged. */
 async function refreshPublicStats(): Promise<void> {}
@@ -1789,7 +1789,7 @@ export async function updatePassword(newPassword: string) {
 
 /** Create the profile row for a fresh account (idempotent; the
  *  on_auth_user_created trigger normally does this first). */
-/** Approved public content (migration 0050). */
+/** Approved public content (migration 0051). */
 export type PublicContentKind = "glossary_term" | "safety_guidance" | "announcement" | "statistics";
 export type ContentStatus = "draft" | "pending_review" | "approved" | "published" | "archived";
 
@@ -2672,7 +2672,7 @@ export const api = {
   },
 
   /** The signed-in person's own profile: details, photo, and account deletion (migration 0035). */
-  /** Approved public content (migration 0050). Readable by anyone — no session needed — and only the
+  /** Approved public content (migration 0051). Readable by anyone — no session needed — and only the
    *  PUBLISHED, in-date rows with the public columns; the database grants nothing else. Text only:
    *  bodies are rendered as plain paragraphs, never as HTML. */
   publicContent: {

@@ -1,5 +1,5 @@
 -- ===========================================================================
--- MINEGUARD LIBERIA — migration 0050: approved public content
+-- MINEGUARD LIBERIA — migration 0051: approved public content
 --                                     (Public User programme, Phase D)
 --
 -- GOAL. The public may read ONLY content the Ministry explicitly approved and published.
@@ -29,7 +29,7 @@
 -- Nothing is published by this migration. The existing glossary is prepared as DRAFTS by the
 -- separate, explicit seed supabase/seeds/public_glossary_drafts.sql (not a migration).
 --
--- Idempotent. ROLLBACK: supabase/maintenance/rollback_0050_public_content.sql
+-- Idempotent. ROLLBACK: supabase/maintenance/rollback_0051_public_content.sql
 -- ===========================================================================
 
 begin;

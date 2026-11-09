@@ -113,7 +113,7 @@ select migration, applied
        exists (select 1 from information_schema.columns
                 where table_schema = 'public' and table_name = 'community_reports' and column_name = 'submitter_id')
        and exists (select 1 from fns where proname = 'submit_my_community_report')),
-    ('0050 approved public content',
+    ('0051 approved public content',
        exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
                 where n.nspname = 'public' and c.relname = 'public_content')
        and exists (select 1 from fns where proname = 'mg_content_transition')),
