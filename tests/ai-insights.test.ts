@@ -337,14 +337,17 @@ describe("request validation, size, limits", () => {
 
   test("rate limit: requests beyond the hourly budget get 429, are logged, and do not affect other users", async () => {
     const n = Number((await adminSql(`select count(*)::int n from public.ai_request_log where user_id='${f.county}' and created_at > now() - interval '1 hour'`))[0].n);
+    // Count the rate-limited rows rather than reading "the latest row": rows written in one transaction can share a
+    // created_at, and the id tie-break is random, so "latest" could be an earlier successful request (error_code null).
+    const limitedRows = async () => Number((await adminSql(`select count(*)::int n from public.ai_request_log where user_id='${f.county}' and capability='risk_patterns' and outcome='refused' and error_code='RATE_LIMITED'`))[0].n);
+    const limitedBefore = await limitedRows();
     const limit = n + 2;
     expect((await ask(f.county, { capability: "risk_patterns" }, { rateLimitPerHour: limit })).status).toBe(200);
     expect((await ask(f.county, { capability: "risk_patterns" }, { rateLimitPerHour: limit })).status).toBe(200);
     const blocked = await ask(f.county, { capability: "risk_patterns" }, { rateLimitPerHour: limit });
     expect(blocked.status).toBe(429);
     expect((blocked.body as any).error).toBe("RATE_LIMITED");
-    const last = await adminSql(`select outcome, error_code from public.ai_request_log where user_id='${f.county}' order by created_at desc, id limit 1`);
-    expect(last[0]).toMatchObject({ outcome: "refused", error_code: "RATE_LIMITED" });
+    expect(await limitedRows()).toBe(limitedBefore + 1); // the blocked request, and only it, was logged as refused / RATE_LIMITED
     const other = await ask(f.national, { capability: "risk_patterns" }, { rateLimitPerHour: 1000 });
     expect(other.status).toBe(200);
   });
