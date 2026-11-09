@@ -255,3 +255,14 @@ describe("wiring: nothing tracks, nothing leaks, everything reachable", () => {
     for (const id of ["wv-cat", "wv-urg", "wv-desc", "wv-when", "wv-site-code"]) expect(s).toContain(`htmlFor="${id}"`);
   });
 });
+
+describe("Voice review is only offered to reviewers", () => {
+  test("the operator menu hides Voice review until the server says the person can review, and the page says so for everyone else", () => {
+    const nav = read("src/pages/operate/OperatorLayout.tsx");
+    expect(nav).toMatch(/voice-review.*voiceReviewOnly: true/);
+    expect(nav).toContain("reviewerSites()");
+    expect(nav).toContain("if (\"voiceReviewOnly\" in i && i.voiceReviewOnly) return canReviewVoice;");
+    expect(nav).toContain("useState(false)"); // hidden until known
+    expect(read("src/pages/voice/VoiceReview.tsx")).toContain("Reviewer access required");
+  });
+});

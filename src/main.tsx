@@ -6,7 +6,7 @@ import { RouteLoading } from "@/components/RouteLoading";
 import React, { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter, Route, Routes } from "react-router";
-import { RequireRegistrar, RequireStaff } from "@/components/RequireAuth";
+import { RequirePublicAccount, RequireRegistrar, RequireStaff } from "@/components/RequireAuth";
 import "./index.css";
 import { installChunkRecovery } from "@/lib/chunk-recovery";
 import { startInstallPrompt } from "@/lib/install-prompt";
@@ -22,6 +22,15 @@ const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const PortalLayout = lazy(() => import("./pages/PortalLayout.tsx"));
 const CommandCenter = lazy(() => import("./pages/CommandCenter.tsx"));
 const OperatorPortal = lazy(() => import("./pages/OperatorPortal.tsx"));
+const MyReports = lazy(() => import("./pages/account/MyReports.tsx"));
+const MyFeedback = lazy(() => import("./pages/account/MyFeedback.tsx"));
+const FeedbackInbox = lazy(() => import("./pages/FeedbackInbox.tsx"));
+const PublicHub = lazy(() => import("./pages/public/PublicHub.tsx"));
+const PublicGlossary = lazy(() => import("./pages/public/PublicGlossary.tsx"));
+const PublicSafety = lazy(() => import("./pages/public/PublicSafety.tsx"));
+const PublicNotices = lazy(() => import("./pages/public/PublicNotices.tsx"));
+const AccountHome = lazy(() => import("./pages/account/AccountHome.tsx"));
+const ContentAdmin = lazy(() => import("./pages/ContentAdmin.tsx"));
 const Companies = lazy(() => import("./pages/Companies.tsx"));
 const RegistryLayout = lazy(() => import("./pages/RegistryLayout.tsx"));
 const CompanyDetail = lazy(() => import("./pages/CompanyDetail.tsx"));
@@ -76,6 +85,7 @@ const VoiceReport = lazy(() => import("./pages/voice/VoiceReport.tsx"));
 const VoicePublic = lazy(() => import("./pages/voice/VoicePublic.tsx"));
 const VoiceStatus = lazy(() => import("./pages/voice/VoiceStatus.tsx"));
 const VoiceReview = lazy(() => import("./pages/voice/VoiceReview.tsx"));
+const MinistryVoiceReview = lazy(() => import("./pages/voice/MinistryVoiceReview.tsx"));
 const SafetyGuidance = lazy(() => import("./pages/safety/SafetyGuidance.tsx"));
 const JsaPage = lazy(() => import("./pages/safety/JsaPage.tsx"));
 const EmergencyConsole = lazy(() => import("./pages/emergency/EmergencyConsole.tsx"));
@@ -142,6 +152,21 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/cookies" element={<Cookies />} />
             <Route path="/report" element={<CommunitySubmit />} />
             <Route path="/report/track" element={<CommunityTrack />} />
+            {/* Public User programme (migration 0049): a verified public account's own reports and
+                feedback. Routing convenience only; the database is the access boundary. */}
+            {/* Public information area (Phase D): approved, published content only; open to everyone. */}
+            <Route path="/public" element={<PublicHub />} />
+            <Route path="/public/glossary" element={<PublicGlossary />} />
+            <Route path="/public/safety" element={<PublicSafety />} />
+            <Route path="/public/notices" element={<PublicNotices />} />
+            <Route path="/account" element={<RequirePublicAccount><AccountHome /></RequirePublicAccount>} />
+            <Route
+              path="/account/profile"
+              element={<RequirePublicAccount><div className="mx-auto max-w-3xl px-4 py-6 md:px-8 md:py-8"><ProfileSettings /></div></RequirePublicAccount>}
+            />
+            <Route path="/account/security" element={<RequirePublicAccount><Security /></RequirePublicAccount>} />
+            <Route path="/account/reports" element={<RequirePublicAccount><MyReports /></RequirePublicAccount>} />
+            <Route path="/account/feedback" element={<RequirePublicAccount><MyFeedback /></RequirePublicAccount>} />
             <Route path="/voice" element={<VoicePublic />} />
             <Route path="/voice/status" element={<VoiceStatus />} />
 
@@ -238,6 +263,10 @@ createRoot(document.getElementById("root")!).render(
               <Route path="environment" element={<Environment />} />
               <Route path="environment/:observationId" element={<ObservationDetail />} />
               <Route path="community" element={<Community />} />
+              <Route path="feedback" element={<FeedbackInbox />} />
+              <Route path="content" element={<ContentAdmin />} />
+              {/* Worker Voice → Ministry (0050): reviewers only; the database is the access boundary */}
+              <Route path="voice-ministry" element={<MinistryVoiceReview />} />
               <Route path="audit" element={<Audit />} />
               <Route path="reports" element={<Reports />} />
               <Route path="risk-config" element={<RiskConfig />} />

@@ -812,11 +812,19 @@ describe("stats and users", () => {
     expect(opLog).toEqual([]);
   });
 
-  test("publicStats: anonymous-readable mirror (authBound: false)", async () => {
-    asAnon();
-    const s = await first(api.stats.publicStats());
-    expect(s).not.toBeNull();
-    expect(typeof s!.sites).toBe("number");
+  test("publicContent: anonymous visitors read only PUBLISHED rows (authBound: false); live stats are gone", async () => {
+    await adminSql(`insert into public.public_content (kind, slug, title, body, category, status, published_at) values
+      ('glossary_term', 'edge-a', 'Edge A', 'A definition that is long enough.', 'General', 'published', now()),
+      ('glossary_term', 'edge-b', 'Edge B', 'A definition that is long enough.', 'General', 'draft', null)`);
+    try {
+      asAnon();
+      const rows = await first(api.publicContent.list("glossary_term"));
+      expect(rows.map((r) => r.slug)).toEqual(["edge-a"]);
+      expect(rows[0]).toMatchObject({ title: "Edge A", kind: "glossary_term", version: 1 });
+      expect((api.stats as Record<string, unknown>).publicStats).toBeUndefined();
+    } finally {
+      await adminSql(`delete from public.public_content where slug in ('edge-a', 'edge-b')`);
+    }
   });
 });
 

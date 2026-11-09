@@ -106,9 +106,9 @@ describe("anonymous (no session)", () => {
     });
   });
 
-  test("can read the public mirror (meta) but NOT list report_tracking (0023)", async () => {
+  test("cannot read meta (0050 retired the live public stats) nor list report_tracking (0023)", async () => {
     await withRole("anon", null, async (run) => {
-      expect(await count(run, "select count(*) from public.meta")).toBe(1);
+      await expect(run("select count(*) from public.meta")).rejects.toThrow(/permission denied/i);
       await expect(
         run("select count(*) from public.report_tracking"),
       ).rejects.toThrow(/permission denied/i);

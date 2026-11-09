@@ -20,6 +20,11 @@ Reviewers = the company administrator, and the site manager / safety officers **
 site** (not for a report routed to administrators only). The **Ministry has no access** and nothing in
 the app says it does.
 
+> **Ministry channel.** Workers can also report a company's labour practices, unsafe work practices and
+> work habits to the Ministry. That is a separate channel (`ministry_voice_*`, migration 0050) with its own
+> reviewers; see `23_MINISTRY_VOICE.MD`. Nothing in it changes who reviews *this* channel: the company
+> administrators, as described here.
+
 ## Reuse, and why not `incidents`
 
 Reused: organizations/members/site assignments and `mg_can_prepare_jsa` / `mg_jsa_sites` (who may

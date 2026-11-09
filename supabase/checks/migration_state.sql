@@ -109,6 +109,14 @@ select migration, applied
        exists (select 1 from fns where proname = 'mg_is_public_user')
        and exists (select 1 from information_schema.columns
                     where table_schema = 'public' and table_name = 'profiles' and column_name = 'restricted_at')),
+    ('0049 public reports, ownership and feedback',
+       exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'community_reports' and column_name = 'submitter_id')
+       and exists (select 1 from fns where proname = 'submit_my_community_report')),
+    ('0051 approved public content',
+       exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                where n.nspname = 'public' and c.relname = 'public_content')
+       and exists (select 1 from fns where proname = 'mg_content_transition')),
     ('0018 boundaries published to Realtime',
        exists (
          select 1 from pg_publication_tables

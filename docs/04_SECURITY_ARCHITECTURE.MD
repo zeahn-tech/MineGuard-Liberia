@@ -92,6 +92,21 @@ and actor are kept in the administrator-only `account_restriction_events`; the a
 holder's own profile row carries only the timestamp. There is no screen for this yet; an
 administrator calls the RPC (SQL editor or API) until one is built.
 
+**Reports and feedback (migration 0049).** Linking a report to an account is opt-in and only for
+verified public users (`submit_my_community_report`, which reuses the anonymous function and then
+claims the row for the session; per-user limit 10 an hour, duplicates refused for 24 hours). Report
+ownership and tracking codes are immutable, even for staff. Owners read their reports and feedback
+only through curated RPCs (`mg_my_community_reports`, `mg_my_feedback`); the tables give them no
+direct access. Feedback is verified-accounts-only, rate limited, answered by reviewers, and RPC-only
+for writes. Rollback: `supabase/maintenance/rollback_0049_public_reports_feedback.sql` (the new
+`other` report category stays).
+
+**Approved public content (migration 0051).** The public reads only published, in-date rows of
+`public_content`, through column grants (no provenance, no staff identifiers); there are no client write
+grants. Publication follows draft → pending_review → approved → published → archived with four-eyes review,
+a written note and accuracy/completeness/confidentiality confirmations, immutable published content and a
+staff-only history. The live anonymous statistics were retired. Full model: `24_PUBLIC_CONTENT.MD`.
+
 Nobody can become administrator by registering: see "There is no self-service first
 administrator" in `14_DEPLOYMENT_OPERATIONS.MD`. Rollbacks: `supabase/maintenance/rollback_0047_*.sql`
 (re-opens the bootstrap) and `rollback_0048_*.sql`.

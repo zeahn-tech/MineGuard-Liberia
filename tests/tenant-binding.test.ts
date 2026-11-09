@@ -14,10 +14,10 @@ beforeAll(async () => {
   // Other files re-apply older migrations on the shared DB; assert the real end state
   // (0047 replaces 0024's complete_staff_profile: role holders only, no privilege fields).
   const db = await getDb();
-  for (const m of ["0047_close_admin_bootstrap.sql", "0048_public_user_identity.sql"]) {
+  for (const m of ["0047_close_admin_bootstrap.sql", "0048_public_user_identity.sql", "0049_public_reports_feedback.sql", "0051_public_content.sql"]) {
     await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", m), "utf8"));
   }
-});
+}, 120000);
 
 async function denied(p: Promise<unknown>): Promise<string> {
   try {

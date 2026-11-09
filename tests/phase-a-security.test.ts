@@ -16,8 +16,10 @@ beforeAll(async () => {
   f = await getFixture();
   // Other test files re-apply older migrations on the shared database: assert the real end state.
   const db = await getDb();
-  await db.exec(read("supabase/migrations/0047_close_admin_bootstrap.sql"));
-});
+  for (const m of ["0047_close_admin_bootstrap.sql", "0048_public_user_identity.sql", "0049_public_reports_feedback.sql", "0051_public_content.sql"]) {
+    await db.exec(read(`supabase/migrations/${m}`));
+  }
+}, 120000);
 
 const REGISTERED = "dddd0047-0000-4000-8000-000000000001"; // email-verified, role-less public account
 const GUEST_ANON = "dddd0047-0000-4000-8000-000000000002"; // anonymous guest session (no email)
