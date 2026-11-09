@@ -41,6 +41,7 @@ const ROLE_LABEL: Record<string, string> = {
 function securityPath(role: string | undefined): string {
   if (role === "operator") return "/operate/security";
   if (role === "registrar") return "/registry/security";
+  if (!role) return "/account/security"; // public account (no platform role)
   return "/portal/security";
 }
 

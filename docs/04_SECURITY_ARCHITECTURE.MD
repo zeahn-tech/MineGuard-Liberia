@@ -101,6 +101,12 @@ direct access. Feedback is verified-accounts-only, rate limited, answered by rev
 for writes. Rollback: `supabase/maintenance/rollback_0049_public_reports_feedback.sql` (the new
 `other` report category stays).
 
+**Approved public content (migration 0050).** The public reads only published, in-date rows of
+`public_content`, through column grants (no provenance, no staff identifiers); there are no client write
+grants. Publication follows draft → pending_review → approved → published → archived with four-eyes review,
+a written note and accuracy/completeness/confidentiality confirmations, immutable published content and a
+staff-only history. The live anonymous statistics were retired. Full model: `23_PUBLIC_CONTENT.MD`.
+
 Nobody can become administrator by registering: see "There is no self-service first
 administrator" in `14_DEPLOYMENT_OPERATIONS.MD`. Rollbacks: `supabase/maintenance/rollback_0047_*.sql`
 (re-opens the bootstrap) and `rollback_0048_*.sql`.

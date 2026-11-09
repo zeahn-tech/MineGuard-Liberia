@@ -1,7 +1,6 @@
 import { LegalLinks } from "@/components/LegalLayout";
 import { Link } from "react-router";
-import { useQuery } from "@/lib/backend-react";
-import { api } from "@/lib/backend";
+import { ApprovedStatistics } from "@/components/ApprovedStatistics";
 import { useAuth } from "@/hooks/use-auth";
 import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
@@ -31,8 +30,6 @@ const MODULES = [
 
 export default function Landing() {
   const { isAuthenticated, isLoading } = useAuth();
-  // Public stats: only aggregate, non-sensitive counts. No fake numbers.
-  const stats = useQuery(api.stats.publicStats);
 
   return (
     <div className="min-h-screen bg-background paper-grain">
@@ -47,6 +44,7 @@ export default function Landing() {
           <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
             <a href="#capabilities" onClick={sectionJump("capabilities")} className="hover:text-foreground">Capabilities</a>
             <a href="#principles" onClick={sectionJump("principles")} className="hover:text-foreground">Principles</a>
+            <Link to="/public" className="hover:text-foreground">Safety information</Link>
             <Link to="/report" className="hover:text-foreground">Report a concern</Link>
             <Link to="/voice" className="hover:text-foreground">Worker Voice</Link>
           </nav>
@@ -100,14 +98,10 @@ export default function Landing() {
           </p>
         </div>
 
-        {/* Public stats strip — computed from real data, or hidden until data exists */}
-        <div className="mt-14 border-y border-border">
-          <div className="grid grid-cols-2 divide-x divide-border md:grid-cols-4">
-            <Stat label="Registered mining sites" value={stats?.sites} />
-            <Stat label="Inspections on record" value={stats?.inspections} />
-            <Stat label="Documented incidents" value={stats?.incidents} />
-            <Stat label="Community reports received" value={stats?.communityReports} />
-          </div>
+        {/* Public statistics: only figures the Ministry approved for release (no live counts, no fake
+            numbers). The strip disappears until a statistics set has been published. */}
+        <div className="mt-14 border-y border-border empty:hidden">
+          <ApprovedStatistics compact />
         </div>
       </section>
 
@@ -208,13 +202,3 @@ export default function Landing() {
   );
 }
 
-function Stat({ label, value }: { label: string; value?: number }) {
-  return (
-    <div className="px-5 py-6">
-      <div className="stat-figure text-3xl">
-        {value === undefined ? "—" : value.toLocaleString()}
-      </div>
-      <div className="kicker mt-1">{label}</div>
-    </div>
-  );
-}

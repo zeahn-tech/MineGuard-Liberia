@@ -16,7 +16,7 @@ beforeAll(async () => {
   f = await getFixture();
   // Other files re-apply older migrations on the shared DB: assert the real end state.
   const db = await getDb();
-  for (const m of ["0047_close_admin_bootstrap.sql", "0048_public_user_identity.sql", "0049_public_reports_feedback.sql"]) {
+  for (const m of ["0047_close_admin_bootstrap.sql", "0048_public_user_identity.sql", "0049_public_reports_feedback.sql", "0050_public_content.sql"]) {
     await db.exec(read(`supabase/migrations/${m}`));
   }
 }, 120000);
