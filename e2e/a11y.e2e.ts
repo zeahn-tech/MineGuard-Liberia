@@ -12,6 +12,11 @@ const ROUTES: { path: string; role: StubRole | null; name: string }[] = [
   { path: "/auth", role: null, name: "auth" },
   { path: "/report", role: null, name: "report" },
   { path: "/report/track", role: null, name: "track" },
+  // Public information area (Public User programme, Phase D) — open to everyone
+  { path: "/public", role: null, name: "public-hub" },
+  { path: "/public/glossary", role: null, name: "public-glossary" },
+  { path: "/public/safety", role: null, name: "public-safety" },
+  { path: "/public/notices", role: null, name: "public-notices" },
   { path: "/portal", role: "admin", name: "command-center" },
   { path: "/portal/sites", role: "admin", name: "sites" },
   { path: "/portal/map", role: "admin", name: "map" },

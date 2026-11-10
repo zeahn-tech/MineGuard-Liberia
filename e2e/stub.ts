@@ -88,7 +88,10 @@ export async function installStub(page: Page, opts: { role?: StubRole | null; fa
       if (table === "profiles" && role) rows = [profileRow(role)];
       if (table === "sites" && role) rows = [SITE];
       if (table === "inspection_templates" && role) rows = [TEMPLATE];
-      if (table === "meta") rows = [{ key: "public_stats", value: { sites: 1, inspections: 0, incidents: 0, communityReports: 0 } }];
+      // Approved public content (migration 0051): one published row so the public pages render real markup.
+      if (table === "public_content") {
+        rows = [{ id: "c1", kind: "glossary_term", slug: "adit", language: "en", title: "Adit", summary: null, body: "A horizontal passage driven into a hillside to reach a mine.", category: "Mine design", data: null, version: 1, published_at: "2026-11-01T00:00:00Z" }];
+      }
       if (wantsObject) return rows.length ? json(rows[0]) : json({ message: "not found", code: "PGRST116" }, 406);
       return json(rows, 200, { "content-range": `0-${Math.max(rows.length - 1, 0)}/${rows.length}` });
     }
