@@ -21,7 +21,7 @@ const OTH = "aaaaaaaa-0000-4000-8000-0000000000d1"; // other company's administr
 beforeAll(async () => { f = await getFixture(); });
 beforeEach(async () => {
   const db = await getDb();
-  for (const m of ["0040_emergency_alerts", "0041_emergency_authority_corrections", "0043_jsa_with_human_review", "0044_role_assignment_and_emergency_contacts", "0046_worker_voice", "0050_ministry_voice"]) {
+  for (const m of ["0040_emergency_alerts", "0041_emergency_authority_corrections", "0043_jsa_with_human_review", "0044_role_assignment_and_emergency_contacts", "0046_worker_voice", "0050_ministry_voice", "0052_voice_hardening"]) {
     await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", `${m}.sql`), "utf8"));
   }
 });
@@ -100,7 +100,9 @@ const mAnon = (run: Runner, siteCode: string, code = newCode(), over: Record<str
   const p = { ...MBASE, ...over } as typeof MBASE & Record<string, unknown>;
   return run("select public.mg_mv_submit_anonymous($1,$2,$3,$4,$5,$6,$7) as r", [siteCode, p.category, p.urgency, p.description, p.occurred ?? null, p.previously, code]).then((r) => ({ ...(r[0].r as Record<string, unknown>), code }));
 };
-const siteCodeFor = async (run: Runner, uid: string, site: string) => { await asAuthed(run, uid); return (await run("select public.mg_wv_site_code($1) as c", [site]))[0].c as string; };
+// F1 (0052): the Ministry has its OWN intake code; the company's code is a different thing.
+const siteCodeFor = async (run: Runner, uid: string, site: string) => { await asAuthed(run, uid); return (await run("select public.mg_mv_site_code($1) as c", [site]))[0].c as string; };
+const companyCodeFor = async (run: Runner, uid: string, site: string) => { await asAuthed(run, uid); return (await run("select public.mg_wv_site_code($1) as c", [site]))[0].c as string; };
 const mIds = async (run: Runner) => (await owner(run, "select id, mode from public.ministry_voice_reports order by created_at, id"));
 const mCount = async (run: Runner, who: string) => { await asAuthed(run, who); return (await run("select count(*)::int as n from public.ministry_voice_reports"))[0].n as number; };
 const MINISTRY_REVIEWERS = () => [f.admin, f.national];
@@ -190,7 +192,7 @@ describe("the two channels stay separate", () => {
 
   test("the company channel is unchanged: company administrators review it, and the Ministry still has NO access to it", async () => {
     await world(async (run, c) => {
-      const code = await siteCodeFor(run, WK, c.siteA);
+      const code = await companyCodeFor(run, WK, c.siteA);
       await asAnon(run);
       await run("select public.mg_wv_submit_anonymous($1,'unsafe_condition','medium',$2,null,'no',false,$3)", [code, BASE.description, newCode()]);
       const cnt = async (who: string) => { await asAuthed(run, who); return (await run("select count(*)::int as n from public.worker_voice_reports"))[0].n as number; };
@@ -207,13 +209,18 @@ describe("the two channels stay separate", () => {
     });
   });
 
-  test("a company-channel code never opens a Ministry report, and the other way round", async () => {
+  test("each channel has its OWN code: the company's never works for the Ministry, and the Ministry's never works for the company", async () => {
     await world(async (run, c) => {
-      const code = await siteCodeFor(run, WK, c.siteA);
+      const company = await companyCodeFor(run, WK, c.siteA);
+      const ministry = await siteCodeFor(run, WK, c.siteA);
+      expect(ministry).not.toBe(company);
       await asAnon(run);
-      const m = await mAnon(run, code);
-      const w = (await run("select public.mg_wv_submit_anonymous($1,'unsafe_condition','medium',$2,null,'no',false,$3) as r", [code, BASE.description, newCode()]))[0].r as Record<string, unknown>;
-      expect(w.status).toBe("received");
+      expect((await mAnon(run, company)).status).toBe("invalid_site_code");
+      const w0 = (await run("select public.mg_wv_submit_anonymous($1,'unsafe_condition','medium',$2,null,'no',false,$3) as r", [ministry, BASE.description, newCode()]))[0].r as Record<string, unknown>;
+      expect(w0.status).toBe("invalid_site_code");
+      const m = await mAnon(run, ministry);
+      const w = (await run("select public.mg_wv_submit_anonymous($1,'unsafe_condition','medium',$2,null,'no',false,$3) as r", [company, BASE.description, newCode()]))[0].r as Record<string, unknown>;
+      expect([m.status, w.status]).toEqual(["received", "received"]);
       expect((await run("select public.mg_mv_status($1) as r", [m.code]))[0].r).toMatchObject({ found: true, stage: "Received" });
       expect((await run("select public.mg_wv_status($1) as r", [m.code]))[0].r).toEqual({ found: false });
     });
@@ -294,7 +301,7 @@ describe("who reviews, and who may open a confidential identity", () => {
       // the reporter sees a stage and the update, and nothing else
       await asAnon(run);
       const st = (await run("select public.mg_mv_status($1) as r", [sent.code]))[0].r as Record<string, unknown>;
-      expect(Object.keys(st).sort()).toEqual(["closed", "found", "lastChange", "stage", "update", "updateOn"]);
+      expect(Object.keys(st).sort()).toEqual(["canReply", "closed", "found", "lastChange", "messages", "stage", "update", "updateOn"]);
       expect(st).toMatchObject({ found: true, stage: "Under review by the Ministry", update: "The Ministry has received this and is reviewing it." });
       await asAuthed(run, f.admin);
       await run("select public.mg_mv_set_status($1,'closed','Referred to the labour inspectorate; the company has been directed to pay.')", [id]);
@@ -357,7 +364,7 @@ describe("anonymity is a data property, as in the company channel", () => {
       await mAnon(run, code);
       for (const t of ["ministry_voice_reports", "ministry_voice_identity", "ministry_voice_events"]) expect(await fails(run(`select * from public.${t}`))).toContain("permission denied");
       for (const sql of ["select * from public.mg_mv_list()", "select public.mg_mv_summary()"]) expect(await fails(run(sql))).toContain("permission denied");
-      expect(await fails(run("select public.mg_mv_insert('anonymous',$1,'other','low','a long enough description',null,'no','0123456789ABCDEF01234567',null)", [c.siteA]))).toContain("permission denied");
+      expect(await fails(run("select public.mg_mv_insert('anonymous',$1,'other','low','a long enough description',null,'no','0123456789ABCDEF01234567',null,null)", [c.siteA]))).toContain("permission denied");
       const rows = await owner(run, "select bucket from public.rate_limits where bucket like 'mv:%'");
       expect(rows.length).toBeGreaterThan(0);
       expect(JSON.stringify(rows)).not.toMatch(/(\d{1,3}\.){3}\d{1,3}/);
