@@ -74,3 +74,9 @@ jobs:
           tests/migration-apply.test.ts
           tests/audit-hardening.test.ts
           tests/rate-limit.test.ts
+          tests/phase-a-security.test.ts
+          tests/phase-b-public-identity.test.ts
+          tests/phase-c-public-reports.test.ts
+          tests/phase-d-public-content.test.ts
+          tests/public-surface-matrix.test.ts
+          tests/migration-hygiene.test.ts
