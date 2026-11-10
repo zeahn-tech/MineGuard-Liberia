@@ -98,6 +98,11 @@ export default defineConfig(({ command }) => {
               "@radix-ui/react-toggle-group",
               "@radix-ui/react-tooltip",
             ],
+            // Tiny helpers (clsx → cn()) used by every page. Without their own
+            // chunk, Rollup parks clsx inside the 395 kB recharts chunk, so the
+            // entry statically imports (and preloads) all of recharts on the
+            // landing page.
+            "ui-utils": ["clsx", "tailwind-merge", "class-variance-authority"],
             charts: ["recharts"],
             forms: ["react-hook-form", "@hookform/resolvers", "zod"],
             maps: ["leaflet", "react-leaflet"],

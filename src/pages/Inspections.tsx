@@ -84,7 +84,15 @@ export default function Inspections() {
   const newBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    const refresh = () => setLocalDrafts(readDrafts());
+    // Bail out when nothing changed: readDrafts() returns a fresh array every
+    // call, so a bare setState re-rendered this whole page on every poll tick.
+    const refresh = () =>
+      setLocalDrafts((prev) => {
+        const next = readDrafts();
+        return prev.length === next.length && prev.every((d, i) => d === next[i])
+          ? prev
+          : next;
+      });
     // Load the durable (IndexedDB) drafts first, then mirror mutations.
     void ensureOfflineReady().then(refresh);
     const off = subscribeQueue(refresh);
