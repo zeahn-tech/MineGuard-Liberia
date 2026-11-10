@@ -83,7 +83,7 @@ persona can read from every table, bans unconditional policies, pins anon's colu
 whole public → company member → public journey. A new function or table that exposes anything to the public
 fails these tests until someone reviews it.
 
-Final run on the Phase E branch (all four programme migrations plus everything else on `main`): **1617 passed, 4 skipped, 0 failed**; typecheck and build clean; lint 0 errors (2 warnings that predate the programme). The 4 skipped tests need a live database and are skipped in every run.
+Final run on the Phase E branch (all four programme migrations plus everything else on `main`): **1629 passed, 4 skipped, 0 failed**; typecheck and build clean; lint 0 errors (2 warnings that predate the programme). The 4 skipped tests need a live database and are skipped in every run.
 CI runs the full suite, and the required `rls-security-test` job now names every Public User suite.
 
 ## 4. Required Supabase configuration (check before release) — **Unverified**
