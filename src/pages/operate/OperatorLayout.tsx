@@ -20,6 +20,7 @@ import { Siren,
   ClipboardCheck,
   Megaphone,
   Inbox,
+  Landmark,
 } from "lucide-react";
 import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
@@ -89,6 +90,7 @@ const OPERATOR_NAV = [
   { to: "/operate/jsa", label: "Job Safety Analysis", icon: ClipboardCheck },
   { to: "/operate/voice", label: "Worker Voice", icon: Megaphone },
   { to: "/operate/voice-review", label: "Voice review", icon: Inbox, voiceReviewOnly: true },
+  { to: "/operate/ministry-requests", label: "Ministry requests", icon: Landmark, voiceReviewOnly: true },
   { to: "/operate/team", label: "Team", icon: Users, adminOnly: true },
   { to: "/operate/site-requests", label: "Site requests", icon: MapPinPlus, adminOnly: true },
   { to: "/operate/analytics", label: "Safety analytics", icon: BarChart3 },

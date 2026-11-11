@@ -66,7 +66,7 @@ describe("the anonymous path carries nothing identifying", () => {
     expect(main).toEqual([]); // the signed-in client was never touched
     expect(anon.length).toBe(1);
     expect(anon[0].fn).toBe("mg_wv_submit_anonymous");
-    expect(Object.keys(anon[0].args).sort()).toEqual(["p_category", "p_code", "p_concerns", "p_description", "p_occurred", "p_previously", "p_site_code", "p_urgency"]);
+    expect(Object.keys(anon[0].args).sort()).toEqual(["p_attachments", "p_category", "p_code", "p_concerns", "p_description", "p_occurred", "p_previously", "p_site_code", "p_urgency"]);
     expect(JSON.stringify(anon[0].args)).not.toMatch(/user|email|employee|member|profile|session|token|device|agent|organization/i);
   });
   test("named and confidential reports use the signed-in client and say which mode", async () => {

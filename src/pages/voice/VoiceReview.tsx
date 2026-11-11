@@ -10,10 +10,13 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { EmptyState } from "@/components/EmptyState";
 import { PageLoading } from "@/components/PageLoading";
+import { PushSetupCard } from "@/components/emergency/PushSetupCard";
+import { HoldControl, Photos, RetentionPanel, Thread } from "@/components/voice/VoiceBits";
 import { VOICE_CATEGORIES, formatSiteCode } from "@/lib/voice";
 import {
-  createIncident, eligibleReviewers, escalate, explainReviewError, listVoiceReports, openIdentity, postUpdate, reviewerSites,
-  rotateSiteCode, setStatus, siteCode, triage, type ReportStatus, type VoiceReportRow,
+  codeInfo, createIncident, disposeCompany, eligibleReviewers, escalate, explainReviewError, listMessages, listPhotos, listVoiceReports, openIdentity, photoCounts, postUpdate, retentionPolicy, reviewerSites, setAnonymousEnabled, setHold,
+  type CodeInfo, type VoiceMessage,
+  rotateSiteCode, setStatus, triage, type ReportStatus, type VoiceReportRow,
 } from "@/lib/voice-review";
 
 const STATUS_LABEL: Record<ReportStatus, string> = {
@@ -23,7 +26,7 @@ const NEXT: ReportStatus[] = ["investigating", "action_assigned", "follow_up", "
 const MODE_LABEL = { named: "Named", confidential: "Confidential", anonymous: "Anonymous" } as const;
 const INCIDENT_TYPES = ["near_miss", "injury", "equipment_accident", "vehicle_accident", "fire", "structural_failure", "chemical_exposure", "environmental", "other"];
 
-function ReportCard({ r, siteName, onChanged }: { r: VoiceReportRow; siteName: string; onChanged: () => void }) {
+function ReportCard({ r, siteName, photoN, onChanged }: { r: VoiceReportRow; siteName: string; photoN: number; onChanged: () => void }) {
   const [open, setOpen] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -38,6 +41,13 @@ function ReportCard({ r, siteName, onChanged }: { r: VoiceReportRow; siteName: s
   const [incType, setIncType] = useState("near_miss");
   const [incText, setIncText] = useState("");
   const closed = r.status === "closed";
+  const [thread, setThread] = useState<VoiceMessage[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    void listMessages(r.id).then((t) => { if (live) setThread(t); }, () => undefined);
+    return () => { live = false; };
+  }, [open, r.id, r.reporter_update]);
   const category = VOICE_CATEGORIES.find((c) => c.value === r.category)?.label ?? r.category;
 
   useEffect(() => {
@@ -65,13 +75,19 @@ function ReportCard({ r, siteName, onChanged }: { r: VoiceReportRow; siteName: s
           <span className="rounded border border-border px-2 py-0.5 uppercase tracking-wide">{STATUS_LABEL[r.status]}</span>
           {r.route === "company_admin" && <span className="rounded border border-primary/50 px-2 py-0.5 text-primary">Administrators only</span>}
           {r.duplicate_of && <span className="rounded border border-amber-500/60 px-2 py-0.5 text-amber-700 dark:text-amber-400">Similar report received earlier</span>}
+          {r.small_site && <span className="rounded border border-amber-500/60 px-2 py-0.5 text-amber-700 dark:text-amber-400">Small site</span>}
+          {r.legal_hold && <span className="rounded border border-primary/50 px-2 py-0.5 text-primary">Legal hold</span>}
+          {photoN > 0 && <span className="rounded border border-border px-2 py-0.5">{photoN} photo{photoN === 1 ? "" : "s"}</span>}
         </span>
         <span className="mt-1 block text-sm font-medium">{category} · {siteName}</span>
-        <span className="block text-xs text-muted-foreground">Received {new Date(r.created_at).toLocaleString()}{r.mode !== "named" ? " (time shown to the hour)" : ""}</span>
+        <span className="block text-xs text-muted-foreground">Received {new Date(r.created_at).toLocaleString()}{r.mode !== "named" ? (r.small_site ? " (shown as a day: small site)" : " (time shown to the hour)") : ""}</span>
       </button>
       {open && (
         <div className="space-y-3 border-t border-border pt-3 text-sm">
           <p className="whitespace-pre-wrap">{r.description}</p>
+          {r.small_site && r.mode !== "named" && <p className="text-xs text-muted-foreground">Few people work at this site, so details in this report could point to the sender. Keep the content within the review and do not try to work out who wrote it.</p>}
+          {photoN > 0 && <Photos load={() => listPhotos(r.id)} />}
+          <Thread messages={thread} />
           <p className="text-xs text-muted-foreground">Reported before: {r.previously_reported}. {r.occurred_at ? `Approximately ${new Date(r.occurred_at).toLocaleString()}.` : ""}</p>
 
           {!closed && (
@@ -96,9 +112,9 @@ function ReportCard({ r, siteName, onChanged }: { r: VoiceReportRow; siteName: s
               </div>
 
               <div className="space-y-1">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Update for the reporter</p>
-                <Textarea aria-label="Update for the reporter" value={update} maxLength={500} onChange={(e) => setUpdate(e.target.value)} placeholder="Write only what the reporter may read. Do not include names, notes or details of the investigation." />
-                <Button size="sm" variant="outline" disabled={busy || !update.trim()} onClick={() => act(() => postUpdate(r.id, update), "Update posted. The reporter sees it with their follow-up code.")}>Post update</Button>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Message to the reporter</p>
+                <Textarea aria-label="Message to the reporter" value={update} maxLength={500} onChange={(e) => setUpdate(e.target.value)} placeholder="Write only what the reporter may read. Do not include names, notes or details of the investigation." />
+                <Button size="sm" variant="outline" disabled={busy || !update.trim()} onClick={() => act(() => postUpdate(r.id, update), "Update posted. The reporter sees it with their follow-up code.")}>Send message</Button>
                 {r.reporter_update && <p className="text-xs text-muted-foreground">Current update: {r.reporter_update}</p>}
               </div>
 
@@ -134,6 +150,7 @@ function ReportCard({ r, siteName, onChanged }: { r: VoiceReportRow; siteName: s
             </div>
           )}
           {r.mode === "anonymous" && <p className="text-xs text-muted-foreground">Anonymous: no identity is held for this report.</p>}
+          <HoldControl held={r.legal_hold} closed={closed} canSet onSet={async (hold, reason) => { try { await setHold(r.id, hold, reason); onChanged(); } catch (e) { setMsg(explainReviewError(e)); throw e; } }} />
           {msg && <p role="status" className="text-sm">{msg}</p>}
         </div>
       )}
@@ -142,25 +159,33 @@ function ReportCard({ r, siteName, onChanged }: { r: VoiceReportRow; siteName: s
 }
 
 function SiteCodes({ sites }: { sites: { id: string; name: string }[] }) {
-  const [codes, setCodes] = useState<Record<string, string>>({});
+  const [info, setInfo] = useState<Record<string, CodeInfo>>({});
   const [msg, setMsg] = useState<string | null>(null);
   if (sites.length === 0) return null;
-  const show = async (id: string) => { try { setCodes({ ...codes, [id]: await siteCode(id) }); } catch (e) { setMsg(explainReviewError(e)); } };
-  const rotate = async (id: string) => { try { setCodes({ ...codes, [id]: await rotateSiteCode(id) }); setMsg("New code issued. The old one no longer works. Update the poster."); } catch (e) { setMsg(explainReviewError(e)); } };
+  const load = async (id: string) => { try { setInfo((m) => ({ ...m, [id]: undefined as unknown as CodeInfo })); const i = await codeInfo(id); setInfo((m) => ({ ...m, [id]: i })); } catch (e) { setMsg(explainReviewError(e)); } };
+  const rotate = async (id: string) => { try { await rotateSiteCode(id); setMsg("New code issued for 90 days. The old one no longer works. Update the poster."); await load(id); } catch (e) { setMsg(explainReviewError(e)); } };
+  const toggle = async (id: string, enabled: boolean) => { try { await setAnonymousEnabled(id, enabled); setMsg(enabled ? "Anonymous reporting resumed." : "Anonymous reporting paused. People are told so when they try."); await load(id); } catch (e) { setMsg(explainReviewError(e)); } };
   return (
     <section className="space-y-2 border border-border p-3" aria-label="Anonymous reporting site codes">
-      <h2 className="text-sm font-medium">Site codes for anonymous reporting</h2>
-      <p className="text-xs text-muted-foreground">Post the code at the site. Anyone with it can send an anonymous report to that site, without an account. Change it if it is misused.</p>
-      <ul className="space-y-2">
-        {sites.map((s) => (
-          <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-            <span>{s.name}{codes[s.id] ? <span className="ml-2 font-mono font-semibold">{formatSiteCode(codes[s.id])}</span> : null}</span>
-            <span className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => show(s.id)}>Show code</Button>
-              <Button size="sm" variant="ghost" onClick={() => rotate(s.id)}>Change code</Button>
-            </span>
-          </li>
-        ))}
+      <h2 className="text-sm font-medium">Anonymous reporting to your company: site codes</h2>
+      <p className="text-xs text-muted-foreground">This code is for reports to YOUR COMPANY only. Post it at the site. Anyone with it can send an anonymous report to your company without an account. A code lasts 90 days. Change it, or pause anonymous reporting, if it is misused. Reports to the Ministry use a separate code that only the Ministry controls.</p>
+      <ul className="space-y-3">
+        {sites.map((s) => {
+          const i = info[s.id];
+          return (
+            <li key={s.id} className="space-y-1 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium">{s.name}</span>
+                <span className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => { void load(s.id); }}>{i ? "Refresh" : "Show code"}</Button>
+                  {i && <Button size="sm" variant="ghost" onClick={() => { void rotate(s.id); }}>Change code</Button>}
+                  {i && <Button size="sm" variant="ghost" onClick={() => { void toggle(s.id, !i.enabled); }}>{i.enabled ? "Pause anonymous" : "Resume anonymous"}</Button>}
+                </span>
+              </div>
+              {i && <p className="text-xs text-muted-foreground"><span className="font-mono text-sm font-semibold text-foreground">{formatSiteCode(i.code)}</span> · expires {i.expiresOn} · {i.enabled ? "accepting anonymous reports" : "PAUSED"} · anonymous reports today {i.today}, last 7 days {i.week}{i.unusual && <span className="block font-medium text-destructive">Unusually many reports today. If this is not expected, change the code or pause anonymous reporting.</span>}</p>}
+            </li>
+          );
+        })}
       </ul>
       {msg && <p role="status" className="text-xs">{msg}</p>}
     </section>
@@ -170,14 +195,15 @@ function SiteCodes({ sites }: { sites: { id: string; name: string }[] }) {
 export default function VoiceReview() {
   const [rows, setRows] = useState<VoiceReportRow[] | null>(null);
   const [sites, setSites] = useState<{ id: string; name: string }[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [failed, setFailed] = useState(false);
   const [tick, setTick] = useState(0);
   const [filter, setFilter] = useState<"open" | "all">("open");
 
   useEffect(() => {
     let live = true;
-    void Promise.all([listVoiceReports(), reviewerSites().catch(() => [])]).then(
-      ([r, s]) => { if (live) { setRows(r); setSites(s); } },
+    void Promise.all([listVoiceReports(), reviewerSites().catch(() => []), photoCounts().catch(() => [])]).then(
+      ([r, s, c]) => { if (live) { setRows(r); setSites(s); setCounts(Object.fromEntries(c.map((x) => [x.report_id, x.n]))); } },
       () => { if (live) setFailed(true); },
     );
     return () => { live = false; };
@@ -198,7 +224,9 @@ export default function VoiceReview() {
         <h1 className="text-xl font-semibold">Worker Voice review</h1>
         <p className="text-sm text-muted-foreground">Safety reports sent to your company. Treat every report as credible until it is assessed, whether it is named, confidential or anonymous. Do not try to work out who sent an anonymous report. Reports that workers choose to send to the Ministry are a separate channel and are not shown here.</p>
       </header>
+      <PushSetupCard />
       <SiteCodes sites={sites} />
+      {rows[0] && <RetentionPanel channel="company" canSetPolicy={false} load={retentionPolicy} dispose={(dry, confirm) => disposeCompany(rows[0].organization_id, dry, confirm)} />}
       <div className="flex gap-2">
         <Button size="sm" variant={filter === "open" ? "default" : "outline"} onClick={() => setFilter("open")}>Open</Button>
         <Button size="sm" variant={filter === "all" ? "default" : "outline"} onClick={() => setFilter("all")}>All</Button>
@@ -206,7 +234,7 @@ export default function VoiceReview() {
       {shown.length === 0 ? (
         <EmptyState title="No reports to review" why="Reports you are authorized to review will appear here. You will get a notification when one arrives." />
       ) : (
-        <ul className="space-y-3">{shown.map((r) => <ReportCard key={r.id} r={r} siteName={siteName(r.site_id)} onChanged={() => setTick((t) => t + 1)} />)}</ul>
+        <ul className="space-y-3">{shown.map((r) => <ReportCard key={r.id} r={r} photoN={counts[r.id] ?? 0} siteName={siteName(r.site_id)} onChanged={() => setTick((t) => t + 1)} />)}</ul>
       )}
     </div>
   );

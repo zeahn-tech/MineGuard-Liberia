@@ -291,7 +291,40 @@ function emergencyPayload(event) {
   return { id, ev, sev, title: str(d && d.title, 120) };
 }
 
+/* WORKER VOICE PUSH. The payload is one of three FIXED values: {"v":1,"t":"wv"} (company report), {"v":1,"t":"mv"}
+ * (Ministry report) or {"v":1,"t":"mr"} (a Ministry request to a company). None carries a report id, mode, category or
+ * text, so a lock-screen preview or a captured message reveals nothing about any report. The wording is the approved
+ * generic notice. Tapping opens the matching page, which needs sign-in. */
+const VOICE_PUSH = {
+  wv: { body: "A safety report requires review. Sign in with your authorized account to access it.", tag: "mg-worker-voice", url: "./#/operate/voice-review" },
+  mv: { body: "A worker report requires review. Sign in with your authorized account to access it.", tag: "mg-ministry-voice", url: "./#/portal/voice-ministry" },
+  mr: { body: "The Ministry has sent your company a request. Sign in with your authorized account to see it.", tag: "mg-ministry-request", url: "./#/operate/ministry-requests" },
+};
+function voicePushKind(event) {
+  try {
+    const d = event.data ? event.data.json() : null;
+    return d && Object.prototype.hasOwnProperty.call(VOICE_PUSH, d.t) ? d.t : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 self.addEventListener("push", (event) => {
+  const vk = voicePushKind(event);
+  if (vk) {
+    const v = VOICE_PUSH[vk];
+    event.waitUntil(
+      self.registration.showNotification("MineGuard", {
+        body: v.body,
+        tag: v.tag,
+        renotify: true,
+        icon: "./icons/pwa-192.v2.png",
+        badge: "./icons/pwa-192.v2.png",
+        data: { url: v.url },
+      }),
+    );
+    return;
+  }
   const p = emergencyPayload(event);
   const verb =
     p.ev === "updated" ? "Emergency alert UPDATED" :

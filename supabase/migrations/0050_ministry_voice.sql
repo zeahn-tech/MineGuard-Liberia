@@ -342,6 +342,8 @@ end;
 $mg$;
 
 -- reporter: own named/confidential Ministry reports and how often the identity was opened ------------------
+-- 0052 widens these rows; dropping first keeps this file safe to re-run after it
+drop function if exists public.mg_mv_my_reports();
 create or replace function public.mg_mv_my_reports()
 returns table (id uuid, received_on date, mode text, category text, stage text, reporter_update text, reporter_update_on date, identity_opened integer)
 language sql stable security definer set search_path = public as $mg$
@@ -356,6 +358,7 @@ language sql stable security definer set search_path = public as $mg$
 $mg$;
 
 -- reviewer: the queue, with company and site names -------------------------------------------------------
+drop function if exists public.mg_mv_list(integer);
 create or replace function public.mg_mv_list(p_limit integer default 300)
 returns table (id uuid, organization_id uuid, organization_name text, site_id uuid, site_name text, mode text, category text,
                urgency text, description text, occurred_at timestamptz, previously_reported text, status text,
