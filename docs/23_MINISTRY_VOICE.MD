@@ -139,3 +139,13 @@ functions and the `mv_forget_reporter` trigger on `profiles`, and delete `worker
    used as one; nothing here feeds the risk model.
 6. **No two-way anonymous messaging.** One reviewer-written update; the reporter cannot reply.
 7. English only.
+
+## Hardening (migration 0052)
+
+The Ministry channel gained, in addition to what is above: **its own intake code** per site (company people cannot
+rotate or pause it, which fixes a gap where a company could cut off anonymous reports about itself); messaging with
+reporters by follow-up code; photos (JPEG, validated, refused if they carry hidden data); small-site protections;
+reviewer push and daily reminders; **trends and companies for attention** (counts with limits, never a prediction);
+**retention, legal hold and counts-only disposal** (Ministry administrators); and **requests to a company**
+(template topics, only when at least three reports match, never linked to a report). Details, deployment and
+rollback are in `docs/22_WORKER_VOICE.MD` ("Hardening").

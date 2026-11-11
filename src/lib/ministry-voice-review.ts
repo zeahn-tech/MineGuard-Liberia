@@ -9,14 +9,14 @@ export interface MinistryReportRow {
   mode: "named" | "confidential" | "anonymous"; category: string; urgency: string; description: string;
   occurred_at: string | null; previously_reported: string; status: MinistryStatus; triage_severity: string | null;
   assigned_to: string | null; assigned_name: string | null; duplicate_of: string | null; closure_reason: string | null;
-  reporter_update: string | null; created_at: string;
+  reporter_update: string | null; created_at: string; small_site: boolean; legal_hold: boolean; closed_at: string | null;
 }
 export interface MinistrySummary {
   total: number; open: number; critical_open: number;
   by_group: Record<string, number>; by_category: Record<string, number>;
   by_company: { organization_id: string; name: string; total: number; open: number; serious_open: number }[];
 }
-export interface MyMinistryReport { id: string; received_on: string; mode: string; category: string; stage: string; reporter_update: string | null; reporter_update_on: string | null; identity_opened: number }
+export interface MyMinistryReport { id: string; received_on: string; mode: string; category: string; stage: string; reporter_update: string | null; reporter_update_on: string | null; identity_opened: number; can_reply: boolean }
 
 const rpc = async <T = unknown>(fn: string, args?: Record<string, unknown>): Promise<T> => {
   const { data, error } = await supabase.rpc(fn, args);
@@ -43,6 +43,61 @@ export function explainMinistryError(e: unknown): string {
   if (/IMMUTABLE/.test(m)) return "This report is closed and cannot be changed.";
   if (/not an authorized reviewer/.test(m)) return "That person cannot be assigned to this report.";
   if (/FORBIDDEN/.test(m)) return "You are not authorized to do that.";
+  if (/INVALID/.test(m)) return m.replace(/^.*INVALID:\s*/, "");
+  return "That could not be completed. Nothing was changed; try again.";
+}
+
+export interface MinistryMessage { seq: number; from_reporter: boolean; body: string; at: string }
+export async function listMinistryMessages(reportId: string): Promise<MinistryMessage[]> {
+  const { data, error } = await supabase.from("ministry_voice_messages").select("seq, from_reporter, body, at").eq("report_id", reportId).order("seq", { ascending: true }).limit(100);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as MinistryMessage[];
+}
+export interface MinistryPhoto { id: string; bytes: number; sha256: string; data: string }
+export const ministryPhotos = (reportId: string) => rpc<MinistryPhoto[]>("mg_mv_attachments", { p_report: reportId });
+export const ministryPhotoCounts = () => rpc<{ report_id: string; n: number }[]>("mg_mv_attachment_counts");
+export const ministrySetHold = (id: string, hold: boolean, reason?: string) => rpc("mg_mv_set_hold", { p_id: id, p_hold: hold, p_reason: reason ?? null });
+export const ministryDispose = (dryRun: boolean, confirm?: string) => rpc<{ dryRun: boolean; eligible?: number; deleted?: number; retentionMonths: number }>("mg_mv_dispose", { p_dry_run: dryRun, p_confirm: confirm ?? null });
+export const setRetention = (channel: "company" | "ministry", months: number) => rpc("mg_voice_set_retention", { p_channel: channel, p_months: months });
+export const retentionPolicy = () => rpc<{ channel: string; retention_months: number }[]>("mg_voice_retention");
+
+// the Ministry's OWN intake codes (Ministry administrators only)
+export interface MinistryCodeSite { site_id: string; site_name: string; organization_name: string }
+export interface MinistryCodeInfo { code: string; changedOn: string; enabled: boolean; today: number; week: number; unusual: boolean }
+export const ministryCodeSites = (search: string) => rpc<MinistryCodeSite[]>("mg_mv_code_sites", { p_search: search });
+export const ministryCodeInfo = (siteId: string) => rpc<MinistryCodeInfo>("mg_mv_code_info", { p_site: siteId });
+export const ministryRotateCode = (siteId: string) => rpc<string>("mg_mv_rotate_code", { p_site: siteId });
+export const ministrySetAnonymous = (siteId: string, enabled: boolean) => rpc("mg_mv_set_anonymous", { p_site: siteId, p_enabled: enabled });
+
+// trends, attention list and ageing (reviewers)
+export interface MinistryTrends {
+  months: { month: string; total: number; safety: number; labour: number; conduct: number; other: number }[];
+  attention: { organization_id: string; name: string; reports90: number; previous90: number; serious90: number; sites90: number; topCategory: string | null; why: string }[];
+  ageing: { unacknowledged3d: number; open14d: number; open30d: number };
+  notice: string; limits: string[];
+}
+export const ministryTrends = (months = 6) => rpc<MinistryTrends>("mg_mv_trends", { p_months: months });
+
+// requests to a company (Ministry administrators send; company administrators answer)
+export const REQUEST_TOPICS = [
+  { value: "working_hours_and_rest", label: "Working hours and rest breaks" },
+  { value: "wages_and_benefits_records", label: "Wages and benefits records" },
+  { value: "safety_training_and_ppe", label: "Safety training and protective equipment" },
+  { value: "hazard_controls_and_maintenance", label: "Hazard controls and maintenance records" },
+  { value: "workplace_conduct_and_discrimination", label: "Workplace conduct and discrimination" },
+  { value: "contracts_and_dismissals", label: "Contracts and dismissals" },
+] as const;
+export interface CompanyRequest { id: string; organization_id: string; organization_name: string; topic: string; note: string | null; created_on: string; status: "open" | "answered" | "closed"; responses: { from: "Ministry" | "Company"; text: string; on: string }[] }
+export const listRequests = () => rpc<CompanyRequest[]>("mg_mr_list");
+export const createRequest = (orgId: string, topic: string, note?: string) => rpc<string>("mg_mr_create", { p_org: orgId, p_topic: topic, p_note: note ?? null });
+export const respondToRequest = (id: string, body: string) => rpc("mg_mr_respond", { p_id: id, p_body: body });
+export const followUpRequest = (id: string, body: string, close: boolean) => rpc("mg_mr_followup", { p_id: id, p_body: body, p_close: close });
+export function explainRequestError(e: unknown): string {
+  const m = e instanceof Error ? e.message : String(e);
+  if (/TOO_FEW/.test(m)) return "There are not enough reports on this topic to ask this company without risking identifying a reporter.";
+  if (/CONFLICT: this company was already asked/.test(m)) return "This company was already asked about this topic in the last 30 days.";
+  if (/closed/.test(m)) return "This request is closed.";
+  if (/FORBIDDEN/.test(m)) return "You are not allowed to do that.";
   if (/INVALID/.test(m)) return m.replace(/^.*INVALID:\s*/, "");
   return "That could not be completed. Nothing was changed; try again.";
 }

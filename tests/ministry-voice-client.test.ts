@@ -66,7 +66,7 @@ describe("sending to the Ministry", () => {
     expect(signed).toEqual([]);
     expect(anon).toHaveLength(1);
     expect(anon[0].fn).toBe("mg_mv_submit_anonymous");
-    expect(Object.keys(anon[0].args).sort()).toEqual(["p_category", "p_code", "p_description", "p_occurred", "p_previously", "p_site_code", "p_urgency"]);
+    expect(Object.keys(anon[0].args).sort()).toEqual(["p_attachments", "p_category", "p_code", "p_description", "p_occurred", "p_previously", "p_site_code", "p_urgency"]);
     __setAnonymousClient(null); __testSetSupabaseClient(null);
   });
 

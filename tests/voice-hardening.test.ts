@@ -28,7 +28,6 @@ beforeEach(async () => {
 });
 
 const as = (run: Runner, uid: string) => run(`select set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true)`);
-const src = (run: Runner, ip: string) => run(`select set_config('request.headers', '{"x-forwarded-for":"${ip}"}', true)`);
 async function fails(p: Promise<unknown>): Promise<string> {
   try { await p; } catch (e) { return String((e as Error).message); }
   return "";
@@ -53,7 +52,6 @@ const asAuthed = async (run: Runner, uid: string) => { await run("reset role"); 
 
 let n = 0;
 const newCode = () => { n++; return (`ABCDEF0123456789${n.toString(16).padStart(8, "0")}`.slice(0, 16) + (n.toString(16).padStart(8, "0"))).toUpperCase().slice(0, 24); };
-const BASE = { category: "unsafe_condition", urgency: "medium", description: "The haul road edge berm near Pit 3 has collapsed and trucks pass within a metre.", previously: "no" };
 
 async function world<T>(fn: (run: Runner, c: { orgA: string; orgB: string; siteA: string; siteB: string; member: (u: string) => Promise<string> }) => Promise<T>) {
   return withRole("postgres", null, async (run) => {
@@ -93,20 +91,10 @@ async function world<T>(fn: (run: Runner, c: { orgA: string; orgB: string; siteA
 
 
 const MBASE = { category: "wages_or_benefits", urgency: "medium", description: "Workers at the crusher have not been paid for six weeks and are told to keep working.", previously: "no" };
-const mSubmit = (run: Runner, mode: string, site: string, code = newCode(), over: Record<string, unknown> = {}) => {
-  const p = { ...MBASE, ...over } as typeof MBASE & Record<string, unknown>;
-  return run("select public.mg_mv_submit($1,$2,$3,$4,$5,$6,$7,$8) as r", [mode, site, p.category, p.urgency, p.description, p.occurred ?? null, p.previously, code]).then((r) => ({ ...(r[0].r as Record<string, unknown>), code }));
-};
-const mAnon = (run: Runner, siteCode: string, code = newCode(), over: Record<string, unknown> = {}) => {
-  const p = { ...MBASE, ...over } as typeof MBASE & Record<string, unknown>;
-  return run("select public.mg_mv_submit_anonymous($1,$2,$3,$4,$5,$6,$7) as r", [siteCode, p.category, p.urgency, p.description, p.occurred ?? null, p.previously, code]).then((r) => ({ ...(r[0].r as Record<string, unknown>), code }));
-};
 // F1 (0052): the Ministry has its OWN intake code; the company's code is a different thing.
 const siteCodeFor = async (run: Runner, uid: string, site: string) => { await asAuthed(run, uid); return (await run("select public.mg_mv_site_code($1) as c", [site]))[0].c as string; };
 const companyCodeFor = async (run: Runner, uid: string, site: string) => { await asAuthed(run, uid); return (await run("select public.mg_wv_site_code($1) as c", [site]))[0].c as string; };
 const mIds = async (run: Runner) => (await owner(run, "select id, mode from public.ministry_voice_reports order by created_at, id"));
-const mCount = async (run: Runner, who: string) => { await asAuthed(run, who); return (await run("select count(*)::int as n from public.ministry_voice_reports"))[0].n as number; };
-const MINISTRY_REVIEWERS = () => [f.admin, f.national];
 
 
 import { createHash } from "node:crypto";
@@ -129,6 +117,13 @@ const mAnonP = (run: Runner, siteCode: string, code = newCode(), over: Record<st
   return run("select public.mg_mv_submit_anonymous($1,$2,$3,$4,$5,$6,$7,$8::jsonb) as r", [siteCode, p.category, p.urgency, p.description, p.occurred ?? null, p.previously, code, p.photos ? JSON.stringify(p.photos) : null]).then((r) => ({ ...(r[0].r as Record<string, unknown>), code }));
 };
 const wIds = async (run: Runner) => (await owner(run, "select id, mode from public.worker_voice_reports order by created_at, id"));
+/** Test-only: change a frozen report (for example to backdate it) with the lifecycle guard switched off inside this transaction. */
+async function bypass(run: Runner, table: "worker_voice_reports" | "ministry_voice_reports", sql: string, params: unknown[] = []) {
+  const trg = table === "worker_voice_reports" ? "wv_reports_guard" : "mv_reports_guard";
+  await owner(run, `alter table public.${table} disable trigger ${trg}`);
+  await owner(run, sql, params);
+  await owner(run, `alter table public.${table} enable trigger ${trg}`);
+}
 const pushSub = (run: Runner, uid: string, n: number) => owner(run, "insert into public.push_subscriptions (user_id, endpoint, p256dh, auth) values ($1, $2, 'p256dh-key', 'auth-key')", [uid, `https://push.example.test/sub/${n}`]);
 
 // ---- a tiny synthetic JPEG: right structure, no real pixels ----
@@ -162,7 +157,8 @@ describe("F1 · the Ministry's intake code belongs to the Ministry", () => {
       await siteCodeFor(run, WK, c.siteA);
       for (const who of [XA, SM, SO, WK, OTH, f.national, f.county]) {
         await asAuthed(run, who);
-        for (const call of ["select * from public.mg_mv_code_sites('')", "select public.mg_mv_code_info($1)", "select public.mg_mv_rotate_code($1)", "select public.mg_mv_set_anonymous($1, false)"]) {
+        expect(await fails(run("select * from public.mg_mv_code_sites('')"))).toContain("FORBIDDEN");
+        for (const call of ["select public.mg_mv_code_info($1)", "select public.mg_mv_rotate_code($1)", "select public.mg_mv_set_anonymous($1, false)"]) {
           expect(await fails(run(call, [c.siteA]))).toContain("FORBIDDEN");
         }
       }
@@ -319,7 +315,7 @@ describe("A2 · ageing and escalation", () => {
       const code = await companyCodeFor(run, WK, c.siteA);
       await asAnon(run);
       await wAnon(run, code, newCode(), { description: "The foreman Kollie ignores the gas alarm every night shift." });
-      await owner(run, "update public.worker_voice_reports set created_at = now() - interval '4 days'");
+      await bypass(run, "worker_voice_reports", "update public.worker_voice_reports set created_at = now() - interval '4 days'");
       await owner(run, "delete from public.notifications where kind = 'worker_voice'");
       const first = (await owner(run, "select public.mg_voice_ageing_sweep() as r"))[0].r as any;
       expect(first).toMatchObject({ companyReminded: 1, autoEscalated: 0 });
@@ -329,7 +325,7 @@ describe("A2 · ageing and escalation", () => {
       expect(n1.every((x) => x.title === "A safety report is still waiting for review")).toBe(true);
       await owner(run, "select public.mg_voice_ageing_sweep()");
       expect((await owner(run, "select count(*)::int as n from public.notifications where kind = 'worker_voice'"))[0].n).toBe(n1.length); // once a day
-      await owner(run, "update public.worker_voice_reports set created_at = now() - interval '8 days'");
+      await bypass(run, "worker_voice_reports", "update public.worker_voice_reports set created_at = now() - interval '8 days'");
       const second = (await owner(run, "select public.mg_voice_ageing_sweep() as r"))[0].r as any;
       expect(second.autoEscalated).toBe(1);
       expect((await owner(run, "select route from public.worker_voice_reports"))[0].route).toBe("company_admin");
@@ -346,7 +342,7 @@ describe("A2 · ageing and escalation", () => {
       await asAnon(run); await wAnon(run, code);
       const id = (await wIds(run))[0].id as string;
       await asAuthed(run, SM); await run("select public.mg_wv_triage($1,'high')", [id]);
-      await owner(run, "update public.worker_voice_reports set created_at = now() - interval '9 days'");
+      await bypass(run, "worker_voice_reports", "update public.worker_voice_reports set created_at = now() - interval '9 days'");
       expect(((await owner(run, "select public.mg_voice_ageing_sweep() as r"))[0].r as any)).toMatchObject({ companyReminded: 0, autoEscalated: 0 });
     });
   });
@@ -354,7 +350,7 @@ describe("A2 · ageing and escalation", () => {
     await world(async (run, c) => {
       const code = await siteCodeFor(run, WK, c.siteA);
       await asAnon(run); await mAnonP(run, code);
-      await owner(run, "update public.ministry_voice_reports set created_at = now() - interval '4 days'");
+      await bypass(run, "ministry_voice_reports", "update public.ministry_voice_reports set created_at = now() - interval '4 days'");
       await owner(run, "delete from public.notifications where kind = 'worker_voice'");
       expect(((await owner(run, "select public.mg_voice_ageing_sweep() as r"))[0].r as any).ministryReminded).toBe(1);
       const rows = await owner(run, "select user_id, body, link_to from public.notifications where kind = 'worker_voice'");
@@ -376,7 +372,7 @@ describe("A2 · ageing and escalation", () => {
       const r = await wAnon(run, code);
       const opt = async () => ((await run("select public.mg_wv_status($1) as r", [r.code]))[0].r as any).ministryOption;
       expect(await opt()).toBe(false);
-      await owner(run, "update public.worker_voice_reports set created_at = now() - interval '15 days'");
+      await bypass(run, "worker_voice_reports", "update public.worker_voice_reports set created_at = now() - interval '15 days'");
       expect(await opt()).toBe(true);
     });
   });
@@ -521,7 +517,7 @@ describe("A7 · Ministry trends", () => {
       const mc = await siteCodeFor(run, WK, c.siteA);
       await asAnon(run);
       for (let i = 0; i < 2; i++) { await src2(run, `198.51.100.${i + 70}`); await mAnonP(run, mc, newCode(), { urgency: "critical", description: `A critical hazard has been ignored for weeks, case ${i}.`, category: "hazard_ignored" }); }
-      await owner(run, "update public.ministry_voice_reports set created_at = now() - interval '20 days'");
+      await bypass(run, "ministry_voice_reports", "update public.ministry_voice_reports set created_at = now() - interval '20 days'");
       await asAuthed(run, f.admin);
       const t = (await run("select public.mg_mv_trends(2) as r"))[0].r as any;
       expect(t.attention).toHaveLength(1);
@@ -531,15 +527,15 @@ describe("A7 · Ministry trends", () => {
 });
 
 describe("A8 · retention, legal hold and disposal", () => {
-  test("the policy is readable by everyone signed in and changeable only by a Ministry administrator, 12 to 120 months", async () => {
+  test("the policy is shown to the people who run disposal and changeable only by a Ministry administrator, 12 to 120 months", async () => {
     await world(async (run) => {
-      await asAuthed(run, WK);
-      expect((await run("select channel, retention_months from public.voice_retention_policy order by channel")).map((r) => [r.channel, r.retention_months])).toEqual([["company", 36], ["ministry", 60]]);
+      for (const who of [XA, f.admin]) { await asAuthed(run, who); expect((await run("select channel, retention_months from public.mg_voice_retention()")).map((r) => [r.channel, r.retention_months])).toEqual([["company", 36], ["ministry", 60]]); }
+      for (const who of [WK, SM, f.county]) { await asAuthed(run, who); expect(await fails(run("select * from public.mg_voice_retention()"))).toContain("FORBIDDEN"); expect(await fails(run("select * from public.voice_retention_policy"))).toContain("permission denied"); }
       for (const who of [WK, XA, f.national, f.county]) { await asAuthed(run, who); expect(await fails(run("select public.mg_voice_set_retention('company', 24)"))).toContain("FORBIDDEN"); }
       await asAuthed(run, f.admin);
       for (const bad of [11, 121, 0]) expect(await fails(run("select public.mg_voice_set_retention('company', $1)", [bad]))).toContain("between 12 and 120");
       await run("select public.mg_voice_set_retention('company', 24)");
-      expect((await run("select retention_months from public.voice_retention_policy where channel = 'company'"))[0].retention_months).toBe(24);
+      expect((await run("select retention_months from public.mg_voice_retention() where channel = 'company'"))[0].retention_months).toBe(24);
     });
   });
   test("company: only a company administrator holds or disposes; held, open and recent reports survive; dry run first; DISPOSE required; the log has counts only", async () => {
@@ -557,7 +553,7 @@ describe("A8 · retention, legal hold and disposal", () => {
       expect((await owner(run, "select legal_hold from public.worker_voice_reports where id = $1", [ids[0]]))[0].legal_hold).toBe(true);
       expect(await fails(owner(run, "update public.worker_voice_reports set description = 'edited after the fact by someone else' where id = $1", [ids[0]]))).toContain("IMMUTABLE");
       // age two of the three closed reports beyond the 36 months; one of those is on hold
-      await owner(run, "update public.worker_voice_reports set closed_at = now() - interval '40 months' where id = any ($1::uuid[])", [ids.slice(0, 2)]);
+      await bypass(run, "worker_voice_reports", "update public.worker_voice_reports set closed_at = now() - interval '40 months' where id = any ($1::uuid[])", [ids.slice(0, 2)]);
       for (const who of [SM, WK, OTH, f.admin]) { await asAuthed(run, who); expect(await fails(run("select public.mg_wv_dispose($1,true,null)", [c.orgA]))).toContain("FORBIDDEN"); }
       await asAuthed(run, XA);
       expect((await run("select public.mg_wv_dispose($1,true,null) as r", [c.orgA]))[0].r).toEqual({ dryRun: true, eligible: 1, retentionMonths: 36 });
@@ -582,7 +578,7 @@ describe("A8 · retention, legal hold and disposal", () => {
       await asAuthed(run, f.national);
       expect(await fails(run("select public.mg_mv_set_hold($1,true,'Legal proceedings are pending')", [id]))).toContain("only a Ministry administrator");
       await run("select public.mg_mv_set_status($1,'closed','Referred and concluded after inspection')", [id]);
-      await owner(run, "update public.ministry_voice_reports set closed_at = now() - interval '61 months'");
+      await bypass(run, "ministry_voice_reports", "update public.ministry_voice_reports set closed_at = now() - interval '61 months'");
       expect(await fails(run("select public.mg_mv_dispose(true,null)"))).toContain("FORBIDDEN");
       await asAuthed(run, f.admin);
       expect((await run("select public.mg_mv_dispose(true,null) as r"))[0].r).toEqual({ dryRun: true, eligible: 1, retentionMonths: 60 });
@@ -631,7 +627,7 @@ describe("A9 · Ministry requests to a company", () => {
       expect(JSON.stringify(rows)).not.toMatch(/wage|report|anonymous/i);
       expect(rows.every((r) => r.link_to === "/operate/ministry-requests")).toBe(true);
       expect((await owner(run, "select kind from public.voice_push_outbox"))[0].kind).toBe("request");
-      for (const who of [SM, SO, WK, OTH]) { await asAuthed(run, who); expect(await fails(run("select * from public.mg_mr_list()"))).toBeTruthy(); }
+      for (const who of [SM, SO, WK]) { await asAuthed(run, who); expect(await fails(run("select * from public.mg_mr_list()"))).toContain("FORBIDDEN"); }
       for (const who of [SM, WK, OTH]) { await asAuthed(run, who); expect(await fails(run("select public.mg_mr_respond($1,'We answer')", [id]))).toContain("FORBIDDEN"); }
       await asAuthed(run, XA);
       expect((await run("select count(*)::int as n from public.mg_mr_list()"))[0].n).toBe(1);

@@ -141,7 +141,17 @@ export const RETALIATION_NOTICE =
 export const ROUTING_NOTICE =
   "This report goes to your company's reviewers in MineGuard. It is not sent to the Ministry or to any regulator.";
 export const PERSONAL_INFO_NOTICE =
-  "Describe what is wrong, where, and when. Leave out names, phone numbers, health details and anything about other people that the safety concern does not need. Photos and files cannot be attached in this version.";
+  "Describe what is wrong, where, and when. Leave out names, phone numbers, health details and anything about other people that the safety concern does not need.";
+export const PHOTO_NOTICE =
+  "You can add up to 3 photos. Camera, time and location data is removed on your phone and checked again by MineGuard, which refuses a photo that still carries any. What the picture shows is not removed: avoid faces, name tags and anything that points to you. Photos are shown only to the reviewers of the channel you chose, never through a link. They are not scanned for viruses.";
+export const SMALL_SITE_NOTICE =
+  "This is a small site (fewer than 10 people are assigned). Details such as your shift, your equipment or who was present may point to you. Reviewers will see only the day, not the hour. Consider general wording.";
+/** Shown when the concern is about a company administrator or the company's management: a company route cannot be neutral. */
+export const ABOUT_MANAGEMENT_NOTICE =
+  "A report about a company administrator or the company's management should not go to the company. Send it to the Ministry instead: your company cannot see the Ministry channel.";
+/** Shown to a reporter whose company report is unresolved for two weeks, or closed. It makes no link between the reports. */
+export const MINISTRY_OPTION_NOTICE =
+  "If you are not satisfied with how your company has handled this, you can send a separate report to the Ministry. The two reports are not linked, and your company will not see the Ministry one.";
 
 // ---- follow-up code -------------------------------------------------------------------------------
 const HEX = /^[0-9A-F]{24}$/;
@@ -203,6 +213,8 @@ export interface QueuedReport {
   /** anonymous: the code posted at the site */
   siteCode?: string;
   fields: VoiceFields;
+  /** base64 JPEGs, already cleaned on the device */
+  attachments?: string[];
   code: string;
   savedAt: string;
   state: "saved_on_device" | "sending" | "needs_attention";
@@ -212,7 +224,7 @@ export interface QueuedReport {
 
 export type SendOutcome =
   | { kind: "received" | "duplicate" }
-  | { kind: "rate_limited" | "invalid_site_code" | "network" | "signed_out" | "forbidden" }
+  | { kind: "rate_limited" | "invalid_site_code" | "anonymous_paused" | "network" | "signed_out" | "forbidden" }
   | { kind: "invalid"; message: string };
 
 function fromRpc(error: { message?: string; code?: string } | null, data: unknown): SendOutcome {
@@ -225,7 +237,7 @@ function fromRpc(error: { message?: string; code?: string } | null, data: unknow
   }
   const r = (data ?? {}) as { status?: string; message?: string };
   switch (r.status) {
-    case "received": case "duplicate": case "rate_limited": case "invalid_site_code": return { kind: r.status };
+    case "received": case "duplicate": case "rate_limited": case "invalid_site_code": case "anonymous_paused": return { kind: r.status };
     case "invalid": return { kind: "invalid", message: r.message ?? "The report could not be accepted." };
     default: return { kind: "network" };
   }
@@ -239,14 +251,14 @@ export async function sendReport(item: QueuedReport): Promise<SendOutcome> {
       const { data, error } = await anonymousClient().rpc("mg_wv_submit_anonymous", {
         p_site_code: normalizeSiteCode(item.siteCode ?? ""), p_category: f.category, p_urgency: f.urgency,
         p_description: f.description, p_occurred: f.occurredAt, p_previously: f.previouslyReported,
-        p_concerns: f.concernsReviewer, p_code: item.code,
+        p_concerns: f.concernsReviewer, p_code: item.code, p_attachments: item.attachments?.length ? item.attachments : null,
       });
       return fromRpc(error, data);
     }
     const { data, error } = await supabase.rpc("mg_wv_submit", {
       p_mode: item.mode, p_site: item.siteId, p_category: f.category, p_urgency: f.urgency,
       p_description: f.description, p_occurred: f.occurredAt, p_previously: f.previouslyReported,
-      p_concerns: f.concernsReviewer, p_code: item.code,
+      p_concerns: f.concernsReviewer, p_code: item.code, p_attachments: item.attachments?.length ? item.attachments : null,
     });
     return fromRpc(error, data);
   } catch {
@@ -261,14 +273,14 @@ async function sendMinistryReport(item: QueuedReport): Promise<SendOutcome> {
     if (item.mode !== "anonymous") {
       const { data, error } = await supabase.rpc("mg_mv_submit", {
         p_mode: item.mode, p_site: item.siteId, p_category: f.category, p_urgency: f.urgency,
-        p_description: f.description, p_occurred: f.occurredAt, p_previously: f.previouslyReported, p_code: item.code,
+        p_description: f.description, p_occurred: f.occurredAt, p_previously: f.previouslyReported, p_code: item.code, p_attachments: item.attachments?.length ? item.attachments : null,
       });
       return fromRpc(error, data);
     }
     // anonymous: the session-less client only, exactly as for the company channel
     const { data, error } = await anonymousClient().rpc("mg_mv_submit_anonymous", {
       p_site_code: normalizeSiteCode(item.siteCode ?? ""), p_category: f.category, p_urgency: f.urgency,
-      p_description: f.description, p_occurred: f.occurredAt, p_previously: f.previouslyReported, p_code: item.code,
+      p_description: f.description, p_occurred: f.occurredAt, p_previously: f.previouslyReported, p_code: item.code, p_attachments: item.attachments?.length ? item.attachments : null,
     });
     return fromRpc(error, data);
   } catch {
@@ -276,18 +288,56 @@ async function sendMinistryReport(item: QueuedReport): Promise<SendOutcome> {
   }
 }
 
-export interface FollowUpStatus { found: boolean; status?: string; stage?: string; closed?: boolean; lastChange?: string; update?: string | null; updateOn?: string | null }
+export interface ThreadMessage { from: "you" | "reviewers"; text: string; on: string }
+export interface FollowUpStatus { found: boolean; status?: string; stage?: string; closed?: boolean; lastChange?: string; update?: string | null; updateOn?: string | null; messages?: ThreadMessage[]; canReply?: boolean; ministryOption?: boolean; channel?: VoiceChannel }
 export async function lookupFollowUp(rawCode: string): Promise<FollowUpStatus> {
   const parsed = parseAnyFollowUpCode(rawCode);
   if (!parsed) return { found: false };
   const ask = async (fn: "mg_wv_status" | "mg_mv_status") => {
     const { data, error } = await anonymousClient().rpc(fn, { p_code: parsed.code });
     if (error) throw new Error("lookup failed");
-    return data as FollowUpStatus;
+    return { ...(data as FollowUpStatus), channel: fn === "mg_mv_status" ? ("ministry" as const) : ("company" as const) };
   };
   // a prefix names the channel; without one, try the company channel first and then the Ministry's
   if (parsed.channel === "ministry") return ask("mg_mv_status");
   const first = await ask("mg_wv_status");
   if (first.found || parsed.channel === "company" || first.status === "rate_limited") return first;
   return ask("mg_mv_status");
+}
+
+export const MAX_REPLY = 1000;
+export type ReplyOutcome = "received" | "rate_limited" | "invalid" | "not_found" | "closed" | "network";
+/** Reply with the follow-up code alone, from the session-less client: nothing identifies the sender. */
+export async function replyWithCode(rawCode: string, text: string, channel: VoiceChannel): Promise<ReplyOutcome> {
+  const parsed = parseAnyFollowUpCode(rawCode);
+  if (!parsed) return "not_found";
+  try {
+    const { data, error } = await anonymousClient().rpc(channel === "ministry" ? "mg_mv_reply" : "mg_wv_reply", { p_code: parsed.code, p_text: text });
+    if (error) return "network";
+    const st = (data as { status?: string } | null)?.status;
+    return st === "received" || st === "rate_limited" || st === "invalid" || st === "not_found" || st === "closed" ? st : "network";
+  } catch { return "network"; }
+}
+export async function replyMine(reportId: string, text: string, channel: VoiceChannel): Promise<void> {
+  const { error } = await supabase.rpc(channel === "ministry" ? "mg_mv_reply_mine" : "mg_wv_reply_mine", { p_id: reportId, p_text: text });
+  if (error) throw new Error(error.message);
+}
+
+export interface SiteInfo { valid: boolean; smallSite?: boolean; paused?: boolean; status?: string }
+/** What to tell a person about a site before they send, from the posted code. A wrong code counts as a guess. */
+export async function siteInfoByCode(rawCode: string, channel: VoiceChannel): Promise<SiteInfo> {
+  try {
+    const { data, error } = await anonymousClient().rpc(channel === "ministry" ? "mg_mv_site_info" : "mg_wv_site_info", { p_site_code: normalizeSiteCode(rawCode) });
+    return error ? { valid: false } : (data as SiteInfo);
+  } catch { return { valid: false }; }
+}
+export async function siteIsSmall(siteId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc("mg_wv_site_small", { p_site: siteId });
+  return !error && data === true;
+}
+/** A member's app reads the CHANNEL's own code (the company's and the Ministry's are different) to send anonymously without typing it. */
+export async function memberSiteCode(channel: VoiceChannel, siteId: string): Promise<string> {
+  const { data, error } = await supabase.rpc(channel === "ministry" ? "mg_mv_site_code" : "mg_wv_site_code", { p_site: siteId });
+  if (error) throw new Error(error.message);
+  return data as string;
 }

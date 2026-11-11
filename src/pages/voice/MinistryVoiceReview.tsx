@@ -12,6 +12,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { EmptyState } from "@/components/EmptyState";
 import { PageLoading } from "@/components/PageLoading";
+import { PushSetupCard } from "@/components/emergency/PushSetupCard";
+import { CodesPanel, RequestsPanel, TrendsPanel } from "@/components/voice/MinistryExtras";
+import { HoldControl, Photos, RetentionPanel, Thread } from "@/components/voice/VoiceBits";
+import { listMinistryMessages, ministryDispose, ministryPhotoCounts, ministryPhotos, ministrySetHold, retentionPolicy, setRetention, type MinistryMessage } from "@/lib/ministry-voice-review";
 import { StaffOnly } from "@/components/StaffOnly";
 import { useAuth } from "@/hooks/use-auth";
 import { MINISTRY_CATEGORIES, MINISTRY_GROUP_LABEL } from "@/lib/voice";
@@ -52,7 +56,7 @@ function Summary({ s }: { s: MinistrySummary }) {
   );
 }
 
-function ReportCard({ r, canOpenIdentity, onChanged }: { r: MinistryReportRow; canOpenIdentity: boolean; onChanged: () => void }) {
+function ReportCard({ r, canOpenIdentity, photoN, onChanged }: { r: MinistryReportRow; canOpenIdentity: boolean; photoN: number; onChanged: () => void }) {
   const [open, setOpen] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -64,6 +68,13 @@ function ReportCard({ r, canOpenIdentity, onChanged }: { r: MinistryReportRow; c
   const [purpose, setPurpose] = useState("");
   const [identity, setIdentity] = useState<string | null>(null);
   const closed = r.status === "closed";
+  const [thread, setThread] = useState<MinistryMessage[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    void listMinistryMessages(r.id).then((t) => { if (live) setThread(t); }, () => undefined);
+    return () => { live = false; };
+  }, [open, r.id, r.reporter_update]);
 
   useEffect(() => {
     if (!open || closed) return;
@@ -89,14 +100,20 @@ function ReportCard({ r, canOpenIdentity, onChanged }: { r: MinistryReportRow; c
           <span className="rounded border border-border px-2 py-0.5 uppercase tracking-wide">{r.urgency}</span>
           <span className="rounded border border-border px-2 py-0.5 uppercase tracking-wide">{STATUS_LABEL[r.status]}</span>
           {r.duplicate_of && <span className="rounded border border-amber-500/60 px-2 py-0.5 text-amber-700 dark:text-amber-400">Similar report received earlier</span>}
+          {r.small_site && <span className="rounded border border-amber-500/60 px-2 py-0.5 text-amber-700 dark:text-amber-400">Small site</span>}
+          {r.legal_hold && <span className="rounded border border-primary/50 px-2 py-0.5 text-primary">Legal hold</span>}
+          {photoN > 0 && <span className="rounded border border-border px-2 py-0.5">{photoN} photo{photoN === 1 ? "" : "s"}</span>}
         </span>
         <span className="mt-1 block text-sm font-medium">{categoryLabel(r.category)}</span>
         <span className="block text-sm">{r.organization_name} · {r.site_name}</span>
-        <span className="block text-xs text-muted-foreground">Received {new Date(r.created_at).toLocaleString()}{r.mode !== "named" ? " (time shown to the hour)" : ""}{r.assigned_name ? ` · Assigned to ${r.assigned_name}` : ""}</span>
+        <span className="block text-xs text-muted-foreground">Received {new Date(r.created_at).toLocaleString()}{r.mode !== "named" ? (r.small_site ? " (shown as a day: small site)" : " (time shown to the hour)") : ""}{r.assigned_name ? ` · Assigned to ${r.assigned_name}` : ""}</span>
       </button>
       {open && (
         <div className="space-y-3 border-t border-border pt-3 text-sm">
           <p className="whitespace-pre-wrap">{r.description}</p>
+          {r.small_site && r.mode !== "named" && <p className="text-xs text-muted-foreground">Few people work at this site, so details in this report could point to the sender. Keep the content within the review and do not try to work out who wrote it.</p>}
+          {photoN > 0 && <Photos load={() => ministryPhotos(r.id)} />}
+          <Thread messages={thread.map((m) => ({ seq: m.seq, from_reporter: m.from_reporter, body: m.body, at: m.at }))} />
           <p className="text-xs text-muted-foreground">Reported before: {r.previously_reported}. {r.occurred_at ? `Approximately ${new Date(r.occurred_at).toLocaleString()}.` : ""}</p>
 
           {!closed && (
@@ -143,6 +160,7 @@ function ReportCard({ r, canOpenIdentity, onChanged }: { r: MinistryReportRow; c
             </div>
           )}
           {r.mode === "anonymous" && <p className="text-xs text-muted-foreground">Anonymous: no identity is held for this report.</p>}
+          <HoldControl held={r.legal_hold} closed={closed} canSet={canOpenIdentity} onSet={async (hold, reason) => { await ministrySetHold(r.id, hold, reason); onChanged(); }} />
           {msg && <p role="status" className="text-sm">{msg}</p>}
         </div>
       )}
@@ -155,6 +173,7 @@ function Inner() {
   const isReviewer = user?.role === "admin" || user?.role === "supervisor";
   const [rows, setRows] = useState<MinistryReportRow[] | null>(null);
   const [summary, setSummary] = useState<MinistrySummary | null>(null);
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [failed, setFailed] = useState(false);
   const [tick, setTick] = useState(0);
   const [filter, setFilter] = useState<"open" | "all">("open");
@@ -162,8 +181,8 @@ function Inner() {
   useEffect(() => {
     if (!isReviewer) return;
     let live = true;
-    void Promise.all([listMinistryReports(), ministrySummary()]).then(
-      ([r, s]) => { if (live) { setRows(r); setSummary(s); } },
+    void Promise.all([listMinistryReports(), ministrySummary(), ministryPhotoCounts().catch(() => [])]).then(
+      ([r, s, c]) => { if (live) { setRows(r); setSummary(s); setCounts(Object.fromEntries(c.map((x) => [x.report_id, x.n]))); } },
       () => { if (live) setFailed(true); },
     );
     return () => { live = false; };
@@ -182,7 +201,12 @@ function Inner() {
         <h1 className="text-xl font-semibold">Worker reports to the Ministry</h1>
         <p className="text-sm text-muted-foreground">Confidential reports from workers about a company&apos;s labour practices, unsafe work practices and work habits. Companies cannot see these reports. Treat every report as credible until it is assessed, whether it is named, confidential or anonymous. Do not try to work out who sent an anonymous report, and do not share a report&apos;s content with the company in a way that could identify the reporter.</p>
       </header>
+      <PushSetupCard />
       <Summary s={summary} />
+      <TrendsPanel />
+      {user?.role === "admin" && <CodesPanel />}
+      {user?.role === "admin" && <RequestsPanel companies={[...new Map(rows.map((r) => [r.organization_id, { id: r.organization_id, name: r.organization_name }])).values()]} />}
+      <RetentionPanel channel="ministry" canSetPolicy={user?.role === "admin"} load={retentionPolicy} setPolicy={setRetention} dispose={ministryDispose} />
       <div className="flex gap-2">
         <Button size="sm" variant={filter === "open" ? "default" : "outline"} onClick={() => setFilter("open")}>Open</Button>
         <Button size="sm" variant={filter === "all" ? "default" : "outline"} onClick={() => setFilter("all")}>All</Button>
@@ -190,7 +214,7 @@ function Inner() {
       {shown.length === 0 ? (
         <EmptyState title="No reports to review" why="Reports workers send to the Ministry will appear here. You will get a notification when one arrives." />
       ) : (
-        <ul className="space-y-3">{shown.map((r) => <ReportCard key={r.id} r={r} canOpenIdentity={user?.role === "admin"} onChanged={() => setTick((t) => t + 1)} />)}</ul>
+        <ul className="space-y-3">{shown.map((r) => <ReportCard key={r.id} r={r} photoN={counts[r.id] ?? 0} canOpenIdentity={user?.role === "admin"} onChanged={() => setTick((t) => t + 1)} />)}</ul>
       )}
     </div>
   );

@@ -18,15 +18,17 @@ import { EmptyState } from "@/components/EmptyState";
 import { PageLoading } from "@/components/PageLoading";
 import { PublicHeader } from "@/components/PublicHeader";
 import { NotSavedError } from "@/lib/offline-store";
+import { MAX_PHOTOS, preparePhoto, type PreparedPhoto } from "@/lib/voice-image";
 import { jsaSites, type JsaSite } from "@/lib/jsa";
 import {
   formatFollowUpCode, formatSiteCode, MAX_DESCRIPTION, MIN_DESCRIPTION, MINISTRY_CATEGORIES, MINISTRY_EMERGENCY_NOTICE,
   MINISTRY_GROUP_LABEL, MINISTRY_MODE_INFO, MINISTRY_ROUTING_NOTICE, MODE_INFO, newFollowUpCode, normalizeSiteCode,
-  PERSONAL_INFO_NOTICE, RETALIATION_NOTICE, ROUTING_NOTICE, VOICE_CATEGORIES, VOICE_PREVIOUS, VOICE_URGENCIES,
+  ABOUT_MANAGEMENT_NOTICE, memberSiteCode, PERSONAL_INFO_NOTICE, PHOTO_NOTICE, replyMine, RETALIATION_NOTICE, ROUTING_NOTICE, siteInfoByCode, siteIsSmall, SMALL_SITE_NOTICE,
+  VOICE_CATEGORIES, VOICE_PREVIOUS, VOICE_URGENCIES,
   type MinistryCategory, type VoiceCategory, type VoiceChannel, type VoiceFields, type VoiceMode, type VoiceUrgency,
 } from "@/lib/voice";
 import { describeItem, enqueue, flushQueue, listQueue, removeFromQueue } from "@/lib/voice-queue";
-import { myVoiceReports, siteCode, type MyReport } from "@/lib/voice-review";
+import { myVoiceReports, type MyReport } from "@/lib/voice-review";
 import { myMinistryReports } from "@/lib/ministry-voice-review";
 import type { QueuedReport } from "@/lib/voice";
 
@@ -74,7 +76,7 @@ function Receipt({ phase, code, message, channel, onAgain }: { phase: Phase; cod
             <li>Keep this code somewhere private. It is the only way to check this report&apos;s progress.</li>
             <li>We cannot recover it for you, and we cannot look it up by your name.</li>
             <li>Anyone who has the code can see the report&apos;s progress, so do not share it.</li>
-            <li>Check progress at <Link className="underline" to="/voice/status">Check a report</Link>. You will see a stage and any update the reviewers wrote for you, and nothing else.</li>
+            <li>Check progress at <Link className="underline" to="/voice/status">Check a report</Link>. You will see a stage and the messages between you and the reviewers, and nothing else.</li>
           </ul>
         </div>
       )}
@@ -96,7 +98,14 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
   const [description, setDescription] = useState("");
   const [occurred, setOccurred] = useState("");
   const [previous, setPrevious] = useState<"no" | "yes" | "unsure">("no");
-  const [concerns, setConcerns] = useState(false);
+  const [about, setAbout] = useState<"none" | "reviewer" | "management">("none");
+  const concerns = about === "reviewer";
+  const [photos, setPhotos] = useState<PreparedPhoto[]>([]);
+  const [photoMsg, setPhotoMsg] = useState<string | null>(null);
+  const [small, setSmall] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [replyTo, setReplyTo] = useState<{ id: string; channel: VoiceChannel; text: string } | null>(null);
+  const [replyMsg, setReplyMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<Phase>("form");
@@ -122,9 +131,30 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
   useEffect(() => {
     if (!member || mode !== "anonymous" || !siteId) return;
     let live = true;
-    void siteCode(siteId).then((c) => { if (live) setSiteCodeText(c); }, () => undefined);
+    void memberSiteCode(channel, siteId).then((c) => { if (live) setSiteCodeText(c); }, () => undefined);
     return () => { live = false; };
-  }, [member, mode, siteId]);
+  }, [member, mode, siteId, channel]);
+
+  // before anything is typed: is this a small site, and is anonymous intake paused for it?
+  useEffect(() => {
+    if (!mode) return;
+    let live = true;
+    if (member && siteId) void siteIsSmall(siteId).then((v) => { if (live) setSmall(v); });
+    if (mode === "anonymous" && normalizeSiteCode(siteCodeText).length === 10) void siteInfoByCode(siteCodeText, channel).then((i) => { if (live) { if (i.valid) setSmall(!!i.smallSite); setPaused(!!i.paused); } });
+    return () => { live = false; };
+  }, [member, mode, siteId, siteCodeText, channel]);
+
+  const addPhotos = async (files: FileList | null) => {
+    if (!files) return;
+    setPhotoMsg(null);
+    for (const f of Array.from(files)) {
+      if (photos.length >= MAX_PHOTOS) { setPhotoMsg(`You can attach up to ${MAX_PHOTOS} photos.`); break; }
+      const r = await preparePhoto(f);
+      if (!r.ok) { setPhotoMsg(r.reason); continue; }
+      setPhotos((p) => (p.length >= MAX_PHOTOS ? p : [...p, r.photo]));
+    }
+  };
+  const dropPhoto = (id: string) => setPhotos((p) => { p.filter((x) => x.id === id).forEach((x) => URL.revokeObjectURL(x.previewUrl)); return p.filter((x) => x.id !== id); });
 
   const flush = useCallback(async () => { await flushQueue({ signedIn: member }); setTick((t) => t + 1); }, [member]);
   useEffect(() => {
@@ -133,8 +163,8 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
     return () => window.removeEventListener("online", on);
   }, [flush]);
 
-  const reset = () => { setPhase("form"); setReceipt(null); setDescription(""); setOccurred(""); setConcerns(false); setCategory(""); setUrgency(""); setError(null); setTick((t) => t + 1); };
-  const chooseChannel = (c: VoiceChannel) => { setChannel(c); setCategory(""); setConcerns(false); };
+  const reset = () => { photos.forEach((p) => URL.revokeObjectURL(p.previewUrl)); setPhotos([]); setAbout("none"); setPhase("form"); setReceipt(null); setDescription(""); setOccurred(""); setCategory(""); setUrgency(""); setError(null); setTick((t) => t + 1); };
+  const chooseChannel = (c: VoiceChannel) => { setChannel(c); setCategory(""); };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -145,6 +175,7 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
     if (mode === "anonymous" && normalizeSiteCode(siteCodeText).length !== 10) return setError("Enter the 10-character site code posted at your site.");
     if (!category) return setError("Choose a category.");
     if (!urgency) return setError("Choose how urgent it is.");
+    if (!ministry && about === "management") return setError(ABOUT_MANAGEMENT_NOTICE);
     const text = description.trim();
     if (text.length < MIN_DESCRIPTION) return setError(`Describe the concern in at least ${MIN_DESCRIPTION} characters.`);
     if (text.length > MAX_DESCRIPTION) return setError(`Please keep it under ${MAX_DESCRIPTION} characters.`);
@@ -153,7 +184,7 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
     const code = newFollowUpCode();
     setBusy(true);
     try {
-      await enqueue({ id, channel, mode, siteId: mode === "anonymous" ? undefined : siteId, siteCode: mode === "anonymous" ? normalizeSiteCode(siteCodeText) : undefined, fields, code });
+      await enqueue({ id, channel, mode, siteId: mode === "anonymous" ? undefined : siteId, siteCode: mode === "anonymous" ? normalizeSiteCode(siteCodeText) : undefined, fields, attachments: photos.map((p) => p.base64), code });
     } catch (e2) {
       setBusy(false);
       setReceipt({ code, message: e2 instanceof NotSavedError ? "This phone could not save the report, and it has NOT been sent. Free some space or try again." : "The report could not be saved and has NOT been sent. Try again." });
@@ -257,10 +288,41 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
                     <label key={p.value} className="flex items-center gap-2 text-sm"><input type="radio" name="wv-prev" checked={previous === p.value} onChange={() => setPrevious(p.value)} /> {p.label}</label>
                   ))}
                 </fieldset>
-                {!ministry && <label className="flex items-start gap-2 text-sm">
-                  <input type="checkbox" className="mt-1" checked={concerns} onChange={(e) => setConcerns(e.target.checked)} />
-                  <span>This concerns the site manager or safety officer who would normally review it. <span className="block text-xs text-muted-foreground">It will go to company administrators only. If it concerns a company administrator, MineGuard has no higher route: use your company procedure or the legal channels open to you.</span></span>
-                </label>}
+                {!ministry && (
+                  <fieldset className="space-y-1">
+                    <legend className="text-sm">Is this about the people who would normally review it?</legend>
+                    <label className="flex items-start gap-2 text-sm"><input type="radio" name="wv-about" className="mt-1" checked={about === "none"} onChange={() => setAbout("none")} /> No</label>
+                    <label className="flex items-start gap-2 text-sm"><input type="radio" name="wv-about" className="mt-1" checked={about === "reviewer"} onChange={() => setAbout("reviewer")} /> <span>Yes, a site manager or safety officer<span className="block text-xs text-muted-foreground">It will go to your company&apos;s administrators only.</span></span></label>
+                    <label className="flex items-start gap-2 text-sm"><input type="radio" name="wv-about" className="mt-1" checked={about === "management"} onChange={() => setAbout("management")} /> Yes, a company administrator or the company&apos;s management</label>
+                    {about === "management" && (
+                      <span role="alert" className="block space-y-2 border border-amber-500/60 bg-amber-500/5 p-3 text-xs">
+                        <span className="block">{ABOUT_MANAGEMENT_NOTICE}</span>
+                        <Button type="button" size="sm" onClick={() => { chooseChannel("ministry"); setAbout("none"); }}>Send it to the Ministry instead</Button>
+                      </span>
+                    )}
+                  </fieldset>
+                )}
+              </section>
+
+              {small && <p role="note" className="border border-amber-500/60 bg-amber-500/5 p-3 text-xs">{SMALL_SITE_NOTICE}</p>}
+              {paused && mode === "anonymous" && normalizeSiteCode(siteCodeText).length === 10 && <p role="alert" className="border border-destructive/60 p-3 text-sm">Anonymous reporting is paused for this site. You can still send a named or confidential report after signing in, or speak to your safety officer.</p>}
+
+              <section className="space-y-2">
+                <h2 className="text-sm font-medium">Photos (optional)</h2>
+                <p className="text-xs text-muted-foreground">{PHOTO_NOTICE}</p>
+                <Input aria-label="Add photos" type="file" accept="image/*" multiple disabled={photos.length >= MAX_PHOTOS} onChange={(e) => { void addPhotos(e.target.files); e.target.value = ""; }} />
+                {photoMsg && <p role="alert" className="text-xs text-destructive">{photoMsg}</p>}
+                {photos.length > 0 && (
+                  <ul className="flex flex-wrap gap-2">
+                    {photos.map((p) => (
+                      <li key={p.id} className="space-y-1 text-xs">
+                        <img src={p.previewUrl} alt="Photo to attach" className="h-20 w-20 border border-border object-cover" />
+                        <span className="block text-muted-foreground">{Math.round(p.bytes / 1024)} KB</span>
+                        <Button type="button" size="sm" variant="ghost" onClick={() => dropPhoto(p.id)}>Remove</Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </section>
 
               <section className="space-y-1 border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
@@ -270,7 +332,7 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
               </section>
 
               {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-              <Button type="submit" disabled={busy}>{busy ? "Sending…" : `Send ${infoFor(channel, mode).title.toLowerCase()}`}</Button>
+              <Button type="submit" disabled={busy || (paused && mode === "anonymous") || (!ministry && about === "management")}>{busy ? "Preparing…" : `Send ${infoFor(channel, mode).title.toLowerCase()}`}</Button>
             </>
           )}
         </form>
@@ -304,9 +366,19 @@ export function VoiceReportForm({ context }: { context: "member" | "public" }) {
                 <span className="font-medium">{r.stage}</span> · {r.channel === "ministry" ? "to the Ministry" : "to your company"} · {r.mode} · received {r.received_on}
                 {r.reporter_update && <span className="block text-muted-foreground">Update{r.reporter_update_on ? ` (${r.reporter_update_on})` : ""}: {r.reporter_update}</span>}
                 {r.mode === "confidential" && <span className="block text-xs text-muted-foreground">Your identity has been opened {r.identity_opened} time{r.identity_opened === 1 ? "" : "s"}.</span>}
+                {r.can_reply && (replyTo?.id === r.id ? (
+                  <span className="mt-1 block space-y-1">
+                    <Textarea aria-label="Your message to the reviewers" value={replyTo.text} maxLength={1000} onChange={(e) => setReplyTo({ id: r.id, channel: r.channel, text: e.target.value })} />
+                    <span className="flex gap-2">
+                      <Button size="sm" disabled={!replyTo.text.trim()} onClick={() => { void replyMine(r.id, replyTo.text, r.channel).then(() => { setReplyTo(null); setReplyMsg("Message sent to the reviewers."); }, () => setReplyMsg("The message could not be sent. Nothing was changed.")); }}>Send message</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setReplyTo(null)}>Cancel</Button>
+                    </span>
+                  </span>
+                ) : <Button size="sm" variant="outline" className="mt-1" onClick={() => { setReplyMsg(null); setReplyTo({ id: r.id, channel: r.channel, text: "" }); }}>Reply to the reviewers</Button>)}
               </li>
             ))}
           </ul>
+          {replyMsg && <p role="status" className="text-xs">{replyMsg}</p>}
           <p className="text-xs text-muted-foreground">Anonymous reports are not listed here, because nothing links them to you. Use your follow-up code.</p>
         </section>
       )}

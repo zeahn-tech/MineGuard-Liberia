@@ -1033,9 +1033,21 @@ begin
   update public.voice_retention_policy set retention_months = p_months, updated_by = auth.uid(), updated_at = now() where channel = p_channel;
 end;
 $mg$;
-drop policy if exists "voice retention read" on public.voice_retention_policy;
-create policy "voice retention read" on public.voice_retention_policy for select to authenticated using (true);
-grant select on public.voice_retention_policy to authenticated;
+-- the policy is shown to the people who run disposal (company administrators, Ministry administrators); it is
+-- NOT a world-readable table (public users and other members have no business reading it)
+create or replace function public.mg_voice_retention()
+returns table (channel text, retention_months integer)
+language plpgsql stable security definer set search_path = public as $mg$
+begin
+  if auth.uid() is null or not (public.mg_voice_is_ministry_admin() or exists (
+       select 1 from public.organization_members m where m.user_id = auth.uid() and m.org_role = 'company_admin' and m.status = 'active')) then
+    raise exception 'FORBIDDEN';
+  end if;
+  return query select p.channel, p.retention_months from public.voice_retention_policy p order by p.channel;
+end;
+$mg$;
+revoke all on function public.mg_voice_retention() from public, anon;
+grant execute on function public.mg_voice_retention() to authenticated;
 
 -- ===========================================================================
 -- A7 trends · A2 ageing · A9 Ministry → company requests · A3 push dispatch surface
@@ -1051,10 +1063,11 @@ begin
       from public.ministry_voice_reports r),
   mo as (select m from generate_series(date_trunc('month', now()) - make_interval(months => v_months - 1), date_trunc('month', now()), interval '1 month') m),
   months as (
-    select jsonb_agg(jsonb_build_object('month', to_char(mo.m, 'YYYY-MM'),
-             'total', count(g.id), 'safety', count(g.id) filter (where g.grp = 'safety'), 'labour', count(g.id) filter (where g.grp = 'labour'),
-             'conduct', count(g.id) filter (where g.grp = 'conduct'), 'other', count(g.id) filter (where g.grp = 'other')) order by mo.m) as j
-      from mo left join g on date_trunc('month', g.created_at) = mo.m group by ()),
+    select jsonb_agg(jsonb_build_object('month', to_char(x.m, 'YYYY-MM'), 'total', x.total, 'safety', x.safety, 'labour', x.labour,
+                                        'conduct', x.conduct, 'other', x.other) order by x.m) as j
+      from (select mo.m, count(g.id) as total, count(g.id) filter (where g.grp = 'safety') as safety, count(g.id) filter (where g.grp = 'labour') as labour,
+                   count(g.id) filter (where g.grp = 'conduct') as conduct, count(g.id) filter (where g.grp = 'other') as other
+              from mo left join g on date_trunc('month', g.created_at) = mo.m group by mo.m) x),
   att as (
     select o.id, o.name,
            count(*) filter (where g.created_at >= now() - interval '90 days') as r90,
@@ -1194,6 +1207,9 @@ language plpgsql stable security definer set search_path = public as $mg$
 declare v_min boolean := public.mg_voice_is_ministry_admin();
 begin
   if auth.uid() is null then raise exception 'UNAUTHENTICATED'; end if;
+  if not v_min and not exists (select 1 from public.organization_members m where m.user_id = auth.uid() and m.org_role = 'company_admin' and m.status = 'active') then
+    raise exception 'FORBIDDEN: only company administrators and the Ministry can see these requests';
+  end if;
   return query
     select q.id, q.organization_id, o.name::text, q.topic, q.note, q.created_on, q.status,
            coalesce((select jsonb_agg(jsonb_build_object('from', case when x.by_ministry then 'Ministry' else 'Company' end, 'text', x.body, 'on', x.on_date) order by x.seq)
