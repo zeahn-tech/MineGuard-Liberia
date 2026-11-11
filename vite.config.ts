@@ -1,6 +1,8 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
+import fs from "fs";
+import crypto from "crypto";
 import { defineConfig, type Plugin } from "vite";
 
 // Audit F6: GitHub Pages cannot send response headers, so ship a <meta> CSP in
@@ -35,6 +37,49 @@ function cspPlugin(): Plugin {
   };
 }
 
+// Offline-first: list every file of the production build inside the service
+// worker so ALL pages (every lazy route chunk, CSS, fonts, images) are cached on
+// first online visit, not only the pages the user happened to open.
+function swPrecachePlugin(): Plugin {
+  let outDir = "dist";
+  return {
+    name: "mg-sw-precache",
+    apply: "build",
+    configResolved(cfg) {
+      outDir = path.resolve(cfg.root, cfg.build.outDir);
+    },
+    closeBundle() {
+      const swPath = path.join(outDir, "sw.js");
+      if (!fs.existsSync(swPath)) return;
+      const files: string[] = [];
+      const walk = (dir: string) => {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, e.name);
+          if (e.isDirectory()) walk(full);
+          else files.push(path.relative(outDir, full).split(path.sep).join("/"));
+        }
+      };
+      walk(outDir);
+      const assets = files
+        .filter((f) => f.startsWith("assets/") && !f.endsWith(".map"))
+        .sort();
+      const stamp = crypto
+        .createHash("sha1")
+        .update(assets.join("|"))
+        .digest("hex")
+        .slice(0, 8);
+      let sw = fs.readFileSync(swPath, "utf8");
+      sw = sw
+        .replace(
+          "/*__MG_BUILD_ASSETS__*/",
+          assets.map((a) => JSON.stringify("./" + a)).join(",\n  "),
+        )
+        .replace("__MG_BUILD_STAMP__", stamp);
+      fs.writeFileSync(swPath, sw);
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ command }) => {
   // Repository-aware base path. On GitHub Pages project sites the app is served
@@ -48,7 +93,7 @@ export default defineConfig(({ command }) => {
     (command === "build" && repoName ? `/${repoName}/` : "/");
 
   return {
-    plugins: [react(), tailwindcss(), cspPlugin()],
+    plugins: [react(), tailwindcss(), cspPlugin(), swPrecachePlugin()],
     base,
     // Short commit id of the deployed build, shown on error panels so a report
     // can say exactly which version of the app produced it.
