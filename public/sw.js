@@ -12,8 +12,8 @@
  * Version bump busts the cache on deploy.
  * ------------------------------------------------------------------------- */
 
-const VERSION = "v1.4.0";
-const CACHE = `mineguard-shell-${VERSION}`;
+const VERSION = "v1.5.0";
+const CACHE_BASE = `mineguard-shell-${VERSION}`;
 
 // ---- Map tiles (GIS-5) — keep in sync with src/lib/map-tiles.ts (pinned by
 // tests/gis.test.ts). Provider policy: ONLY tiles the map requested while
@@ -92,6 +92,16 @@ const PRECACHE = [
   "./icons/favicon-32.v2.png",
 ];
 
+// Every hashed file of the production build (route chunks, CSS, fonts, images).
+// The Vite plugin `mg-sw-precache` (vite.config.ts) replaces the marker comment
+// below with the real list in dist/sw.js and stamps BUILD_STAMP so each deploy
+// gets its own cache. In dev the marker stays a comment, so the list is empty.
+// Without this, a page chunk was only cached once the user had OPENED that page
+// online, so navigating to any page not yet visited failed offline.
+const BUILD_ASSETS = [/*__MG_BUILD_ASSETS__*/];
+const BUILD_STAMP = "__MG_BUILD_STAMP__";
+const CACHE = BUILD_STAMP.startsWith("__") ? CACHE_BASE : `${CACHE_BASE}-${BUILD_STAMP}`;
+
 /** Immutable build output — safe to serve cache-first forever. */
 function isCacheableAsset(pathname) {
   if (pathname.includes("/assets/")) return true; // hashed bundles
@@ -121,7 +131,7 @@ self.addEventListener("install", (event) => {
       // never stop the offline shell from installing.
       .then((cache) =>
         Promise.all(
-          PRECACHE.map((u) =>
+          PRECACHE.concat(BUILD_ASSETS).map((u) =>
             cache.add(u).catch((e) => console.warn("[sw] precache skipped", u, e)),
           ),
         ),
