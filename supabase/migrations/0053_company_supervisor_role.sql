@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0052 — Company role "supervisor"
+-- 0053 — Company role "supervisor"
 --
 -- A supervisor leads a crew on site: below a site manager, above a worker. It is a
 -- COMPANY role (organization_members.org_role), not the government 'supervisor'

@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Migration 0052 — the company "supervisor" role: appointed only by a company
+// Migration 0053 — the company "supervisor" role: appointed only by a company
 // administrator, site-scoped like a safety officer, no management rights. Real Postgres (PGlite).
 // ---------------------------------------------------------------------------
 import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
@@ -20,7 +20,7 @@ const OTH = "aaaaaaaa-0000-4000-8000-0000000000d1"; // another company's adminis
 beforeAll(async () => { f = await getFixture(); });
 beforeEach(async () => {
   const db = await getDb();
-  for (const m of ["0040_emergency_alerts", "0041_emergency_authority_corrections", "0043_jsa_with_human_review", "0044_role_assignment_and_emergency_contacts", "0052_company_supervisor_role"]) {
+  for (const m of ["0040_emergency_alerts", "0041_emergency_authority_corrections", "0043_jsa_with_human_review", "0044_role_assignment_and_emergency_contacts", "0053_company_supervisor_role"]) {
     await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", `${m}.sql`), "utf8"));
   }
 });
@@ -75,7 +75,7 @@ async function world<T>(fn: (run: Runner, c: { orgA: string; orgB: string; siteA
   });
 }
 
-describe("company supervisor role (0052)", () => {
+describe("company supervisor role (0053)", () => {
   test("a company administrator appoints a supervisor; the invitee becomes exactly that role", async () => {
     await world(async (run, c) => {
       await as(run, XA);
