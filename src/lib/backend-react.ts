@@ -253,6 +253,49 @@ export function useQuery<T = any, A = never>(
   return value as T | undefined;
 }
 
+/**
+ * Start a query BEFORE any page asks for it (hover/focus on a nav link, idle time after sign-in), so the first
+ * visit to a page finds its data already cached instead of an empty page waiting on the network.
+ *
+ * Same cache entry and subscription as useQuery, so the page that mounts later simply replays the value. The
+ * normal keep-alive applies: if nobody mounts it, the subscription is released after KEEPALIVE_MS (the value stays).
+ *
+ * Returns a promise that resolves once the value is cached (or after 15 s, or immediately when nobody is signed
+ * in). It never rejects and never throws: a warm-up must not surface; the page's own useQuery fetches normally.
+ */
+export function prefetchQuery<T, A = never>(fn: (args: A) => QueryHandle<T>, args?: A): Promise<void> {
+  try {
+    if (authUserId() === null) return Promise.resolve();
+    const key = `${fnCacheId(fn)}|${args === undefined ? "" : JSON.stringify(args)}`;
+    touch(key);
+    ensureSubscribed(key, fn as unknown as QueryFn, args, authEpoch);
+    const e = getEntry(key);
+    if (e.hasValue) {
+      releaseSubscription(key);
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        e.listeners.delete(onChange);
+        window.clearTimeout(timer);
+        touch(key);
+        releaseSubscription(key); // arms the keep-alive teardown now that our listener is gone
+        resolve();
+      };
+      const onChange = () => {
+        if (e.hasValue) finish();
+      };
+      const timer = window.setTimeout(finish, 15_000);
+      e.listeners.add(onChange);
+    });
+  } catch {
+    return Promise.resolve();
+  }
+}
+
 /** Identity for the query fn so call sites don't need to memoize it. */
 const FN_IDS = new WeakMap<object, string>();
 let FN_SEQ = 0;

@@ -13,7 +13,7 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { RouteBoundary } from "@/components/RouteBoundary";
-import { preloadProps } from "@/lib/route-preload";
+import { useIntentLink } from "@/lib/route-preload";
 import { Building2, LogOut, Menu, RefreshCw, ShieldEllipsis, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { BrandMark } from "@/components/BrandMark";
@@ -43,6 +43,7 @@ const NAV: { to: string; label: string; icon: typeof Building2; end?: boolean }[
 // Shared navigation list: rendered in the desktop sidebar and the mobile
 // drawer so both surfaces always show the same destinations.
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
+  const intentLink = useIntentLink(onNavigate);
   return (
     <>
       {NAV.map((item) => (
@@ -50,8 +51,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
           key={item.to}
           to={item.to}
           end={item.end}
-          onClick={onNavigate}
-          {...preloadProps(item.to)}
+          {...intentLink(item.to)}
           className={({ isActive }) =>
             `flex items-center gap-2.5 rounded-sm px-3 py-2 text-sm transition-colors ${
               isActive

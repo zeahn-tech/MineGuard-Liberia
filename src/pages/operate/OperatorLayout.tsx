@@ -75,7 +75,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { RouteBoundary } from "@/components/RouteBoundary";
-import { preloadProps, preloadSectionWhenIdle } from "@/lib/route-preload";
+import { useIntentLink, preloadSectionWhenIdle } from "@/lib/route-preload";
 import { toast } from "sonner";
 import { toastError } from "@/lib/feedback";
 import { canWorkCorrectiveActions } from "@/lib/corrective-actions";
@@ -111,6 +111,7 @@ function OperatorNavLinks({
   items: readonly { to: string; label: string; icon: typeof Building2; end?: boolean }[];
   onNavigate?: () => void;
 }) {
+  const intentLink = useIntentLink(onNavigate);
   return (
     <>
       {items.map((item) => (
@@ -118,8 +119,7 @@ function OperatorNavLinks({
           key={item.to}
           to={item.to}
           end={"end" in item ? (item as { end?: boolean }).end : false}
-          onClick={onNavigate}
-          {...preloadProps(item.to)}
+          {...intentLink(item.to)}
           className={({ isActive }) =>
             `flex items-center gap-2.5 rounded-sm px-3 py-2 text-sm transition-colors ${
               isActive
