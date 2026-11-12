@@ -19,7 +19,7 @@ export type TargetGroup = "all" | "workers" | "safety_officers" | "site_managers
 
 export const TARGET_GROUP_LABEL: Record<TargetGroup, string> = {
   all: "Everyone at the site",
-  workers: "Workers",
+  workers: "Workers and supervisors",
   safety_officers: "Safety officers",
   site_managers: "Site managers and company administrators",
 };

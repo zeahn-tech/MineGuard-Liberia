@@ -8,7 +8,8 @@ describe("company role labels", () => {
     expect(orgRoleLabel("site_manager")).toBe("Site manager");
     expect(orgRoleLabel("worker")).toBe("Worker");
     expect(orgRoleLabel("onboarding_officer")).toBe("Onboarding officer");
-    expect(Object.keys(ORG_ROLE_LABEL)).toHaveLength(5);
+    expect(orgRoleLabel("supervisor")).toBe("Supervisor");
+    expect(Object.keys(ORG_ROLE_LABEL)).toHaveLength(6);
   });
   test("missing role falls back, unknown role is readable", () => {
     expect(orgRoleLabel(undefined)).toBe("Company member");
