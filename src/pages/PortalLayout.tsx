@@ -16,6 +16,8 @@ import { sectionJump } from "@/lib/utils";
 import NotificationBell from "@/components/NotificationBell";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { LightPathProvider } from "@/components/PageLoading";
+import { RouteBoundary } from "@/components/RouteBoundary";
+import { preloadProps, preloadSectionWhenIdle } from "@/lib/route-preload";
 import { SessionGuard } from "@/components/SessionGuard";
 import {
   Dialog,
@@ -135,6 +137,9 @@ export default function PortalLayout() {
   const [targetCounty, setTargetCounty] = useState("");
 
   const isAdmin = user?.role === "admin";
+
+  // Warm the common pages while the browser is idle so a tab click never waits on a download.
+  useEffect(() => preloadSectionWhenIdle("/portal"), []);
 
   // First-run provisioning: first admin can assign roles; seed available to staff.
   const seedData = useMutation(api.seed.seedIfEmpty);
@@ -439,7 +444,9 @@ export default function PortalLayout() {
                 hint: "Reports are saved on this device first and sent when your connection allows.",
               }}
             >
-              <Outlet />
+              <RouteBoundary>
+                <Outlet />
+              </RouteBoundary>
             </LightPathProvider>
           </main>
 
@@ -644,6 +651,7 @@ function NavLinks({
           to={item.to}
           end={item.to === "/portal"}
           onClick={onNavigate}
+          {...preloadProps(item.to)}
           className={({ isActive }) =>
             `flex items-center gap-2.5 rounded-sm px-3 py-2 text-sm transition-colors ${
               isActive
