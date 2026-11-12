@@ -307,3 +307,9 @@
 .mg-site-marker > span {
   transform: rotate(45deg);
 }
+
+/* Thin progress bar shown while a tab click waits for the next page (RouteBoundary). */
+@keyframes mg-nav-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}

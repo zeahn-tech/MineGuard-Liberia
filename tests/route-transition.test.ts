@@ -12,8 +12,8 @@ describe("tab changes never blank the shell", () => {
     test(`${layout} keeps its sidebar/header and suspends only the page area`, () => {
       const src = read(layout);
       expect(src).toMatch(/<RouteBoundary>\s*<Outlet \/>\s*<\/RouteBoundary>/);
-      // links warm their chunk on hover / focus / touch
-      expect(src).toContain("{...preloadProps(item.to)}");
+      // links warm their chunk + data on hover / focus / touch and hold the current page until the next is ready
+      expect(src).toContain("{...intentLink(item.to)}");
     });
   }
 
@@ -35,5 +35,22 @@ describe("tab changes never blank the shell", () => {
       expect(main).toContain(`/${page}.tsx`);
       expect(preload).toContain(`/${page}.tsx`);
     }
+  });
+
+  test("a tab click holds the current page until the next one's code and data are ready (capped), never a blank swap", () => {
+    const pre = read("src/lib/route-preload.ts");
+    expect(pre).toContain("HOLD_MAX_MS");
+    expect(pre).toContain("e.preventDefault()");
+    // the main portal tabs start the data their page waits on
+    for (const q of ["api.stats.commandCenter", "api.inspections.listMyCorrectiveActions", "api.sites.list", "api.oversight.list"]) {
+      expect(pre).toContain(`prefetchQuery(${q}`);
+    }
+    expect(read("src/lib/backend-react.ts")).toContain("export function prefetchQuery");
+    expect(read("src/components/RouteBoundary.tsx")).toContain("useNavigationPending");
+  });
+
+  test("a page-level skeleton is labelled and visible, not a pale unlabelled screen", () => {
+    expect(read("src/components/PageLoading.tsx")).toContain('aria-hidden="true" className="text-xs font-medium uppercase');
+    expect(read("src/components/ui/skeleton.tsx")).toContain("bg-foreground/10");
   });
 });

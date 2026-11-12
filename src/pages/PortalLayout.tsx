@@ -17,7 +17,7 @@ import NotificationBell from "@/components/NotificationBell";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { LightPathProvider } from "@/components/PageLoading";
 import { RouteBoundary } from "@/components/RouteBoundary";
-import { preloadProps, preloadSectionWhenIdle } from "@/lib/route-preload";
+import { useIntentLink, preloadSectionWhenIdle } from "@/lib/route-preload";
 import { SessionGuard } from "@/components/SessionGuard";
 import {
   Dialog,
@@ -643,6 +643,7 @@ function NavLinks({
   items: typeof NAV;
   onNavigate?: () => void;
 }) {
+  const intentLink = useIntentLink(onNavigate);
   return (
     <>
       {items.map((item) => (
@@ -650,8 +651,7 @@ function NavLinks({
           key={item.to}
           to={item.to}
           end={item.to === "/portal"}
-          onClick={onNavigate}
-          {...preloadProps(item.to)}
+          {...intentLink(item.to)}
           className={({ isActive }) =>
             `flex items-center gap-2.5 rounded-sm px-3 py-2 text-sm transition-colors ${
               isActive

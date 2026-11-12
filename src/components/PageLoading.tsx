@@ -206,6 +206,14 @@ export function PageLoading({
         {phase === "offline" ? `You're offline. ${label} will load when you reconnect.` : `Loading ${label}…`}
       </span>
 
+      {/* A page-level load is never a pale, unlabelled screen: say what is coming straight away (quiet kicker,
+          no spinner, no fake progress). Sections inside a page (compact) stay as they were. */}
+      {!compact && phase === "loading" && (
+        <p aria-hidden="true" className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          {label}
+        </p>
+      )}
+
       {phase !== "loading" && (
         <div className="space-y-2 rounded-sm border border-border bg-muted/40 p-3 text-sm">
           {phase === "offline" ? (
