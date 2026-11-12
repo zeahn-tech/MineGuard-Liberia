@@ -12,6 +12,8 @@
 
 import { useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
+import { RouteBoundary } from "@/components/RouteBoundary";
+import { preloadProps } from "@/lib/route-preload";
 import { Building2, LogOut, Menu, RefreshCw, ShieldEllipsis, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { BrandMark } from "@/components/BrandMark";
@@ -49,6 +51,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
           to={item.to}
           end={item.end}
           onClick={onNavigate}
+          {...preloadProps(item.to)}
           className={({ isActive }) =>
             `flex items-center gap-2.5 rounded-sm px-3 py-2 text-sm transition-colors ${
               isActive
@@ -171,7 +174,9 @@ export default function RegistryLayout() {
             <OfflineBanner variant="readonly" />
           </header>
           <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">
-            <Outlet />
+            <RouteBoundary>
+              <Outlet />
+            </RouteBoundary>
           </main>
 
           <footer className="border-t border-border px-4 py-4 text-[11px] text-muted-foreground md:px-8 print:hidden">

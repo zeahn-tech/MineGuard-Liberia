@@ -74,6 +74,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
+import { RouteBoundary } from "@/components/RouteBoundary";
+import { preloadProps, preloadSectionWhenIdle } from "@/lib/route-preload";
 import { toast } from "sonner";
 import { toastError } from "@/lib/feedback";
 import { canWorkCorrectiveActions } from "@/lib/corrective-actions";
@@ -117,6 +119,7 @@ function OperatorNavLinks({
           to={item.to}
           end={"end" in item ? (item as { end?: boolean }).end : false}
           onClick={onNavigate}
+          {...preloadProps(item.to)}
           className={({ isActive }) =>
             `flex items-center gap-2.5 rounded-sm px-3 py-2 text-sm transition-colors ${
               isActive
@@ -136,6 +139,8 @@ function OperatorNavLinks({
 export default function OperatorLayout() {
   const { user, signOut } = useAuth();
   const membership = useQuery(api.workforce.myMembership);
+  // Warm the common pages while the browser is idle so a tab click never waits on a download.
+  useEffect(() => preloadSectionWhenIdle("/operate"), []);
   const isCompanyAdmin = membership?.orgRole === "company_admin" && membership.memberStatus === "active";
   const isOfficer = membership?.orgRole === "onboarding_officer" && membership.memberStatus === "active";
   const canWorkCa = canWorkCorrectiveActions(membership);
@@ -392,7 +397,9 @@ export default function OperatorLayout() {
                   hint: "Reports are saved on this device first and sent when your connection allows.",
                 }}
               >
-                <Outlet />
+                <RouteBoundary>
+                  <Outlet />
+                </RouteBoundary>
               </LightPathProvider>
             </main>
 
