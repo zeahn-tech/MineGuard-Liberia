@@ -117,6 +117,11 @@ select migration, applied
        exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
                 where n.nspname = 'public' and c.relname = 'public_content')
        and exists (select 1 from fns where proname = 'mg_content_transition')),
+    ('0054 company member suspend / remove / block',
+       exists (select 1 from fns where proname = 'mg_suspend_member')
+       and exists (select 1 from fns where proname = 'mg_block_member')
+       and exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                    where n.nspname = 'public' and c.relname = 'organization_member_blocks')),
     ('0018 boundaries published to Realtime',
        exists (
          select 1 from pg_publication_tables

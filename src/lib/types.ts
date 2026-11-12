@@ -158,8 +158,22 @@ export interface WorkforceMember {
   email: string | null;
   name: string | null;
   orgRole: string;
-  status: "pending" | "active";
+  status: "pending" | "active" | "suspended";
   createdAt: number;
+  /** Suspended members only (migration 0054): why, when, and who suspended them. */
+  statusReason?: string;
+  statusChangedAt?: number;
+  statusChangedByName?: string | null;
+}
+
+/** A person blocked from a company (migration 0054). Visible to company administrators only. */
+export interface CompanyBlock {
+  blockId: string;
+  email: string;
+  name: string | null;
+  reason: string;
+  blockedAt: number;
+  blockedByName: string | null;
 }
 
 /** The signed-in person's own live membership (active, or a pending request). */
