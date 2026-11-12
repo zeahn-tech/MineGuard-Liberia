@@ -108,6 +108,7 @@ import {
   type MyMembership,
   type SiteRosterMember,
   type WorkforceMember,
+  type CompanyBlock,
   type CompanyInvitation,
   type CompanyStatus,
   type PendingInvitation,
@@ -2289,6 +2290,8 @@ const INVITE_ERRORS: Record<string, string> = {
   PENDING_REQUEST_EXISTS: "You already have a pending request. Cancel it before asking another company.",
   REQUEST_COOLDOWN: "Your last request was declined. You can ask again after 24 hours.",
   UNREGISTERED_USER: "Your account is not fully set up yet. Sign out and back in, then try again.",
+  BLOCKED_FROM_COMPANY: "This person is blocked from the company. Unblock them first.",
+  BLOCK_NOT_ACTIVE: "This block has already been lifted.",
 };
 
 /** Maps a PostgREST / edge-function failure to a short, safe message. */
@@ -3155,6 +3158,85 @@ export const api = {
     revokeMember: async (args: { memberId: string }) => {
       await requireAuthed();
       const { error } = await supabase.rpc("mg_revoke_member", { p_member_id: args.memberId });
+      if (error) throw friendlyInviteError(error.message);
+    },
+
+    /** Team list including suspended members (migration 0054). Before 0054 is applied it falls
+     *  back to the older active/pending list, so the screen keeps working during release. */
+    team: (args: { organizationId: string }) =>
+      live<WorkforceMember[]>(
+        async () => {
+          await requireAuthed(true);
+          let res = await supabase.rpc("mg_company_team", { p_org: args.organizationId });
+          if (res.error && (res.error.code === "PGRST202" || /could not find the function/i.test(res.error.message ?? ""))) {
+            res = await supabase.rpc("mg_company_workforce", { p_org: args.organizationId });
+          }
+          if (res.error) throw backendError(res.error);
+          return ((res.data ?? []) as AnyRow[]).map((r) => ({
+            memberId: r.member_id as string,
+            userId: r.user_id as string,
+            email: (r.email as string) ?? null,
+            name: (r.name as string) ?? null,
+            orgRole: r.org_role as string,
+            status: r.status as WorkforceMember["status"],
+            createdAt: Date.parse(r.created_at as string),
+            statusReason: (r.status_reason as string) ?? undefined,
+            statusChangedAt: r.status_changed_at ? Date.parse(r.status_changed_at as string) : undefined,
+            statusChangedByName: (r.status_changed_by_name as string) ?? null,
+          }));
+        },
+        ["organization_members", "profiles"],
+      ),
+
+    /** People blocked from this company (migration 0054). Empty before it is applied. */
+    blocks: (args: { organizationId: string }) =>
+      live<CompanyBlock[]>(
+        async () => {
+          await requireAuthed(true);
+          const { data, error } = await supabase.rpc("mg_company_blocks", { p_org: args.organizationId });
+          if (error && (error.code === "PGRST202" || /could not find the function/i.test(error.message ?? ""))) {
+            return [];
+          }
+          if (error) throw backendError(error);
+          return ((data ?? []) as AnyRow[]).map((r) => ({
+            blockId: r.block_id as string,
+            email: r.email as string,
+            name: (r.name as string) ?? null,
+            reason: r.reason as string,
+            blockedAt: Date.parse(r.blocked_at as string),
+            blockedByName: (r.blocked_by_name as string) ?? null,
+          }));
+        },
+        ["organization_member_blocks", "organization_members"],
+      ),
+
+    /** Stops a member's access now; the membership and site assignments are kept. Reason required. */
+    suspendMember: async (args: { memberId: string; reason: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_suspend_member", { p_member_id: args.memberId, p_reason: args.reason });
+      if (error) throw friendlyInviteError(error.message);
+    },
+    reinstateMember: async (args: { memberId: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_reinstate_member", { p_member_id: args.memberId });
+      if (error) throw friendlyInviteError(error.message);
+    },
+    /** Removal with an optional reason; works on active and suspended members. */
+    removeMember: async (args: { memberId: string; reason?: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_remove_member", { p_member_id: args.memberId, p_reason: args.reason ?? null });
+      if (error) throw friendlyInviteError(error.message);
+    },
+    /** Removal plus a standing block: cannot rejoin, be invited or be reinstated. Reason required. */
+    blockMember: async (args: { memberId: string; reason: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_block_member", { p_member_id: args.memberId, p_reason: args.reason });
+      if (error) throw friendlyInviteError(error.message);
+    },
+    /** Lifts a block. Does not restore access: they must be invited or approved again. */
+    unblock: async (args: { blockId: string }) => {
+      await requireAuthed();
+      const { error } = await supabase.rpc("mg_unblock", { p_block_id: args.blockId });
       if (error) throw friendlyInviteError(error.message);
     },
 
