@@ -181,8 +181,14 @@ describe("0051: the lifecycle", () => {
       await as(run, ADM());
       const d1 = (await run(`select public.mg_content_get('${v1}') as d`))[0].d as { status: string; events: { action: string; actor: string; checks: unknown }[] };
       expect(d1.status).toBe("published");
-      expect(d1.events.map((e) => e.action)).toEqual(["create", "submit", "approve", "publish"]);
-      expect(d1.events[2].checks).toEqual({ accuracy: true, completeness: true, confidentiality: true });
+      // Events carry clock_timestamp(); the in-process test database has a millisecond clock, so two
+      // steps can share a timestamp and the database order between them is arbitrary. Compare in
+      // lifecycle order for ties (production Postgres has microsecond resolution).
+      const LIFECYCLE = ["create", "submit", "approve", "publish"];
+      const ordered = [...(d1.events as { action: string; at?: string; checks: unknown }[])]
+        .sort((a, b) => String(a.at).localeCompare(String(b.at)) || LIFECYCLE.indexOf(a.action) - LIFECYCLE.indexOf(b.action));
+      expect(ordered.map((e) => e.action)).toEqual(LIFECYCLE);
+      expect(ordered[2].checks).toEqual({ accuracy: true, completeness: true, confidentiality: true });
       await back(run);
 
       await as(run, SUP());
