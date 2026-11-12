@@ -78,6 +78,7 @@ import { toast } from "sonner";
 import { toastError } from "@/lib/feedback";
 import { canWorkCorrectiveActions } from "@/lib/corrective-actions";
 import { reviewerSites } from "@/lib/voice-review";
+import { orgRoleLabel } from "@/lib/org-roles";
 
 const OPERATOR_NAV = [
   { to: "/operate", label: "Overview", icon: ClipboardList, end: true },
@@ -259,7 +260,7 @@ export default function OperatorLayout() {
     }
   };
 
-  const identity = `operator · ${user?.operatorName ?? "—"}`;
+  const identity = `${orgRoleLabel(membership?.orgRole, "Company member")} · ${user?.operatorName ?? membership?.organizationName ?? "—"}`;
 
   return (
     <RequireOperator>
