@@ -29,13 +29,14 @@ import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { FormField } from "@/components/FormField";
 import { errorSentence } from "@/lib/error-messages";
+import { orgRoleLabel } from "@/lib/org-roles";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Administrator",
   supervisor: "Supervisor",
   inspector: "Inspector",
   registrar: "Company registrar",
-  operator: "Company user",
+  operator: "Company member",
 };
 
 function securityPath(role: string | undefined): string {
@@ -203,7 +204,13 @@ export default function ProfileSettings() {
             </div>
             <div className="min-w-0">
               <dt className="text-xs text-muted-foreground">Role</dt>
-              <dd>{user.role ? ROLE_LABEL[user.role] ?? user.role : "Not assigned yet"}</dd>
+              <dd>
+                {user.role === "operator"
+                  ? orgRoleLabel(membership?.orgRole)
+                  : user.role
+                    ? ROLE_LABEL[user.role] ?? user.role
+                    : "Not assigned yet"}
+              </dd>
             </div>
             {user.role === "operator" && membership && (
               <div className="min-w-0 sm:col-span-2">

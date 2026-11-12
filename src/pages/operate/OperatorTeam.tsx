@@ -34,13 +34,14 @@ import { toastSuccess } from "@/lib/feedback";
 import { validateInvite } from "@/lib/form-rules";
 import { emailProblem, focusField } from "@/lib/validation";
 
-const ASSIGNABLE = ["worker", "safety_officer", "site_manager", "onboarding_officer"] as const;
+const ASSIGNABLE = ["worker", "supervisor", "safety_officer", "site_manager", "onboarding_officer"] as const;
 /** Join requests are approved into an operational role only (the server enforces this too). */
 const REQUEST_ROLES = ["worker", "safety_officer", "site_manager"] as const;
 const ROLE_LABEL: Record<string, string> = {
   company_admin: "Company administrator",
   site_manager: "Site manager",
   safety_officer: "Safety officer",
+  supervisor: "Supervisor",
   worker: "Worker",
   onboarding_officer: "Onboarding officer",
 };

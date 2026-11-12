@@ -24,6 +24,7 @@ const ROLE_LABEL: Record<string, string> = {
   company_admin: "Company administrator",
   site_manager: "Site manager",
   safety_officer: "Safety officer",
+  supervisor: "Supervisor",
   worker: "Worker",
   onboarding_officer: "Onboarding officer",
 };

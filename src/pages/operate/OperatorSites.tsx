@@ -80,6 +80,7 @@ export function OperatorSites() {
 const SITE_ROLE_LABEL: Record<string, string> = {
   site_manager: "Site manager",
   safety_officer: "Safety officer",
+  supervisor: "Supervisor",
   worker: "Worker",
 };
 
@@ -108,7 +109,7 @@ function SiteTeam({ siteId }: { siteId: string }) {
     }
   }
 
-  const canTouch = (role: string) => me.orgRole === "company_admin" || role === "worker" || role === "safety_officer";
+  const canTouch = (role: string) => me.orgRole === "company_admin" || role === "worker" || role === "safety_officer" || role === "supervisor";
 
   return (
     <Card className="paper rounded-none border-border shadow-none">

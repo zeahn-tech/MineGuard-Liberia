@@ -33,7 +33,7 @@ const ROLE_LABEL: Record<string, string> = {
 };
 const ORG_ROLE: Record<string, string> = {
   company_admin: "Company administrator", site_manager: "Site manager", safety_officer: "Safety officer",
-  onboarding_officer: "Onboarding officer", worker: "Worker",
+  supervisor: "Supervisor", onboarding_officer: "Onboarding officer", worker: "Worker",
 };
 
 export default function AdminUsers() {
