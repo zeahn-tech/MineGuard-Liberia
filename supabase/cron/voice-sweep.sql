@@ -9,8 +9,8 @@
    'mineguard-voice-sweep',
    '* * * * *',
    $$ select net.http_post(
-        url     := 'https://<PROJECT-REF>.supabase.co/functions/v1/worker-voice-push',
-        headers := jsonb_build_object('Content-Type','application/json','x-sweep-secret','<WORKER_VOICE_PUSH_SECRET>'),
+        url     := 'https://ewukneoblhogtreeekqc.supabase.co/functions/v1/worker-voice-push',
+        headers := jsonb_build_object('Content-Type','application/json','x-sweep-secret','a8f3c91e7d42b650f1a9e83c6d5b0274e9f18a3c7b62d0e5f4a91c8b3d76e2059a1f4c8e7b32d6a0f9e51c4b8d27a603e6f19a5c2b84d7e0f3a96c1b5d28e47'),
         body    := '{}'::jsonb,
         timeout_milliseconds := 20000) $$);
 
