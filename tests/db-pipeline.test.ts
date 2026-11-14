@@ -123,7 +123,9 @@ describe("targeted test selection", () => {
   test("an unrelated migration does not pull in the whole suite", () => {
     const all = selectTests([], ROOT).tests;
     const voice = selectTests(["supabase/migrations/0053_voice_hardening.sql"], ROOT).tests;
-    expect(all.length).toBeLessThan(5);
+    // with nothing changed, only the structural suites run (migration hygiene/apply/replay, pipeline logic, phase-e) — never feature suites
+    expect(all.length).toBeGreaterThan(0);
+    expect(all.every((t: string) => /migration-|db-pipeline|phase-e-/.test(t))).toBe(true);
     expect(voice.some((t: string) => /voice/.test(t))).toBe(true);
     expect(voice.length).toBeLessThan(60);
   });
