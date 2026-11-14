@@ -1,0 +1,5 @@
+{
+  "_comment": "Read by scripts/db/cli.mjs. firstManagedVersion: the pipeline refuses to apply while any pending migration is older than this (versions below it were applied before the pipeline existed and must not be replayed). knownDuplicateVersions pins historical collisions; the 0046 collision was resolved by renumbering the unrecorded files (supabase/migration-renumbering.md), so none remain.",
+  "firstManagedVersion": "0047",
+  "knownDuplicateVersions": {}
+}

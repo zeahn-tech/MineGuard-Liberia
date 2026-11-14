@@ -1,0 +1,195 @@
+name: Database migrations (production)
+
+# Applies pending Supabase migrations to PRODUCTION from the main branch only, in a fixed order:
+#   validate -> plan (dry run) -> apply (needs the `production` environment approval) -> functions.
+# Nothing here runs `supabase migration repair`, `db reset`, `--include-all` or `--include-seed`.
+# Setup, secrets and recovery: docs/db-deployment.md
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/migrations/**"
+      - "supabase/migration-policy.json"
+      - "supabase/functions/**"
+      - ".github/workflows/db-migrate.yml"
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Apply pending migrations to production (unchecked = validate and plan only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# One production database deployment at a time. A second run waits for the first (it is never
+# cancelled mid-apply); it cannot run in parallel.
+concurrency:
+  group: production-db-migrations
+  cancel-in-progress: false
+
+env:
+  EXPECTED_PROJECT_REF: ewukneoblhogtreeekqc   # not a secret; the project URL is derived from it, they are not interchangeable
+  SUPABASE_CLI_VERSION: "2.122.0"              # pinned deliberately; change it in a reviewed PR
+
+jobs:
+  validate:
+    name: Validate migrations and run targeted tests
+    runs-on: ubuntu-latest
+    outputs:
+      functions: ${{ steps.changes.outputs.functions }}
+    steps:
+      - name: Only the main branch may deploy
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::Production database deployments run from main only (got ${GITHUB_REF})"; exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Validate migration files (names, unique versions, LF, transactions, destructive gate)
+        run: node scripts/db/cli.mjs validate
+      - name: Work out what changed
+        id: changes
+        run: |
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then BEFORE="${GITHUB_SHA}~1"; fi
+          git diff --name-only "$BEFORE" "${GITHUB_SHA}" > changed.txt || git diff-tree --no-commit-id --name-only -r "${GITHUB_SHA}" > changed.txt
+          echo "changed files:"; sed 's/^/  /' changed.txt
+          if grep -q '^supabase/functions/' changed.txt; then echo "functions=true" >> "$GITHUB_OUTPUT"; else echo "functions=false" >> "$GITHUB_OUTPUT"; fi
+          grep '^supabase/migrations/' changed.txt > changed-migrations.txt || true
+      - name: Select the tests that touch the changed database objects
+        id: select
+        run: |
+          node scripts/db/cli.mjs select-tests $(cat changed-migrations.txt) > selected-tests.txt
+          echo "targeted tests:"; sed 's/^/  /' selected-tests.txt
+      - name: Run the targeted tests
+        run: bun test $(cat selected-tests.txt) --timeout 120000
+
+  plan:
+    name: Compare history and dry-run
+    needs: validate
+    runs-on: ubuntu-latest
+    outputs:
+      pending: ${{ steps.compare.outputs.pending }}
+      count: ${{ steps.compare.outputs.count }}
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Required secrets are present and point at the expected project
+        run: |
+          for n in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD SUPABASE_PROJECT_REF; do
+            [ -n "${!n}" ] || { echo "::error::Missing required secret $n"; exit 1; }
+          done
+          [ "$SUPABASE_PROJECT_REF" = "$EXPECTED_PROJECT_REF" ] || { echo "::error::SUPABASE_PROJECT_REF does not match the expected production project"; exit 1; }
+      - uses: supabase/setup-cli@v1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Link the project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+      - name: Read local and remote migration history
+        run: supabase migration list --linked | tee migration-list.txt
+      - name: Compare histories (fails on duplicates, remote-only, out-of-order or hand-applied versions)
+        id: compare
+        run: node scripts/db/cli.mjs compare migration-list.txt
+      - name: Dry run
+        if: steps.compare.outputs.count != '0'
+        run: supabase db push --linked --dry-run | tee dry-run.txt
+      - name: Summary
+        run: |
+          {
+            echo "### Production migration plan"
+            echo "Pending: \`${{ steps.compare.outputs.pending }}\` (count ${{ steps.compare.outputs.count }})"
+            echo '```'; [ -f dry-run.txt ] && cat dry-run.txt || echo "Nothing to apply."; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    name: Apply to production
+    needs: plan
+    if: needs.plan.outputs.count != '0' && (github.event_name == 'push' || inputs.apply == true)
+    runs-on: ubuntu-latest
+    # Configure required reviewers on this environment: that approval is the human gate for production.
+    environment: production
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Required secrets are present and point at the expected project
+        run: |
+          for n in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD SUPABASE_PROJECT_REF SUPABASE_DB_URL; do
+            [ -n "${!n}" ] || { echo "::error::Missing required secret $n"; exit 1; }
+          done
+          [ "$SUPABASE_PROJECT_REF" = "$EXPECTED_PROJECT_REF" ] || { echo "::error::SUPABASE_PROJECT_REF does not match the expected production project"; exit 1; }
+          case "$SUPABASE_DB_URL" in *"$EXPECTED_PROJECT_REF"*) ;; *) echo "::error::SUPABASE_DB_URL does not reference the expected project"; exit 1;; esac
+      - uses: supabase/setup-cli@v1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Link the project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+      - name: Re-check history immediately before applying (state may have changed since the plan)
+        run: |
+          supabase migration list --linked | tee before.txt
+          node scripts/db/cli.mjs compare before.txt
+      - name: Capture the current access layer (read-only; kept so it can be restored)
+        run: psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -At -F $'\t' -f supabase/maintenance/capture_pre_0056.sql > pre-apply-capture.tsv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pre-apply-capture
+          path: pre-apply-capture.tsv
+          retention-days: 90
+      - name: Apply the pending migrations
+        # --yes: the CLI prompts for confirmation and CI is non-interactive. The human decision is the
+        # `production` environment approval, and the exact migrations were shown by the dry run above.
+        run: supabase db push --linked --yes
+      - name: Verify the migration history afterwards (nothing may remain pending)
+        run: |
+          supabase migration list --linked | tee after.txt
+          node scripts/db/cli.mjs compare after.txt --expect-none
+      - name: Verify security posture and an administrator exists
+        run: |
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/checks/security_posture.sql
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/checks/admin_present.sql
+      - name: Summary
+        run: echo "Applied ${{ needs.plan.outputs.pending }}" >> "$GITHUB_STEP_SUMMARY"
+
+  functions:
+    name: Deploy Edge Functions
+    needs: [validate, plan, apply]
+    # Only after the database is known to be at the right version: either migrations just applied
+    # successfully, or there was nothing to apply. Never when validation, planning or apply failed.
+    if: >-
+      ${{ always() && needs.validate.result == 'success' && needs.plan.result == 'success' &&
+      needs.validate.outputs.functions == 'true' &&
+      (needs.apply.result == 'success' || (needs.apply.result == 'skipped' && needs.plan.outputs.count == '0')) }}
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Required secrets
+        run: |
+          for n in SUPABASE_ACCESS_TOKEN SUPABASE_PROJECT_REF; do
+            [ -n "${!n}" ] || { echo "::error::Missing required secret $n"; exit 1; }
+          done
+          [ "$SUPABASE_PROJECT_REF" = "$EXPECTED_PROJECT_REF" ] || { echo "::error::project mismatch"; exit 1; }
+      - uses: supabase/setup-cli@v1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Deploy (JWT verification stays ON except where the function documents otherwise)
+        run: |
+          for fn in account-delete ai-assist company-admin-invite emergency-dispatch; do
+            supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" --use-api
+          done
+          # called only by a scheduler holding a shared secret; documented in its source as --no-verify-jwt
+          supabase functions deploy worker-voice-push --project-ref "$SUPABASE_PROJECT_REF" --use-api --no-verify-jwt

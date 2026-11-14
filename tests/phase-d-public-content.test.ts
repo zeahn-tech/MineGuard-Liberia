@@ -18,10 +18,10 @@ beforeAll(async () => {
   // Other files re-apply older migrations on the shared DB: assert the real end state.
   const db = await getDb();
   for (const m of [
-    "0047_close_admin_bootstrap.sql",
-    "0048_public_user_identity.sql",
-    "0049_public_reports_feedback.sql",
-    "0051_public_content.sql",
+    "0048_close_admin_bootstrap.sql",
+    "0049_public_user_identity.sql",
+    "0050_public_reports_feedback.sql",
+    "0052_public_content.sql",
   ]) {
     await db.exec(read(`supabase/migrations/${m}`));
   }
@@ -533,7 +533,7 @@ describe("0051: source contracts", () => {
     expect(m).toContain('path="content"');
   });
   test("the migration grants no table writes, no anon function access, and publishes nothing", () => {
-    const m = read("supabase/migrations/0051_public_content.sql").replace(/--[^\n]*/g, "");
+    const m = read("supabase/migrations/0052_public_content.sql").replace(/--[^\n]*/g, "");
     expect(m).not.toMatch(/\bgrant\s+(insert|update|delete|all)\b/i);
     expect(m).not.toMatch(/grant execute[^;]*to anon/i);
     expect(m).not.toMatch(/'published'\s*,\s*now\(\)/);

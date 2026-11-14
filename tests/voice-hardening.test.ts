@@ -22,7 +22,7 @@ const OTH = "aaaaaaaa-0000-4000-8000-0000000000d1"; // other company's administr
 beforeAll(async () => { f = await getFixture(); });
 beforeEach(async () => {
   const db = await getDb();
-  for (const m of ["0040_emergency_alerts", "0041_emergency_authority_corrections", "0043_jsa_with_human_review", "0044_role_assignment_and_emergency_contacts", "0046_worker_voice", "0050_ministry_voice", "0052_voice_hardening"]) {
+  for (const m of ["0040_emergency_alerts", "0041_emergency_authority_corrections", "0043_jsa_with_human_review", "0044_role_assignment_and_emergency_contacts", "0047_worker_voice", "0051_ministry_voice", "0053_voice_hardening"]) {
     await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", `${m}.sql`), "utf8"));
   }
 });

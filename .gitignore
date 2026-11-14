@@ -26,3 +26,11 @@ src/convex/_generated
 # local backup output
 backups/
 e2e/.artifacts/
+
+# local Supabase CLI state, database dumps and backups (never commit)
+supabase/.temp/
+supabase/.branches/
+*.dump
+*.pgdump
+*.bak
+*.sql.gpg

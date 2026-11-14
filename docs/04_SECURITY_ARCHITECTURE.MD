@@ -98,7 +98,7 @@ claims the row for the session; per-user limit 10 an hour, duplicates refused fo
 ownership and tracking codes are immutable, even for staff. Owners read their reports and feedback
 only through curated RPCs (`mg_my_community_reports`, `mg_my_feedback`); the tables give them no
 direct access. Feedback is verified-accounts-only, rate limited, answered by reviewers, and RPC-only
-for writes. Rollback: `supabase/maintenance/rollback_0049_public_reports_feedback.sql` (the new
+for writes. Rollback: `supabase/maintenance/rollback_0050_public_reports_feedback.sql` (the new
 `other` report category stays).
 
 **Approved public content (migration 0051).** The public reads only published, in-date rows of

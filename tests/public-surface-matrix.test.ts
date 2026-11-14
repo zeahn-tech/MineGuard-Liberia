@@ -26,10 +26,10 @@ beforeAll(async () => {
   // in order; every file is idempotent).
   const db = await getDb();
   for (const m of [
-    "0047_close_admin_bootstrap.sql",
-    "0048_public_user_identity.sql",
-    "0049_public_reports_feedback.sql",
-    "0051_public_content.sql",
+    "0048_close_admin_bootstrap.sql",
+    "0049_public_user_identity.sql",
+    "0050_public_reports_feedback.sql",
+    "0052_public_content.sql",
   ]) {
     await db.exec(read(`supabase/migrations/${m}`));
   }
