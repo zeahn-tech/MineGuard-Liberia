@@ -1,0 +1,110 @@
+name: Database rehearsal (staging)
+
+# Manual only. Copies PRODUCTION'S SCHEMA (no data) into the STAGING project, then runs the real pipeline steps there:
+# history comparison, dry run, apply, posture check and a schema fingerprint comparison against a clean build.
+# It only ever READS production and only ever WRITES staging. Run it from the pull-request branch before merging to main.
+# Setup and reading the result: docs/db-deployment.md
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type STAGING to confirm the target is the staging project (its schema is replaced)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-db-rehearsal
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: ewukneoblhogtreeekqc
+  SUPABASE_CLI_VERSION: "2.122.0"
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    env:
+      PRODUCTION_DB_URL: ${{ secrets.SUPABASE_DB_URL }}        # read only: pg_dump
+      STAGING_PROJECT_REF: ${{ secrets.STAGING_PROJECT_REF }}
+      STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+      STAGING_DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    steps:
+      - name: Safety checks — this workflow may only write to a project that is not production
+        run: |
+          [ "${{ inputs.confirm }}" = "STAGING" ] || { echo "::error::Type STAGING to confirm"; exit 1; }
+          for n in PRODUCTION_DB_URL STAGING_PROJECT_REF STAGING_DB_URL STAGING_DB_PASSWORD SUPABASE_ACCESS_TOKEN; do
+            [ -n "${!n}" ] || { echo "::error::Missing required secret for $n"; exit 1; }
+          done
+          [ "$STAGING_PROJECT_REF" != "$PRODUCTION_PROJECT_REF" ] || { echo "::error::STAGING_PROJECT_REF is the production project"; exit 1; }
+          case "$STAGING_DB_URL" in *"$PRODUCTION_PROJECT_REF"*) echo "::error::STAGING_DB_URL references the production project"; exit 1;; esac
+          case "$STAGING_DB_URL" in *"$STAGING_PROJECT_REF"*) ;; *) echo "::error::STAGING_DB_URL does not reference the staging project"; exit 1;; esac
+          case "$PRODUCTION_DB_URL" in *"$PRODUCTION_PROJECT_REF"*) ;; *) echo "::error::SUPABASE_DB_URL does not reference production"; exit 1;; esac
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: node scripts/db/cli.mjs validate
+      - name: PostgreSQL 17 client (pg_dump must be at least the server's version)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+          /usr/lib/postgresql/17/bin/pg_dump --version
+      - name: Dump production schema (read only) — public schema without data, migration history with data
+        run: |
+          PGD=/usr/lib/postgresql/17/bin/pg_dump
+          $PGD "$PRODUCTION_DB_URL" --no-owner --no-privileges --schema-only --schema=public --clean --if-exists -f public.sql
+          $PGD "$PRODUCTION_DB_URL" --no-owner --no-privileges --schema=supabase_migrations --clean --if-exists -f history.sql
+          wc -l public.sql history.sql
+      - name: Replace staging's schema with the dump (staging only)
+        run: |
+          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -c "drop schema if exists public cascade; create schema public; grant usage on schema public to postgres, anon, authenticated, service_role; alter default privileges in schema public grant all on tables to postgres, anon, authenticated, service_role; alter default privileges in schema public grant all on functions to postgres, anon, authenticated, service_role; alter default privileges in schema public grant all on sequences to postgres, anon, authenticated, service_role;"
+          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -f public.sql
+          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -f history.sql
+      - uses: supabase/setup-cli@v1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Link STAGING
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+        run: supabase link --project-ref "$STAGING_PROJECT_REF"
+      - name: History comparison (must show exactly 0047 onward pending)
+        id: compare
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+        run: |
+          supabase migration list --linked | tee migration-list.txt
+          node scripts/db/cli.mjs compare migration-list.txt
+      - name: Dry run
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+        run: supabase db push --linked --dry-run
+      - name: Apply to STAGING
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+        run: supabase db push --linked --yes
+      - name: Nothing may remain pending
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+        run: |
+          supabase migration list --linked | tee after.txt
+          node scripts/db/cli.mjs compare after.txt --expect-none
+      - name: Security posture on staging
+        run: psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -f supabase/checks/security_posture.sql
+      - name: Schema fingerprint, staging vs a clean build of the repo (report)
+        run: |
+          bun scripts/db/clean-fingerprint.ts > expected.json
+          { echo "select coalesce(json_agg(t), '[]') from ("; sed '$ s/;[[:space:]]*$//' supabase/checks/schema_fingerprint.sql; echo ") t;"; } > fp-wrapped.sql
+          psql "$STAGING_DB_URL" -At -f fp-wrapped.sql > actual.json
+          node scripts/db/diff-fingerprint.mjs expected.json actual.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rehearsal-fingerprints
+          path: |
+            expected.json
+            actual.json
+          retention-days: 30
