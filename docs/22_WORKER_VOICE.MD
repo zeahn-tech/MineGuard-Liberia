@@ -1,6 +1,6 @@
 # 22 — Worker Voice: named, confidential and anonymous safety reporting
 
-Implementation Phase 4. Migration `0046_worker_voice.sql`. Not applied to production by this change.
+Implementation Phase 4. Migration `0047_worker_voice.sql`. Not applied to production by this change.
 
 ## What it is
 
@@ -107,7 +107,7 @@ company procedures and legal channels. No regulator channel is implied.
 
 ## Deployment
 
-1. Apply `0046_worker_voice.sql` (after 0044/0045). Run it yourself; nothing here applies it.
+1. Apply `0047_worker_voice.sql` (after 0044/0045). Run it yourself; nothing here applies it.
 2. No secrets, no new service, no environment variables, no Edge Function.
 3. Deploy the app. Public routes: `/voice`, `/voice/status`. Member routes: `/operate/voice`,
    `/operate/voice-review`.
@@ -194,7 +194,7 @@ earlier proposal that gave the Ministry read access to company reports was **not
 | A9 | Ministry → company requests | Template topics (no child or forced labour template), only when at least **three** Ministry reports match the topic in 180 days, one open request per company and topic per 30 days, no report id or fingerprint anywhere, day-level dates, generic notification, company administrators answer, Ministry follows up or closes |
 
 ### Deployment (0052)
-1. Apply `0052_voice_hardening.sql` after `0051`. It drops and recreates a few functions whose signatures grew; 0046
+1. Apply `0053_voice_hardening.sql` after `0051`. It drops and recreates a few functions whose signatures grew; 0046
    and 0050 now `drop function if exists` first so they stay safe to re-run.
 2. Deploy `worker-voice-push` (`supabase functions deploy worker-voice-push --no-verify-jwt --use-api`), set
    `WORKER_VOICE_PUSH_SECRET`, reuse the existing `VAPID_*` secrets, then schedule `supabase/cron/voice-sweep.sql`

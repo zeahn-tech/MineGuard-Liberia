@@ -80,3 +80,6 @@ jobs:
           tests/phase-d-public-content.test.ts
           tests/public-surface-matrix.test.ts
           tests/migration-hygiene.test.ts
+          tests/db-pipeline.test.ts
+          tests/migration-replay.test.ts
+          tests/phase-e-legacy-access-retirement.test.ts

@@ -1,6 +1,6 @@
 # 23 — Worker Voice to the Ministry: confidential reporting to government
 
-Migration `0050_ministry_voice.sql`. Builds on `22_WORKER_VOICE.MD` (migration 0046). Not applied to
+Migration `0051_ministry_voice.sql`. Builds on `22_WORKER_VOICE.MD` (migration 0046). Not applied to
 production by this change.
 
 ## What it is
@@ -96,7 +96,7 @@ MineGuard cannot guarantee protection from retaliation. Additionally:
 
 ## Deployment
 
-1. Apply `0050_ministry_voice.sql` after `0046_worker_voice.sql` (it reuses its site codes and rate-limit helper)
+1. Apply `0051_ministry_voice.sql` after `0047_worker_voice.sql` (it reuses its site codes and rate-limit helper)
    and after `0049`. Run it yourself; nothing here applies it.
 2. No secrets, no new service, no environment variables, no Edge Function.
 3. Deploy the app. Public: `/voice`, `/voice/status` (now also takes `MV-` codes). Members: `/operate/voice`.

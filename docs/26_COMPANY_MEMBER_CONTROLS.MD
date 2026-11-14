@@ -19,7 +19,7 @@ Screen: **Operate → Team** (company administrators only).
 Search by name/email, filter by role and status, per-row actions menu, suspension note (when/by whom/why), *Blocked people* list with *Unblock*.
 
 ## Deployment
-Apply `0054_company_member_discipline.sql` **before** the frontend. Until then the screen falls back to the old list (no suspended members, no block list).
+Apply `0055_company_member_discipline.sql` **before** the frontend. Until then the screen falls back to the old list (no suspended members, no block list).
 
 ## Known limits
 - A suspension has no automatic end date; an administrator must reinstate.

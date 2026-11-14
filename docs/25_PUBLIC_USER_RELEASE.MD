@@ -129,9 +129,9 @@ safely: the access-class lookup returns "unknown" and the new pages show their e
 - Company and Ministry users: sign in and confirm their normal screens and data are unchanged.
 
 **Rollback** — reverse order, only the layers you need, each in its own transaction:
-`rollback_0051_public_content.sql` (loses content and history; re-opens anonymous live statistics),
-`rollback_0049_public_reports_feedback.sql` (loses feedback and report owner links),
-`rollback_0048_public_user_identity.sql` (loses restriction records),
+`rollback_0052_public_content.sql` (loses content and history; re-opens anonymous live statistics),
+`rollback_0050_public_reports_feedback.sql` (loses feedback and report owner links),
+`rollback_0049_public_user_identity.sql` (loses restriction records),
 `rollback_0047_reopens_admin_bootstrap.sql` (**re-opens the self-service administrator bootstrap — avoid**).
 The frontend can be rolled back independently by redeploying the previous build.
 

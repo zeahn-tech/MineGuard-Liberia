@@ -13,14 +13,14 @@ const read = (p: string) => readFileSync(join(ROOT, p), "utf8");
 const MIGRATIONS = readdirSync(join(ROOT, "supabase", "migrations")).filter((f) => f.endsWith(".sql")).sort();
 
 describe("migration numbering", () => {
-  test("numbers are unique — the one historical duplicate (0046) is pinned and no new one may appear", () => {
+  test("numbers are unique — no two migrations may share a version (the CLI cannot record both)", () => {
     const byNumber = new Map<string, string[]>();
     for (const f of MIGRATIONS) {
       const n = f.slice(0, 4);
       byNumber.set(n, [...(byNumber.get(n) ?? []), f]);
     }
     const dupes = [...byNumber.entries()].filter(([, v]) => v.length > 1);
-    expect(dupes).toEqual([["0046", ["0046_corrective_action_roles.sql", "0046_worker_voice.sql"]]]);
+    expect(dupes).toEqual([]);
   });
 
   test("the chain has no gaps and every file is NNNN_snake_case.sql", () => {
@@ -42,10 +42,10 @@ describe("migration numbering", () => {
 describe("Public User programme: rollback and recovery files", () => {
   test("every programme migration has a rollback script outside supabase/migrations", () => {
     for (const [n, name] of [
-      ["0047", "reopens_admin_bootstrap"],
-      ["0048", "public_user_identity"],
-      ["0049", "public_reports_feedback"],
-      ["0051", "public_content"],
+      ["0048", "reopens_admin_bootstrap"],
+      ["0049", "public_user_identity"],
+      ["0050", "public_reports_feedback"],
+      ["0052", "public_content"],
     ]) {
       const p = `supabase/maintenance/rollback_${n}_${name}.sql`;
       expect(existsSync(join(ROOT, p)), p).toBe(true);

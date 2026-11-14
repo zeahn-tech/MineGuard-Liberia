@@ -16,7 +16,7 @@ beforeAll(async () => {
   f = await getFixture();
   // Other files re-apply older migrations on the shared DB: assert the real end state.
   const db = await getDb();
-  for (const m of ["0047_close_admin_bootstrap.sql", "0048_public_user_identity.sql", "0049_public_reports_feedback.sql", "0051_public_content.sql"]) {
+  for (const m of ["0048_close_admin_bootstrap.sql", "0049_public_user_identity.sql", "0050_public_reports_feedback.sql", "0052_public_content.sql"]) {
     await db.exec(read(`supabase/migrations/${m}`));
   }
 }, 120000);
@@ -331,7 +331,7 @@ describe("0048: source contracts", () => {
     expect(r).toContain("anonymous_guest");
   });
   test("the migration is additive: it never grants a role, never loosens a policy", () => {
-    const m = read("supabase/migrations/0048_public_user_identity.sql").replace(/--[^\n]*/g, "");
+    const m = read("supabase/migrations/0049_public_user_identity.sql").replace(/--[^\n]*/g, "");
     expect(m).not.toMatch(/\bgrant\s+(insert|update|delete|all)\b/i);
     expect(m).not.toMatch(/to anon/i);
     expect(m).not.toMatch(/using\s*\(\s*true\s*\)/i);

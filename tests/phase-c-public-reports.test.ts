@@ -16,7 +16,7 @@ beforeAll(async () => {
   f = await getFixture();
   // Other files re-apply older migrations on the shared DB: assert the real end state.
   const db = await getDb();
-  for (const m of ["0047_close_admin_bootstrap.sql", "0048_public_user_identity.sql", "0049_public_reports_feedback.sql", "0051_public_content.sql"]) {
+  for (const m of ["0048_close_admin_bootstrap.sql", "0049_public_user_identity.sql", "0050_public_reports_feedback.sql", "0052_public_content.sql"]) {
     await db.exec(read(`supabase/migrations/${m}`));
   }
 }, 120000);
@@ -454,12 +454,12 @@ describe("0049: account deletion anonymizes ownership", () => {
 
 describe("0049: source contracts", () => {
   test("the anonymous submit and track functions are NOT redefined by 0049", () => {
-    const m = read("supabase/migrations/0049_public_reports_feedback.sql").replace(/--[^\n]*/g, "");
+    const m = read("supabase/migrations/0050_public_reports_feedback.sql").replace(/--[^\n]*/g, "");
     expect(m).not.toMatch(/create or replace function public\.submit_community_report\(/);
     expect(m).not.toMatch(/create or replace function public\.track_community_report\(/);
   });
   test("the migration grants no table writes and no anon access", () => {
-    const m = read("supabase/migrations/0049_public_reports_feedback.sql").replace(/--[^\n]*/g, "");
+    const m = read("supabase/migrations/0050_public_reports_feedback.sql").replace(/--[^\n]*/g, "");
     expect(m).not.toMatch(/\bgrant\s+(insert|update|delete|all)\b/i);
     expect(m).not.toMatch(/\bto anon\b/i);
   });
