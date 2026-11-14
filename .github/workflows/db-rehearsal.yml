@@ -57,12 +57,13 @@ jobs:
       - name: Dump production schema (read only) — public schema without data, migration history with data
         run: |
           PGD=/usr/lib/postgresql/17/bin/pg_dump
-          $PGD "$PRODUCTION_DB_URL" --no-owner --no-privileges --schema-only --schema=public --clean --if-exists -f public.sql
-          $PGD "$PRODUCTION_DB_URL" --no-owner --no-privileges --schema=supabase_migrations --clean --if-exists -f history.sql
+          $PGD "$PRODUCTION_DB_URL" --no-owner --no-privileges --schema-only --schema=public -f public.sql
+          $PGD "$PRODUCTION_DB_URL" --no-owner --no-privileges --schema=supabase_migrations -f history.sql
           wc -l public.sql history.sql
       - name: Replace staging's schema with the dump (staging only)
         run: |
-          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -c "drop schema if exists public cascade; create schema public; grant usage on schema public to postgres, anon, authenticated, service_role; alter default privileges in schema public grant all on tables to postgres, anon, authenticated, service_role; alter default privileges in schema public grant all on functions to postgres, anon, authenticated, service_role; alter default privileges in schema public grant all on sequences to postgres, anon, authenticated, service_role;"
+          # staging is rebuilt from scratch, so the dumps carry no DROP statements (--clean would fail on tables that no longer exist)
+          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -c "drop schema if exists public cascade; drop schema if exists supabase_migrations cascade; create schema public; grant usage on schema public to postgres, anon, authenticated, service_role; alter default privileges in schema public grant all on tables to postgres, anon, authenticated, service_role; alter default privileges in schema public grant all on functions to postgres, anon, authenticated, service_role; alter default privileges in schema public grant all on sequences to postgres, anon, authenticated, service_role; create schema if not exists extensions; create extension if not exists pgcrypto with schema extensions; create extension if not exists pg_trgm with schema extensions;"
           psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -f public.sql
           psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -f history.sql
       - uses: supabase/setup-cli@v1
