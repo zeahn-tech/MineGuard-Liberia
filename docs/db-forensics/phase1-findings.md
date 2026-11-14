@@ -37,3 +37,11 @@ Not verified live: a site manager assigned to *part* of a multi-site company (pr
 covered by tests/phase-e-legacy-access-retirement.test.ts on a rebuilt legacy state).
 Still open: the duplicate `0046`, the unrecorded `0047_worker_voice`/`0047`-`0054`, 9 worker-voice functions whose text
 differs from the repo, legacy functions still callable over RPC, leaked-password protection disabled (Auth setting).
+
+## Staging rehearsal result 2026-11-14 (production schema + 0047-0057, no data)
+Migrations 0047-0057 applied to staging's copy of production's schema without error; history comparison clean before and after.
+Fingerprint against a clean build of the repo: equal 1525, differs 11, missing-live 20, live-only 30. Reviewed:
+- **Differs (11)** — all cosmetic: five identity helpers (`mg_is_admin`, `mg_is_staff`, `mg_is_reviewer`, `mg_profile`, `mg_role`) differ only in text; three policies differ only in an older column-alias list; `community_reports_len_chk` is `NOT VALID` in production; `rate_limits.window_start` is nullable in production; `mg_guard_finding_update` in production is STRICTER (open -> acknowledged, own company only).
+- **Missing-live (20)** — 15 triggers + 4 functions + 1 FK. Legacy-named equivalents exist for the stamp/guard triggers on incidents, observations, evidence, findings, corrective actions, inspections and profiles (production's incident/observation guard `mg_guard_staff_update` is stricter than the repo's). **Four had no equivalent:** `community_reports_guard`, `inspection_templates_guard`, `sites_guard`, `sites_rescope` (the report guard protects ownership, tracking code and status transitions) — fixed by migration 0058. Not fixed: `audit_log_actor_id_fkey` (integrity only; existing rows may violate it).
+- **Live-only (30)** — legacy functions (`mg_is_operator`, `mg_can_access_site(text,text)`, `mg_can_access_site_row(text,text)`, `mg_can_read_county_rows`, `mg_guard_staff_update`, `mg_stamp_site`, `rls_auto_enable`), the public mirror and seed policies, legacy-named triggers, `inspections.county/operator_name`. No migration creates them and none grants access now that the legacy policies are gone; they need their own cleanup review.
+0058 was dry-run on production's real state in a rolled-back transaction (all four triggers attach).

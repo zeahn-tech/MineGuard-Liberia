@@ -109,7 +109,7 @@ export function extractObjects(sql) {
 
 /** Tests that mention any object the changed migrations touch, plus the always-run structural suites. */
 export function selectTests(changedMigrations, root) {
-  const always = ["tests/migration-apply.test.ts", "tests/migration-hygiene.test.ts", "tests/db-pipeline.test.ts", "tests/phase-e-legacy-access-retirement.test.ts"].filter((t) => existsSync(join(root, t)));
+  const always = ["tests/migration-apply.test.ts", "tests/migration-hygiene.test.ts", "tests/db-pipeline.test.ts", "tests/phase-e-legacy-access-retirement.test.ts", "tests/phase-e-guard-convergence.test.ts"].filter((t) => existsSync(join(root, t)));
   const objects = new Set();
   for (const f of changedMigrations) {
     const p = join(root, f);
