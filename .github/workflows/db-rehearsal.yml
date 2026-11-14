@@ -57,14 +57,14 @@ jobs:
       - name: Dump production schema (read only) — public schema without data, migration history with data
         run: |
           PGD=/usr/lib/postgresql/17/bin/pg_dump
-          $PGD "$PRODUCTION_DB_URL" --no-owner --no-privileges --schema-only --schema=public -f public.sql
+          $PGD "$PRODUCTION_DB_URL" --no-owner --schema-only --schema=public -f public.sql
           $PGD "$PRODUCTION_DB_URL" --no-owner --no-privileges --schema=supabase_migrations -f history.sql
           wc -l public.sql history.sql
       - name: Replace staging's schema with the dump (staging only)
         run: |
           # staging is rebuilt from scratch, so the dumps carry no DROP statements (--clean would fail on tables that no longer exist)
-          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -c "drop schema if exists public cascade; drop schema if exists supabase_migrations cascade; create schema public; grant usage on schema public to postgres, anon, authenticated, service_role; alter default privileges in schema public grant all on tables to postgres, anon, authenticated, service_role; alter default privileges in schema public grant all on functions to postgres, anon, authenticated, service_role; alter default privileges in schema public grant all on sequences to postgres, anon, authenticated, service_role; create schema if not exists extensions; create extension if not exists pgcrypto with schema extensions; create extension if not exists pg_trgm with schema extensions;"
-          # pg_dump 17 writes CREATE SCHEMA public; the prep step above already created it (with the grants Supabase's roles need)
+          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -c "drop schema if exists public cascade; drop schema if exists supabase_migrations cascade; create schema public; grant usage on schema public to postgres, anon, authenticated, service_role; create schema if not exists extensions; create extension if not exists pgcrypto with schema extensions; create extension if not exists pg_trgm with schema extensions;"
+          # pg_dump 17 writes CREATE SCHEMA public; the prep step above already created it (schema usage only; table and function grants come from the dump so staging carries production's real grants)
           sed -i '/^CREATE SCHEMA public;$/d' public.sql
           psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -f public.sql
           psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -f history.sql
@@ -87,6 +87,7 @@ jobs:
           SUPABASE_DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
         run: supabase db push --linked --dry-run
       - name: Apply to STAGING
+        id: apply
         env:
           SUPABASE_DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
         run: supabase db push --linked --yes
@@ -99,12 +100,14 @@ jobs:
       - name: Security posture on staging
         run: psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -f supabase/checks/security_posture.sql
       - name: Schema fingerprint, staging vs a clean build of the repo (report)
+        if: ${{ !cancelled() && steps.apply.conclusion == 'success' }}
         run: |
           bun scripts/db/clean-fingerprint.ts > expected.json
           { echo "select coalesce(json_agg(t), '[]') from ("; sed '$ s/;[[:space:]]*$//' supabase/checks/schema_fingerprint.sql; echo ") t;"; } > fp-wrapped.sql
           psql "$STAGING_DB_URL" -At -f fp-wrapped.sql > actual.json
           node scripts/db/diff-fingerprint.mjs expected.json actual.json
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && steps.apply.conclusion == 'success' }}
         with:
           name: rehearsal-fingerprints
           path: |
