@@ -65,7 +65,8 @@ jobs:
           # staging is rebuilt from scratch, so the dumps carry no DROP statements (--clean would fail on tables that no longer exist)
           psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -c "drop schema if exists public cascade; drop schema if exists supabase_migrations cascade; create schema public; grant usage on schema public to postgres, anon, authenticated, service_role; create schema if not exists extensions; create extension if not exists pgcrypto with schema extensions; create extension if not exists pg_trgm with schema extensions;"
           # pg_dump 17 writes CREATE SCHEMA public; the prep step above already created it (schema usage only; table and function grants come from the dump so staging carries production's real grants)
-          sed -i '/^CREATE SCHEMA public;$/d' public.sql
+          # default-privilege statements for other roles (e.g. supabase_admin) need superuser and only affect objects created later; the object grants stay
+          sed -i -e '/^CREATE SCHEMA public;$/d' -e '/^ALTER DEFAULT PRIVILEGES /d' public.sql
           psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -f public.sql
           psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -f history.sql
       - uses: supabase/setup-cli@v1
