@@ -149,7 +149,13 @@ describe("a STALLED profile read (the 'Still loading your account' failure)", ()
     state.mode.profiles = "stall";
     const values: unknown[] = [];
     const stop = track(api.users.currentUser().subscribe((v) => values.push(v)));
-    await until(() => problem("profiles") !== undefined, 6000, "a recorded problem");
+    // The recorded-problems store is shared across tests, so "any problem" can be a stale one (or a resume-interrupted
+    // attempt). Wait for what this test asserts: the stalled request was aborted AND the timeout reason was recorded.
+    await until(
+      () => state.aborted >= 1 && (problem("profiles")?.message ?? "").includes("did not answer"),
+      6000,
+      "the stalled request to be aborted and its timeout recorded",
+    );
     expect(problem("profiles")?.message).toContain("did not answer");
     expect(state.aborted).toBeGreaterThanOrEqual(1); // the socket is freed, not abandoned
     // Emitting null here would push a signed-in user into "no portal role assigned".
