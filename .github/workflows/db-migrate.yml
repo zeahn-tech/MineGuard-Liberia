@@ -129,10 +129,8 @@ jobs:
             [ -n "${!n}" ] || { echo "::error::Missing required secret $n"; exit 1; }
           done
           [ "$SUPABASE_PROJECT_REF" = "$EXPECTED_PROJECT_REF" ] || { echo "::error::SUPABASE_PROJECT_REF does not match the expected production project"; exit 1; }
-          case "$SUPABASE_DB_URL" in *"$EXPECTED_PROJECT_REF"*) ;; *) echo "::error::SUPABASE_DB_URL does not reference the expected project"; exit 1;; esac
-          case "$SUPABASE_DB_URL" in postgresql://*|postgres://*) ;; *) echo "::error::SUPABASE_DB_URL is not a connection URI: it must start with postgresql:// (copy the full Session pooler URI from Supabase -> Connect). If the production environment holds its own SUPABASE_DB_URL it overrides the repository secret."; exit 1;; esac
-          case "$SUPABASE_DB_URL" in *"[YOUR-PASSWORD]"*) echo "::error::SUPABASE_DB_URL still contains the [YOUR-PASSWORD] placeholder"; exit 1;; esac
-          case "$SUPABASE_DB_URL" in *"db.$EXPECTED_PROJECT_REF.supabase.co"*) echo "::error::SUPABASE_DB_URL is the Direct connection (IPv6 only, unreachable from GitHub runners): use the Session pooler URI"; exit 1;; esac
+          # accepts postgresql://... or host=... key/value; prints facts (length, stray quotes/spaces), never the value
+          node scripts/db/cli.mjs check-db-url SUPABASE_DB_URL --ref "$EXPECTED_PROJECT_REF"
       - uses: supabase/setup-cli@v1
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}

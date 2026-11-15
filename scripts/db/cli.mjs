@@ -4,7 +4,7 @@
 //   node scripts/db/cli.mjs compare <migration-list-output.txt> [--expect-none]  -> writes pending versions, exits 1 if unsafe
 //   node scripts/db/cli.mjs select-tests <changed-file>...          -> prints the targeted test files
 import { readFileSync, appendFileSync } from "node:fs";
-import { loadPolicy, readMigrationDir, validateMigrations, parseMigrationList, compareHistory, selectTests } from "./lib.mjs";
+import { loadPolicy, readMigrationDir, validateMigrations, parseMigrationList, compareHistory, selectTests, checkDbUrl } from "./lib.mjs";
 
 const root = process.cwd();
 const [cmd, ...args] = process.argv.slice(2);
@@ -29,6 +29,13 @@ if (cmd === "validate") {
   const r = selectTests(args.filter((a) => a.startsWith("supabase/migrations/")), root);
   console.error(`objects touched: ${r.objects.length}`);
   console.log(r.tests.join("\n"));
+} else if (cmd === "check-db-url") {
+  // node scripts/db/cli.mjs check-db-url ENV_VAR_NAME [--ref REF] [--not-ref REF]  — prints problems, never the value
+  const name = args[0];
+  const opt = (flag) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : undefined; };
+  const problems = checkDbUrl(process.env[name], { ref: opt("--ref"), notRef: opt("--not-ref") });
+  if (problems.length) fail(problems.map((x) => `${name} ${x}`));
+  console.log(`${name} looks like a valid connection string`);
 } else {
   console.error("unknown command"); process.exit(2);
 }

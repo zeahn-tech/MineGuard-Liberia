@@ -9,7 +9,7 @@ import { join } from "node:path";
 // @ts-expect-error plain ESM helper without type declarations
 import { diffFingerprints } from "../scripts/db/diff-fingerprint.mjs";
 // @ts-expect-error plain ESM helper without type declarations
-import { compareHistory, extractObjects, loadPolicy, parseMigrationList, readMigrationDir, selectTests, validateMigrations } from "../scripts/db/lib.mjs";
+import { checkDbUrl, compareHistory, extractObjects, loadPolicy, parseMigrationList, readMigrationDir, selectTests, validateMigrations } from "../scripts/db/lib.mjs";
 
 const ROOT = join(import.meta.dir, "..");
 const policy = loadPolicy(ROOT);
@@ -141,5 +141,32 @@ describe("fingerprint comparison (rehearsal report)", () => {
   test("compares long signatures on their first 63 characters (identifier truncation in exports)", () => {
     const long = "mg_" + "x".repeat(80) + "(p uuid)";
     expect(diffFingerprints([row("function", long, "1")], [row("function", long.slice(0, 63), "1")]).equal).toBe(1);
+  });
+});
+
+describe("connection-string check (never reveals the value)", () => {
+  const REF = "abcdefghijklmnopqrst";
+  const UP = `postgresql://postgres.${REF}:s3cret-pw@aws-0-eu-west-1.pooler.supabase.com:5432/postgres`;
+  test("accepts the Session pooler URI and libpq key/value strings", () => {
+    expect(checkDbUrl(UP, { ref: REF })).toEqual([]);
+    expect(checkDbUrl(UP.replace("postgresql://", "postgres://"), { ref: REF })).toEqual([]);
+    expect(checkDbUrl(`host=aws-0-eu-west-1.pooler.supabase.com port=5432 dbname=postgres user=postgres.${REF} password=s3cret-pw`, { ref: REF })).toEqual([]);
+  });
+  test("rejects empty, bare, placeholder, quoted, whitespace-padded and Direct-connection values", () => {
+    expect(checkDbUrl("", { ref: REF }).join()).toMatch(/empty/);
+    expect(checkDbUrl(`postgres.${REF}:pw@host:5432/postgres`, { ref: REF }).join()).toMatch(/not a connection string/);
+    expect(checkDbUrl(UP.replace("s3cret-pw", "[YOUR-PASSWORD]"), { ref: REF }).join()).toMatch(/placeholder/);
+    expect(checkDbUrl(`"${UP}"`, { ref: REF }).join()).toMatch(/not a connection string|quotes/);
+    expect(checkDbUrl(`${UP}\n`, { ref: REF }).join()).toMatch(/whitespace|quotes/);
+    expect(checkDbUrl(`postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres`, { ref: REF }).join()).toMatch(/Direct connection/);
+  });
+  test("enforces the project: the expected ref must appear and the forbidden one must not", () => {
+    expect(checkDbUrl(UP, { ref: "zzzzzzzzzzzzzzzzzzzz" }).join()).toMatch(/does not reference the expected project/);
+    expect(checkDbUrl(UP, { ref: REF, notRef: REF }).join()).toMatch(/must not point at/);
+  });
+  test("failure messages describe the value without containing any of it", () => {
+    const msg = checkDbUrl(`"  s3cret-pw-not-a-url "`, { ref: REF }).join(" | ");
+    expect(msg).toMatch(/length \d+/);
+    expect(msg).not.toContain("s3cret");
   });
 });

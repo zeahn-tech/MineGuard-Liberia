@@ -126,3 +126,21 @@ export function selectTests(changedMigrations, root) {
   }
   return { tests: [...picked].sort(), objects: [...objects].sort(), reasons };
 }
+
+/** Problems with a database connection string (never includes the value itself). Accepts the URI form and libpq's key=value form. */
+export function checkDbUrl(value, { ref, notRef } = {}) {
+  const problems = [];
+  const v = value ?? "";
+  if (!v.trim()) return ["is empty or not set"];
+  const facts = `length ${v.length}, quotes ${/["']/.test(v) ? "present" : "none"}, newline ${/[\r\n]/.test(v) ? "present" : "none"}, leading/trailing space ${v !== v.trim() ? "present" : "none"}`;
+  const isUri = /^postgres(ql)?:\/\//.test(v);
+  const isKeyValue = !isUri && /(^|\s)host=\S+/.test(v) && /(^|\s)(user|dbname|password)=/.test(v);
+  if (!isUri && !isKeyValue) problems.push(`is not a connection string: it must start with postgresql:// (copy the full Session pooler URI from Supabase -> Connect) or be a host=… user=… key/value string (${facts})`);
+  if (isUri && (/\s/.test(v) || /["']/.test(v))) problems.push(`contains whitespace or quotes, which break the URI; re-save it without them (${facts})`);
+  if (isUri && !v.includes("@")) problems.push("has no user:password@host part");
+  if (/\[YOUR-PASSWORD\]/.test(v)) problems.push("still contains the [YOUR-PASSWORD] placeholder");
+  if (/(\/\/|@|host=)db\.[a-z0-9]{20}\.supabase\.co/.test(v)) problems.push("is the Direct connection (IPv6 only, unreachable from GitHub runners): use the Session pooler");
+  if (ref && !v.includes(ref)) problems.push("does not reference the expected project");
+  if (notRef && v.includes(notRef)) problems.push("references a project it must not point at");
+  return problems;
+}
