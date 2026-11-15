@@ -84,3 +84,4 @@ jobs:
           tests/migration-replay.test.ts
           tests/phase-e-legacy-access-retirement.test.ts
           tests/phase-e-guard-convergence.test.ts
+          tests/phase-e-legacy-cleanup.test.ts

@@ -211,12 +211,15 @@ describe("supabase/checks/security_posture.sql (post-deployment verification)", 
       expect(await rejects(check)).toBe("");
     });
   });
-  test("fails on the legacy production state and passes once 0055 and 0056 are applied", async () => {
+  test("fails on the legacy production state and passes once 0056, 0057 and 0060 (the full retirement) are applied", async () => {
     await withRole("postgres", null, async () => {
       await exec(LEGACY);
       expect(await rejects(check)).toMatch(/SECURITY POSTURE/);
       await exec(mig("0056_retire_legacy_access_layer.sql"));
       await exec(mig("0057_revoke_client_truncate.sql"));
+      // 0056 retires the policies; the legacy helper functions the check also bans are removed by 0060
+      expect(await rejects(check)).toMatch(/legacy functions present/);
+      await exec(mig("0060_retire_legacy_layer.sql"));
       expect(await rejects(check)).toBe("");
     });
   });
