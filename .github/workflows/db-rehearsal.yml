@@ -43,6 +43,12 @@ jobs:
           case "$STAGING_DB_URL" in *"$PRODUCTION_PROJECT_REF"*) echo "::error::STAGING_DB_URL references the production project"; exit 1;; esac
           case "$STAGING_DB_URL" in *"$STAGING_PROJECT_REF"*) ;; *) echo "::error::STAGING_DB_URL does not reference the staging project"; exit 1;; esac
           case "$PRODUCTION_DB_URL" in *"$PRODUCTION_PROJECT_REF"*) ;; *) echo "::error::SUPABASE_DB_URL does not reference production"; exit 1;; esac
+          for pair in "SUPABASE_DB_URL:$PRODUCTION_DB_URL" "STAGING_DB_URL:$STAGING_DB_URL"; do
+            name="${pair%%:*}"; val="${pair#*:}"
+            case "$val" in postgresql://*|postgres://*) ;; *) echo "::error::$name must start with postgresql:// (full Session pooler URI from Supabase -> Connect)"; exit 1;; esac
+            case "$val" in *"[YOUR-PASSWORD]"*) echo "::error::$name still contains the [YOUR-PASSWORD] placeholder"; exit 1;; esac
+            case "$val" in *"@db."*".supabase.co"*) echo "::error::$name is a Direct connection (IPv6 only): use the Session pooler URI"; exit 1;; esac
+          done
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
