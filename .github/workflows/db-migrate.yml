@@ -140,7 +140,7 @@ jobs:
           supabase migration list --linked | tee before.txt
           node scripts/db/cli.mjs compare before.txt
       - name: Capture the current access layer (read-only; kept so it can be restored)
-        run: psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -At -F $'\t' -f supabase/maintenance/capture_pre_0056.sql > pre-apply-capture.tsv
+        run: psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -At -F $'\t' -f supabase/maintenance/capture_pre_0060.sql > pre-apply-capture.tsv
       - uses: actions/upload-artifact@v4
         with:
           name: pre-apply-capture
