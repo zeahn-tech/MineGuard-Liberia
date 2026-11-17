@@ -46,8 +46,9 @@ const GHOST_B = "ffffffff-0000-4000-8000-0000000000a2";
 // production's state: len_chk NOT VALID, window_start nullable, no actor foreign key, audit rows whose actor no longer exists
 const PRODUCTION_STATE = `
 alter table public.community_reports drop constraint community_reports_len_chk;
+-- production's real form: the same rule written flat (no BETWEEN), NOT VALID
 alter table public.community_reports add constraint community_reports_len_chk check (
-  char_length(description) between 1 and 5000 and char_length(county) <= 100
+  char_length(description) >= 1 and char_length(description) <= 5000 and char_length(county) <= 100
   and (district is null or char_length(district) <= 200) and (community is null or char_length(community) <= 200)
   and (contact_phone is null or char_length(contact_phone) <= 32)) not valid;
 alter table public.rate_limits alter column window_start drop not null;
@@ -93,9 +94,11 @@ describe("0061 — the remaining constraints", () => {
     // [description, statements run after production's state is rebuilt, before 0061]
     const cases: [string, string][] = [
       ["null window_start", `insert into public.rate_limits (bucket, window_start) values ('probe', null)`],
-      ["existing report breaks the constraint",
+      ["a report longer than the rule allows",
         `alter table public.community_reports drop constraint community_reports_len_chk;
-         alter table public.community_reports add constraint community_reports_len_chk check (char_length(county) <= 2) not valid;`],
+         insert into public.community_reports (id, tracking_code, category, description, county, status)
+           values ('99999999-0000-4000-8000-0000000000ee', 'CR-TOOLONG1', 'pollution', 'Too long county name', repeat('x', 101), 'submitted');
+         alter table public.community_reports add constraint community_reports_len_chk check (char_length(description) >= 1) not valid;`],
     ];
     for (const [label, violation] of cases) {
       await scenario(async () => {

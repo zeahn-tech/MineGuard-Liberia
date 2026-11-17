@@ -8,7 +8,7 @@
 --     (0035, 0039, 0050) set actor_id = NULL on that user's audit rows BEFORE removing the account, so no dangling id is ever
 --     left; production has 4 audit rows (3 accounts) whose actor no longer exists, left by deletions made some other way.
 --
--- WHAT. (1) validates the length constraint; (2) makes window_start NOT NULL; (3) detaches the orphaned actor ids exactly as
+-- WHAT. (1) recreates the length constraint in the repo's exact form, validated; (2) makes window_start NOT NULL; (3) detaches the orphaned actor ids exactly as
 -- the deletion functions do (the row and its actor_label text are kept) and then adds the foreign key so a dangling actor
 -- cannot be created again. If any row violates (1), (2) or (3) the statement fails and the whole migration rolls back.
 --
@@ -22,7 +22,19 @@
 
 begin;
 
-alter table public.community_reports validate constraint community_reports_len_chk;
+-- Recreated (not merely validated) so the stored definition is the repo's: production holds the same rule written as a flat
+-- "description >= 1 AND description <= 5000 AND ..." (NOT VALID); the repo defines it with BETWEEN, which Postgres prints
+-- with an extra grouping. Same logic, different text, and the rehearsal compares text. Adding it validated scans the table
+-- (0 violating rows in production); a violating row fails the statement and rolls the whole migration back.
+alter table public.community_reports drop constraint if exists community_reports_len_chk;
+alter table public.community_reports
+  add constraint community_reports_len_chk check (
+    char_length(description) between 1 and 5000
+    and char_length(county) <= 100
+    and (district      is null or char_length(district)      <= 200)
+    and (community     is null or char_length(community)     <= 200)
+    and (contact_phone is null or char_length(contact_phone) <= 32)
+  );
 
 alter table public.rate_limits alter column window_start set not null;
 
