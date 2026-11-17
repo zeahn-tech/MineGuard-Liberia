@@ -4,6 +4,7 @@
 // selection of only the tests that touch the changed database objects.
 // ---------------------------------------------------------------------------
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 // @ts-expect-error plain ESM helper without type declarations
 // @ts-expect-error plain ESM helper without type declarations
@@ -168,5 +169,25 @@ describe("connection-string check (never reveals the value)", () => {
     const msg = checkDbUrl(`"  s3cret-pw-not-a-url "`, { ref: REF }).join(" | ");
     expect(msg).toMatch(/length \d+/);
     expect(msg).not.toContain("s3cret");
+  });
+});
+
+describe("accepted-drift classification (strict rehearsal)", () => {
+  test("listed differences are accepted, anything else is unexpected, and the shipped list has a reason for every entry", async () => {
+    // @ts-expect-error plain ESM helper without type declarations
+    const { classifyDrift } = await import("../scripts/db/diff-fingerprint.mjs");
+    const d = { differs: ["function|a()"], repoOnly: ["trigger|t.x"], liveOnly: ["policy|t.legacy", "policy|t.keep"] };
+    const out = classifyDrift(d, { liveOnly: { "policy|t.keep": "reviewed" } });
+    expect(out.acceptedCount).toBe(1);
+    expect(out.unexpected).toEqual(["DIFFERS function|a()", "MISSING-LIVE trigger|t.x", "LIVE-ONLY policy|t.legacy"]);
+    const shipped = JSON.parse(readFileSync(join(ROOT, "supabase/checks/accepted-drift.json"), "utf8"));
+    for (const group of ["liveOnly", "differs", "repoOnly"]) for (const [k, why] of Object.entries(shipped[group])) expect(String(why).length, k).toBeGreaterThan(10);
+  });
+  test("a clean build compared with itself has zero unexpected differences", async () => {
+    // @ts-expect-error plain ESM helper without type declarations
+    const { diffFingerprints, classifyDrift } = await import("../scripts/db/diff-fingerprint.mjs");
+    const fpRows = [{ kind: "function", obj: "mg_a()", h: "1" }, { kind: "func_exec", obj: "digest(text)", h: "x" }];
+    const d = diffFingerprints(fpRows, [{ kind: "function", obj: "mg_a()", h: "1" }]);
+    expect(classifyDrift(d, {}).unexpected).toEqual([]); // extension-function execute rows are noise
   });
 });

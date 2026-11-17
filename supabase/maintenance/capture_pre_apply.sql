@@ -1,6 +1,6 @@
--- READ-ONLY. Run against the target database BEFORE applying 0060 and keep the output (the apply job does this and
--- uploads it as an artifact for 90 days). It records the exact objects 0060 removes or replaces so they can be restored.
--- Dropped data is not captured: the legacy inspections.county/operator_name stamps can be rebuilt from sites.
+-- READ-ONLY. Run against the target database BEFORE every apply (the apply job does this and uploads it as an artifact for 90 days).
+-- It records the access layer, triggers, indexes, key functions and constraints, plus the audit rows 0061 will detach, so they can be
+-- restored. Dropped column data is not captured (the legacy inspections stamps can be rebuilt from sites).
 select 'policy' as kind, schemaname||'.'||tablename||'.'||policyname as obj,
        format('create policy %I on %I.%I for %s to %s%s%s;', policyname, schemaname, tablename, lower(cmd),
               array_to_string(roles, ', '),
@@ -22,4 +22,11 @@ select 'function', p.proname||'('||pg_get_function_identity_arguments(p.oid)||')
 union all
 select 'column', table_name||'.'||column_name, data_type||' nullable='||is_nullable||' default='||coalesce(column_default,'-')
   from information_schema.columns where table_schema='public' and table_name='inspections' and column_name in ('county','operator_name')
+union all
+select 'constraint', c.relname||'.'||k.conname, pg_get_constraintdef(k.oid)||' | validated='||k.convalidated
+  from pg_constraint k join pg_class c on c.oid=k.conrelid join pg_namespace n on n.oid=c.relnamespace
+ where n.nspname='public' and k.conname in ('community_reports_len_chk','audit_log_actor_id_fkey','community_reports_description_check')
+union all
+select 'audit orphan', a.id::text, 'actor_id='||a.actor_id::text||' action='||coalesce(a.action,'')||' at='||a.created_at::text
+  from public.audit_log a where a.actor_id is not null and not exists (select 1 from public.profiles p where p.id=a.actor_id)
 order by 1,2;

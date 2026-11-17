@@ -48,7 +48,7 @@ The pipeline re-applies them idempotently as part of the first run.
 
 ## Post-deployment checks (what a green apply proves)
 `supabase/checks/security_posture.sql` fails the deployment if any of these is false: RLS on every public table; no legacy policy (public or `storage`); the organisation-aware `mg_can_access_site(uuid)`; no legacy helper functions; no client TRUNCATE and no client writes to `audit_log`; the anonymous API surface is exactly the 12 intended public RPCs (`mg_*_reply/site_info/status/submit_anonymous`, `refresh_public_stats`, `submit_community_report`, `track_community_report`, `mg_content_guard`). When a migration legitimately adds a public RPC, add its name to that list in the same PR.
-`schema_fingerprint.sql` also hashes `storage` policies and each function's execute rights; run the rehearsal to compare a copy of production against a clean build.
+The rehearsal fails on any schema difference that is not listed (with a reason) in `supabase/checks/accepted-drift.json`; add an entry only after review. `schema_fingerprint.sql` also hashes `storage` policies and each function's execute rights; run the rehearsal to compare a copy of production against a clean build.
 
 ## Local testing without Docker
 - Static: `node scripts/db/cli.mjs validate`.
