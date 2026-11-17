@@ -55,5 +55,12 @@ begin
      and p.proname !~ '^(armor|crypt|dearmor|decrypt|digest|encrypt|fips_mode|gen_|gin_|gtrgm|hmac|pgp_|show_|similarity|set_limit|strict_word|word_similarity|uuid_|gist_)'
      and p.proname not in ('mg_content_guard','mg_mv_reply','mg_mv_site_info','mg_mv_status','mg_mv_submit_anonymous','mg_wv_reply','mg_wv_site_info','mg_wv_status','mg_wv_submit_anonymous','refresh_public_stats','submit_community_report','track_community_report');
   if bad is not null then raise exception 'SECURITY POSTURE: anon can execute unexpected functions: %', bad; end if;
+
+  -- 6. no audit row may reference an account that no longer exists (the foreign key from 0061 enforces it).
+  -- (community_reports_len_chk is validated by 0061 too, but it is an integrity nicety, not a security property, and the
+  -- migration 0023 that defines it is deliberately NOT VALID, so it is not asserted here.)
+  if not exists (select 1 from pg_constraint where conname = 'audit_log_actor_id_fkey' and convalidated) then
+    raise exception 'SECURITY POSTURE: audit_log_actor_id_fkey is missing or not validated';
+  end if;
 end $$;
 select 'security posture ok' as result;

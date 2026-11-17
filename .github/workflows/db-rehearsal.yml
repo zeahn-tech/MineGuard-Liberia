@@ -106,7 +106,9 @@ jobs:
           bun scripts/db/clean-fingerprint.ts > expected.json
           { echo "select coalesce(json_agg(t), '[]') from ("; sed '$ s/;[[:space:]]*$//' supabase/checks/schema_fingerprint.sql; echo ") t;"; } > fp-wrapped.sql
           psql "$STAGING_DB_URL" -At -f fp-wrapped.sql > actual.json
-          node scripts/db/diff-fingerprint.mjs expected.json actual.json
+          # storage policies are not copied into staging (only the public schema and migration history are), so they are not compared here;
+          # the production posture check covers them. Anything not in the accepted-drift list fails the rehearsal.
+          node scripts/db/diff-fingerprint.mjs expected.json actual.json --accepted supabase/checks/accepted-drift.json --ignore-kind storage_policy --strict
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && steps.apply.conclusion == 'success' }}
         with:

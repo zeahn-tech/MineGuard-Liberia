@@ -1,0 +1,17 @@
+{
+  "_comment": "Differences between a live database and a clean build of the migrations that were reviewed and kept on purpose (see the 0060 and 0061 headers). The rehearsal runs with --strict: anything NOT listed here fails it. Keys are 'kind|object' (objects cut at 63 characters).",
+  "liveOnly": {
+    "function|rls_auto_enable()": "Supabase's own event-trigger helper that enables RLS on new tables (event trigger ensure_rls); keep",
+    "func_exec|rls_auto_enable()": "execute rights of the platform helper above",
+    "policy|community_reports.reports insert admin seed": "backs the app's admin demo-seeding feature (admin-only INSERT)",
+    "policy|report_tracking.tracking insert admin seed": "same demo-seeding feature (admin-only INSERT)",
+    "policy|report_tracking.tracking update": "same demo-seeding feature (reviewer UPDATE of tracking rows)",
+    "policy|meta.meta select public": "meta holds one key, public_stats (aggregated public statistics only)",
+    "column|community_reports.rate_bucket": "unused legacy column, harmless; dropping it destroys data for no benefit",
+    "column|meta.updated_at": "harmless legacy column",
+    "column|rate_limits.updated_at": "harmless legacy column",
+    "constraint|community_reports.community_reports_description_check": "legacy input rule (minimum 10 characters), stricter than the repo's; changing it changes what users can submit"
+  },
+  "differs": {},
+  "repoOnly": {}
+}
