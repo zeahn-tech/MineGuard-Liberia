@@ -4,20 +4,36 @@
 // rebuilt on a clean build; 0061 is applied; the full schema fingerprint must equal the clean build again.
 // Every scenario rolls back.
 // ---------------------------------------------------------------------------
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { PGlite } from "@electric-sql/pglite";
+import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
+import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { beforeAll } from "bun:test";
-import { getDb, getFixture, withRole } from "./helpers/pglite-db";
+import { MIGRATIONS, PLATFORM_STUB } from "./helpers/pglite-db";
 
-beforeAll(async () => { await getFixture(); }); // seeds a community report so a constraint has a row to check
-
+// A PRIVATE database: other suites (migration-apply) re-apply older migrations on the shared one, which leaves
+// community_reports_len_chk in its pre-0061 NOT VALID state and makes a "clean build" baseline order-dependent.
 const root = join(import.meta.dir, "..");
 const read = (p: string) => readFileSync(join(root, p), "utf8");
 const FINGERPRINT = read("supabase/checks/schema_fingerprint.sql");
 const mig = read("supabase/migrations/0061_validate_remaining_constraints.sql").replace(/^begin;$/m, "").replace(/^commit;$/m, "");
-const exec = async (sql: string) => void (await (await getDb()).exec(sql));
-const q = async (sql: string) => ((await (await getDb()).query(sql)).rows as Record<string, unknown>[]);
+let db: PGlite;
+beforeAll(async () => {
+  db = new PGlite({ extensions: { pgcrypto, pg_trgm } });
+  await db.exec(PLATFORM_STUB);
+  for (const f of MIGRATIONS) await db.exec(read(`supabase/migrations/${f}`)); // all migrations, 0061 included
+  await db.exec(`insert into public.community_reports (id, tracking_code, category, description, county, status)
+    values ('99999999-0000-4000-8000-000000000010', 'CR-TEST0001', 'pollution', 'Brown water near the wash plant', 'Bomi', 'submitted')`);
+});
+afterAll(async () => { await db.close(); });
+const exec = async (sql: string) => void (await db.exec(sql));
+const q = async (sql: string) => ((await db.query(sql)).rows as Record<string, unknown>[]);
+/** Run a scenario inside a transaction that is always rolled back. */
+const scenario = async (fn: () => Promise<void>) => {
+  await db.exec("begin");
+  try { await fn(); } finally { await db.exec("rollback"); }
+};
 const fp = async () => (await q(FINGERPRINT)) as { kind: string; obj: string; h: string }[];
 const key = (r: { kind: string; obj: string }) => `${r.kind}|${r.obj}`;
 const diff = (a: { kind: string; obj: string; h: string }[], b: { kind: string; obj: string; h: string }[]) => {
@@ -43,7 +59,7 @@ insert into public.audit_log (actor_id, actor_label, action, entity_type, entity
 
 describe("0061 — the remaining constraints", () => {
   test("production's half-done constraints, then 0061, converge the whole schema fingerprint back to the clean build", async () => {
-    await withRole("postgres", null, async () => {
+    await scenario(async () => {
       const clean = await fp();
       await exec(PRODUCTION_STATE);
       const drifted = diff(clean, await fp());
@@ -57,7 +73,7 @@ describe("0061 — the remaining constraints", () => {
   });
 
   test("orphaned actor ids are detached (the rows and their labels are kept) and a dangling actor can no longer be created", async () => {
-    await withRole("postgres", null, async () => {
+    await scenario(async () => {
       await exec(PRODUCTION_STATE);
       const before = Number((await q("select count(*) n from public.audit_log"))[0].n);
       await exec(mig);
@@ -82,7 +98,7 @@ describe("0061 — the remaining constraints", () => {
          alter table public.community_reports add constraint community_reports_len_chk check (char_length(county) <= 2) not valid;`],
     ];
     for (const [label, violation] of cases) {
-      await withRole("postgres", null, async () => {
+      await scenario(async () => {
         await exec(PRODUCTION_STATE);
         expect(Number((await q("select count(*) n from public.community_reports"))[0].n), label).toBeGreaterThan(0);
         await exec("savepoint pre");
@@ -95,7 +111,7 @@ describe("0061 — the remaining constraints", () => {
   });
 
   test("0061 is idempotent on a database that is already clean", async () => {
-    await withRole("postgres", null, async () => {
+    await scenario(async () => {
       const clean = await fp();
       await exec(mig);
       await exec(mig);
