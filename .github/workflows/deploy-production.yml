@@ -72,7 +72,21 @@ jobs:
         # Production build: demo seeding compiled out of the UI.
         env:
           VITE_MINEGUARD_ENV: production
+          # Public Web Push key (same value as the Supabase VAPID_PUBLIC_KEY
+          # secret). A repository VARIABLE, not a secret: it ships in the bundle.
+          VITE_VAPID_PUBLIC_KEY: ${{ vars.VITE_VAPID_PUBLIC_KEY }}
         run: bun run build
+
+      - name: Verify VAPID public key is compiled into the bundle
+        env:
+          VITE_VAPID_PUBLIC_KEY: ${{ vars.VITE_VAPID_PUBLIC_KEY }}
+        run: |
+          # Never prints the key; only reports pass/fail.
+          [ -n "$VITE_VAPID_PUBLIC_KEY" ] || { echo "FAIL: repository variable VITE_VAPID_PUBLIC_KEY is not set"; exit 1; }
+          grep -rqF -- "$VITE_VAPID_PUBLIC_KEY" dist/assets/ || {
+            echo "FAIL: VITE_VAPID_PUBLIC_KEY not found in built bundle"; exit 1;
+          }
+          echo "VAPID public key present in production bundle"
 
       - name: Production sanity — seed button absent, build complete
         run: |
