@@ -36,7 +36,14 @@ if (vapid.ok) {
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json(405, { ok: false, error: "METHOD_NOT_ALLOWED" });
-  if (!secretsMatch(req.headers.get("x-sweep-secret") ?? "", Deno.env.get("WORKER_VOICE_PUSH_SECRET") ?? "")) {
+  const expected = Deno.env.get("WORKER_VOICE_PUSH_SECRET") ?? "";
+  const presented = req.headers.get("x-sweep-secret") ?? "";
+  if (!secretsMatch(presented, expected)) {
+    // Safe diagnostics only: whether each side is present and whether the lengths agree. Never the values.
+    console.warn(
+      `[worker-voice-push] sweep rejected: server secret ${expected ? "is set" : "is NOT set"}, request header ${presented ? "present" : "missing"}` +
+        (expected && presented ? `, lengths ${presented.length === expected.length ? "equal (value differs)" : "differ"}` : "") + ".",
+    );
     return json(401, { ok: false, error: "UNAUTHENTICATED" });
   }
   const service = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false, autoRefreshToken: false } });
