@@ -19,6 +19,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import webpush from "npm:web-push@3.6.7";
+import { describeVapidProblem, resolveVapidConfig } from "../_shared/push/vapid.ts";
 import { handleDispatch, handleSweep, secretsMatch } from "../_shared/emergency/dispatch.ts";
 
 const CORS = {
@@ -33,11 +34,20 @@ function json(status: number, body: unknown): Response {
   });
 }
 
-const pub = Deno.env.get("VAPID_PUBLIC_KEY");
-const priv = Deno.env.get("VAPID_PRIVATE_KEY");
-const subject = Deno.env.get("VAPID_SUBJECT");
-const configured = Boolean(pub && priv && subject);
-if (configured) webpush.setVapidDetails(subject!, pub!, priv!);
+// Keys are normalised and validated (decoded length, pair match) before the library sees them. A bad secret
+// disables push delivery with a safe log line instead of crashing the function at boot.
+const vapid = resolveVapidConfig({
+  subject: Deno.env.get("VAPID_SUBJECT"),
+  publicKey: Deno.env.get("VAPID_PUBLIC_KEY"),
+  privateKey: Deno.env.get("VAPID_PRIVATE_KEY"),
+});
+const configured = vapid.ok;
+if (vapid.ok) {
+  webpush.setVapidDetails(vapid.subject, vapid.publicKey, vapid.privateKey);
+  console.log("[emergency-dispatch] VAPID configured: private key 32 bytes, public key 65 bytes, key pair verified.");
+} else {
+  console.error(describeVapidProblem("emergency-dispatch", vapid.diagnostics));
+}
 
 function makeSender() {
   return async (sub: { endpoint: string; p256dh: string; auth: string }, payload: string) => {

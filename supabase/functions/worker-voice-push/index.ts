@@ -12,17 +12,27 @@
 // ---------------------------------------------------------------------------
 import { createClient } from "npm:@supabase/supabase-js@2";
 import webpush from "npm:web-push@3.6.7";
+import { describeVapidProblem, resolveVapidConfig } from "../_shared/push/vapid.ts";
 import { secretsMatch } from "../_shared/emergency/dispatch.ts";
 import { handleVoicePushSweep } from "../_shared/voice/push.ts";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 
-const pub = Deno.env.get("VAPID_PUBLIC_KEY");
-const priv = Deno.env.get("VAPID_PRIVATE_KEY");
-const subject = Deno.env.get("VAPID_SUBJECT");
-const configured = Boolean(pub && priv && subject);
-if (configured) webpush.setVapidDetails(subject!, pub!, priv!);
+// Keys are normalised and validated (decoded length, pair match) before the library sees them. A bad secret
+// disables push delivery with a safe log line instead of crashing the function at boot.
+const vapid = resolveVapidConfig({
+  subject: Deno.env.get("VAPID_SUBJECT"),
+  publicKey: Deno.env.get("VAPID_PUBLIC_KEY"),
+  privateKey: Deno.env.get("VAPID_PRIVATE_KEY"),
+});
+const configured = vapid.ok;
+if (vapid.ok) {
+  webpush.setVapidDetails(vapid.subject, vapid.publicKey, vapid.privateKey);
+  console.log("[worker-voice-push] VAPID configured: private key 32 bytes, public key 65 bytes, key pair verified.");
+} else {
+  console.error(describeVapidProblem("worker-voice-push", vapid.diagnostics));
+}
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json(405, { ok: false, error: "METHOD_NOT_ALLOWED" });
