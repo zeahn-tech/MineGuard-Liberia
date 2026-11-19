@@ -63,4 +63,12 @@ describe("voice push dispatcher", () => {
     const sql = readFileSync(join(ROOT, "supabase/cron/voice-sweep.sql"), "utf8");
     expect(sql.split("\n").filter((l) => l.trim() && !l.trim().startsWith("--"))).toEqual([]);
   });
+  test("the sweep secret is compared with the same secretsMatch, tolerates pasted quotes/whitespace, and logs only presence and lengths", () => {
+    const fn = readFileSync(join(ROOT, "supabase/functions/worker-voice-push/index.ts"), "utf8");
+    expect(fn).toContain('req.headers.get("x-sweep-secret")');
+    expect(fn).toMatch(/secretsMatch\(presented, expected\)/);
+    expect(fn).toContain("const clean = (v: string)");
+    expect(fn).toContain("sweep rejected: server secret");
+    expect(fn).not.toMatch(/\$\{\s*(expected|presented)\s*\}/);
+  });
 });

@@ -36,13 +36,17 @@ if (vapid.ok) {
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json(405, { ok: false, error: "METHOD_NOT_ALLOWED" });
-  const expected = Deno.env.get("WORKER_VOICE_PUSH_SECRET") ?? "";
-  const presented = req.headers.get("x-sweep-secret") ?? "";
+  // Tolerate how secrets get pasted (surrounding whitespace/newline or one pair of wrapping quotes) on both sides.
+  const clean = (v: string) => {
+    const t = v.trim();
+    return t.length >= 2 && ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) ? t.slice(1, -1).trim() : t;
+  };
+  const expected = clean(Deno.env.get("WORKER_VOICE_PUSH_SECRET") ?? "");
+  const presented = clean(req.headers.get("x-sweep-secret") ?? "");
   if (!secretsMatch(presented, expected)) {
-    // Safe diagnostics only: whether each side is present and whether the lengths agree. Never the values.
+    // Safe diagnostics only: presence and lengths. Never the values.
     console.warn(
-      `[worker-voice-push] sweep rejected: server secret ${expected ? "is set" : "is NOT set"}, request header ${presented ? "present" : "missing"}` +
-        (expected && presented ? `, lengths ${presented.length === expected.length ? "equal (value differs)" : "differ"}` : "") + ".",
+      `[worker-voice-push] sweep rejected: server secret ${expected ? `is set (${expected.length} chars)` : "is NOT set"}, request header ${presented ? `present (${presented.length} chars)` : "missing"}.`,
     );
     return json(401, { ok: false, error: "UNAUTHENTICATED" });
   }
