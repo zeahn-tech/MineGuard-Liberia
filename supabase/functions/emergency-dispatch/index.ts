@@ -74,20 +74,35 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const sweepSecret = Deno.env.get("EMERGENCY_SWEEP_SECRET") ?? "";
   const presented = req.headers.get("x-sweep-secret");
   if (presented !== null) {
-    if (!secretsMatch(presented, sweepSecret)) return json(401, { ok: false, error: "UNAUTHENTICATED" });
+    if (!secretsMatch(presented, sweepSecret)) {
+      // Safe diagnostics only: presence and lengths, never the values. This function checks EMERGENCY_SWEEP_SECRET,
+      // not WORKER_VOICE_PUSH_SECRET (that one belongs to worker-voice-push).
+      console.warn(
+        `[emergency-dispatch] sweep rejected: EMERGENCY_SWEEP_SECRET ${sweepSecret ? `is set (${sweepSecret.length} chars)` : "is NOT set"}, ` +
+          `x-sweep-secret header ${presented ? `present (${presented.length} chars)` : "empty"}. ` +
+          "This function does not use WORKER_VOICE_PUSH_SECRET.",
+      );
+      return json(401, { ok: false, error: "UNAUTHENTICATED" });
+    }
     const svc = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false, autoRefreshToken: false } });
     const swept = await handleSweep({ service: svc, sender: configured ? makeSender() : null });
     return json(swept.status, swept.body);
   }
 
   const auth = req.headers.get("Authorization") ?? "";
-  if (!auth.toLowerCase().startsWith("bearer ")) return json(401, { ok: false, error: "UNAUTHENTICATED" });
+  if (!auth.toLowerCase().startsWith("bearer ")) {
+    console.warn("[emergency-dispatch] rejected: no Bearer token on a non-sweep request.");
+    return json(401, { ok: false, error: "UNAUTHENTICATED" });
+  }
 
   const url = Deno.env.get("SUPABASE_URL")!;
   const opts = { auth: { persistSession: false, autoRefreshToken: false } };
   const caller = createClient(url, Deno.env.get("SUPABASE_ANON_KEY")!, { ...opts, global: { headers: { Authorization: auth } } });
   const { data: u, error } = await caller.auth.getUser(auth.slice(7));
-  if (error || !u?.user) return json(401, { ok: false, error: "UNAUTHENTICATED" });
+  if (error || !u?.user) {
+    console.warn("[emergency-dispatch] rejected: Bearer token is not a valid user session (anon and service keys are not user sessions).");
+    return json(401, { ok: false, error: "UNAUTHENTICATED" });
+  }
 
   let body: unknown;
   try {
