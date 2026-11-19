@@ -237,6 +237,21 @@ describe("scheduled sweep", () => {
     expect(fn).toMatch(/presented !== null/);
     expect(fn).toMatch(/secretsMatch\(presented, sweepSecret\)/);
   });
+  test("rejections log a safe reason (presence/length only) and keep the same 401 body", () => {
+    const fn = readFileSync("supabase/functions/emergency-dispatch/index.ts", "utf8");
+    expect(fn).toContain("sweep rejected: EMERGENCY_SWEEP_SECRET");
+    expect(fn).toContain("no Bearer token on a non-sweep request");
+    expect(fn).toContain("not a valid user session");
+    // never interpolate a secret, header or token value; only .length is allowed
+    expect(fn).not.toMatch(/\$\{\s*(sweepSecret|presented|auth)\s*\}/);
+    expect(fn).not.toMatch(/console\.\w+\([^;]*headers\.get/); // no raw header value in a log call
+    expect(fn).not.toMatch(/console\.\w+\([^;]*auth\.slice/); // no token in a log call
+    expect(fn).not.toMatch(/\$\{\s*(?:sweepSecret|presented)\s*[^.?\s}]/); // only .length or a presence test
+    // the response contract is unchanged: every rejection is still the generic 401
+    expect(fn.match(/json\(401, \{ ok: false, error: "UNAUTHENTICATED" \}\)/g)?.length).toBe(3);
+    expect(fn).toMatch(/presented !== null/);
+    expect(fn).toMatch(/secretsMatch\(presented, sweepSecret\)/);
+  });
 });
 
 describe("service worker push handling", () => {
