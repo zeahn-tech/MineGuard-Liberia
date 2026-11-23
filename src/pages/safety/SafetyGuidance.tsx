@@ -14,6 +14,7 @@ import { PageLoading } from "@/components/PageLoading";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { askAiAssistant, type AiAssistResponse } from "@/lib/ai-assist";
 import { AiFooter, AiHeader, KindBadge, aiFailure } from "@/components/AiOutputNotice";
+import { PpeIcon } from "@/components/PpeIcon";
 import { FIRST_AID, GLOSSARY, IMMEDIATE_ACTIONS, PPE, REVIEW } from "@/data/safety-reference";
 import { contactScopes, explainContactError, listEmergencyContacts, PHONE_PATTERN, removeEmergencyContact, saveEmergencyContact, type ContactScope, type EmergencyContact } from "@/lib/emergencyContacts";
 
@@ -125,7 +126,7 @@ function PpeGuide() {
       <ul className="space-y-3">
         {PPE.map((p) => (
           <li key={p.id} className="flex gap-3 border border-border p-3">
-            <span className="text-3xl" aria-hidden="true">{p.emoji}</span>
+            <span className="flex w-9 shrink-0 justify-center text-3xl leading-none"><PpeIcon ppe={p} className="size-9" /></span>
             <div className="space-y-1">
               <h3 className="text-sm font-medium">{p.name}</h3>
               <p className="text-sm text-muted-foreground">{p.description}</p>
