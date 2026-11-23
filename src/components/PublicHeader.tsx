@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { BrandMark } from "@/components/BrandMark";
+import { ShareAppButton } from "@/components/ShareAppDialog";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { LEGAL_PRODUCT } from "@/lib/legal";
 
@@ -38,7 +39,10 @@ export function PublicHeader({
           <BrandMark className="size-5 shrink-0" />
           <span className="display text-base whitespace-nowrap">{LEGAL_PRODUCT}</span>
         </Link>
-        {children}
+        <div className="flex shrink-0 items-center gap-2">
+          <ShareAppButton variant="ghost" iconOnlyOnMobile />
+          {children}
+        </div>
       </div>
       <OfflineBanner variant="public" />
     </header>

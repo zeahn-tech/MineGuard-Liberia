@@ -24,6 +24,7 @@ import { Siren,
 } from "lucide-react";
 import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
+import { ShareAppButton } from "@/components/ShareAppDialog";
 import {
   Sheet,
   SheetContent,
@@ -299,6 +300,10 @@ export default function OperatorLayout() {
                 <br />
                 {identity}
               </div>
+              <ShareAppButton
+                variant="ghost"
+                className="w-full justify-start text-muted-foreground"
+              />
               <Button
                 variant="ghost"
                 size="sm"
@@ -435,6 +440,10 @@ export default function OperatorLayout() {
               />
             </nav>
             <div className="shrink-0 space-y-2 border-t border-border bg-sidebar p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+              <ShareAppButton
+                variant="ghost"
+                className="w-full justify-start text-muted-foreground"
+              />
               <Button
                 variant="ghost"
                 size="sm"

@@ -12,6 +12,7 @@ import { useLatest } from "@/lib/use-latest";
 import { useAuth } from "@/hooks/use-auth";
 import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
+import { ShareAppButton } from "@/components/ShareAppDialog";
 import { sectionJump } from "@/lib/utils";
 import NotificationBell from "@/components/NotificationBell";
 import { OfflineBanner } from "@/components/OfflineBanner";
@@ -358,6 +359,10 @@ export default function PortalLayout() {
                 <UserCog className="size-3.5" /> Assign roles
               </Button>
             )}
+            <ShareAppButton
+              variant="ghost"
+              className="w-full justify-start text-muted-foreground"
+            />
             <Button
               variant="ghost"
               size="sm"
@@ -533,6 +538,10 @@ export default function PortalLayout() {
                 <UserCog className="size-3.5" /> Assign roles
               </Button>
             )}
+            <ShareAppButton
+              variant="ghost"
+              className="w-full justify-start text-muted-foreground"
+            />
             <Button
               variant="ghost"
               size="sm"

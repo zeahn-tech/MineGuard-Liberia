@@ -23,6 +23,7 @@ import { OfflineBanner } from "@/components/OfflineBanner";
 import { SessionGuard } from "@/components/SessionGuard";
 import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
+import { ShareAppButton } from "@/components/ShareAppDialog";
 import {
   Sheet,
   SheetContent,
@@ -121,6 +122,10 @@ export default function RegistryLayout() {
                 {identity}
               </div>
             </div>
+            <ShareAppButton
+              variant="ghost"
+              className="w-full justify-start text-muted-foreground"
+            />
             <Button
               variant="ghost"
               size="sm"
@@ -211,6 +216,10 @@ export default function RegistryLayout() {
             <NavLinks onNavigate={() => setMobileNavOpen(false)} />
           </nav>
           <div className="shrink-0 space-y-2 border-t border-border bg-sidebar p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            <ShareAppButton
+              variant="ghost"
+              className="w-full justify-start text-muted-foreground"
+            />
             <Button
               variant="ghost"
               size="sm"
