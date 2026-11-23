@@ -232,10 +232,25 @@ export default function JsaPage() {
               <p className="text-lg font-semibold leading-snug">{j.task_description}</p>
               <ul className="space-y-2 text-base leading-relaxed">
                 {j.hazards.map((h, i) => (
-                  <li key={i}><span className="font-medium">{h.hazard}</span> <span className="text-sm uppercase text-muted-foreground">({h.risk_level})</span>{h.source === "ai_suggested" ? <span className="text-sm text-primary"> · AI-suggested</span> : null}<br /><span className="text-muted-foreground">Control: {h.control}</span></li>
+                  <li key={i}><span className="font-medium">{h.hazard}</span> <span className="text-sm uppercase text-muted-foreground">({h.risk_level})</span>{h.source === "ai_suggested" ? <span className="text-sm text-primary"> · AI-suggested</span> : null}<br /><span className="text-muted-foreground"><strong className="font-bold text-foreground">Control Measure:</strong> {h.control}</span></li>
                 ))}
               </ul>
-              {j.ppe.length > 0 && <p className="text-sm leading-relaxed text-muted-foreground">PPE: {j.ppe.map((id) => PPE.find((p) => p.id === id)?.name ?? id).join(", ")}</p>}
+              {j.ppe.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-bold">PPE:</p>
+                  <ul className="flex flex-wrap gap-2">
+                    {j.ppe.map((id) => {
+                      const item = PPE.find((p) => p.id === id);
+                      return (
+                        <li key={id} className="flex items-center gap-2 rounded border border-border px-2.5 py-1.5 text-sm text-muted-foreground">
+                          {item ? <span className="flex size-7 shrink-0 items-center justify-center text-xl leading-none"><PpeIcon ppe={item} className="size-7" /></span> : null}
+                          <span>{item?.name ?? id}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
               {j.review_note && <p className="text-base"><span className="font-medium">Reviewer note:</span> {j.review_note}</p>}
               {j.status === "approved" && <p className="text-sm text-muted-foreground">Reviewed {j.reviewed_at ? new Date(j.reviewed_at).toLocaleString() : ""} by a different authorised person.</p>}
               {(j.status === "draft" || j.status === "rejected") && j.prepared_by === me && <Button size="sm" variant="outline" onClick={() => setMode({ edit: j })}>Edit</Button>}
