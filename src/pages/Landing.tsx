@@ -4,6 +4,7 @@ import { ApprovedStatistics } from "@/components/ApprovedStatistics";
 import { useAuth } from "@/hooks/use-auth";
 import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
+import { ShareAppButton } from "@/components/ShareAppDialog";
 import { sectionJump } from "@/lib/utils";
 import {
   ArrowRight,
@@ -49,6 +50,7 @@ export default function Landing() {
             <Link to="/voice" className="hover:text-foreground">Worker Voice</Link>
           </nav>
           <div className="flex items-center gap-2">
+            <ShareAppButton variant="ghost" iconOnlyOnMobile />
             {!isLoading && isAuthenticated && (
               <Button asChild variant="outline" size="sm">
                 <Link to="/portal">Open portal</Link>
