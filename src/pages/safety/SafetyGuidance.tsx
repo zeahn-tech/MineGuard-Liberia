@@ -234,21 +234,21 @@ function EmergencyReference() {
   const [open, setOpen] = useState<string | null>(null);
   return (
     <section className="space-y-4">
-      <div className="overflow-hidden rounded-xl border border-[#272a3f] bg-[#0d1020]">
-        <div className="border-b-2 border-[#5a1a1f] bg-[#1f0d0d] px-4 py-6 text-center">
+      <div className="overflow-hidden rounded-xl border border-border bg-background">
+        <div className="border-b-2 border-destructive/50 bg-destructive/5 px-4 py-6 text-center">
           <div className="mg-siren-zoom text-6xl leading-none" aria-hidden="true">🚨</div>
-          <h2 className="mt-3 text-4xl font-bold uppercase tracking-[0.15em] text-[#e63946]">EMERGENCY</h2>
-          <p className="mt-1 text-base text-[#9ca0b8]">Immediate actions &amp; contacts</p>
+          <h2 className="mt-3 text-4xl font-bold uppercase tracking-[0.15em] text-destructive">EMERGENCY</h2>
+          <p className="mt-1 text-base text-muted-foreground">Immediate actions &amp; contacts</p>
         </div>
         <div className="space-y-3 p-4">
-          <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-[0.15em] text-[#9ca0b8]"><span aria-hidden="true">🔴</span>Immediate actions</h3>
+          <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-[0.15em] text-muted-foreground"><span aria-hidden="true">🔴</span>Immediate actions</h3>
           <ol className="space-y-3">
             {IMMEDIATE_ACTIONS.map((a) => {
               const [keyword, ...rest] = a.text.split(" ");
               return (
-                <li key={a.id} className="flex items-center gap-4 rounded-xl border border-[#272a3f] bg-[#161829] p-4 text-base">
-                  <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[#e63946] text-lg font-bold text-white">{a.order}</span>
-                  <span className="text-[#9ca0b8]"><strong className="font-bold text-white">{keyword}</strong> {rest.join(" ")}</span>
+                <li key={a.id} className="flex items-center gap-4 rounded-xl border border-border bg-card p-4 text-base">
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-destructive text-lg font-bold text-destructive-foreground">{a.order}</span>
+                  <span className="text-muted-foreground"><strong className="font-bold text-foreground">{keyword}</strong> {rest.join(" ")}</span>
                 </li>
               );
             })}
