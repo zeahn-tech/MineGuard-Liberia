@@ -110,3 +110,19 @@ describe("share entry points", () => {
     expect(read("src/components/PublicHeader.tsx")).toContain("<ShareAppButton");
   });
 });
+
+describe("link preview icon", () => {
+  test("the build injects an absolute og:image / twitter:image pointing at the 512px app icon", () => {
+    const cfg = read("vite.config.ts");
+    expect(cfg).toContain("socialPreviewPlugin(siteUrl)");
+    expect(cfg).toContain("icons/pwa-512.v2.png");
+    expect(cfg).toContain('property="og:image"');
+    expect(cfg).toContain('name="twitter:image"');
+    // no site address → no tag, rather than a relative address crawlers cannot use
+    expect(cfg).toContain("if (!siteUrl) return html;");
+  });
+
+  test("the share dialog shows the app icon", () => {
+    expect(read("src/components/ShareAppDialog.tsx")).toContain("icons/pwa-192.v2.png");
+  });
+});

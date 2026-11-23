@@ -78,9 +78,21 @@ export function ShareAppDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <p className="rounded-sm border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-          {SHARE_MESSAGE}
-        </p>
+        {/* Preview of what the recipient sees: the app icon, name and address. */}
+        <div className="flex min-w-0 items-center gap-3 rounded-sm border border-border bg-muted/40 p-3">
+          <img
+            src={`${import.meta.env.BASE_URL}icons/pwa-192.v2.png`}
+            alt=""
+            width={48}
+            height={48}
+            className="size-12 shrink-0 rounded-md border border-border"
+          />
+          <div className="min-w-0">
+            <p className="display text-sm leading-tight">MineGuard Liberia</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{SHARE_MESSAGE}</p>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground/80">{url}</p>
+          </div>
+        </div>
 
         {nativeAvailable && (
           <Button type="button" className="w-full" onClick={() => void handleNative()}>
