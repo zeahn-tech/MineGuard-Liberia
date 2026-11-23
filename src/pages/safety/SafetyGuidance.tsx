@@ -234,16 +234,26 @@ function EmergencyReference() {
   const [open, setOpen] = useState<string | null>(null);
   return (
     <section className="space-y-4">
-      <p className="border border-destructive/50 bg-destructive/5 p-3 text-sm">
-        Reference only. It does not raise an alarm or call anyone. In an emergency follow your site&apos;s approved emergency procedure and use your site&apos;s emergency number.
-      </p>
-      <div className="space-y-2">
-        <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Immediate actions</h3>
-        <ol className="space-y-2">
-          {IMMEDIATE_ACTIONS.map((a) => (
-            <li key={a.id} className="flex gap-3 border border-border p-3 text-sm"><span className="font-semibold text-destructive">{a.order}</span><span>{a.text}</span></li>
-          ))}
-        </ol>
+      <div className="overflow-hidden rounded-xl border border-[#272a3f] bg-[#0d1020]">
+        <div className="border-b-2 border-[#5a1a1f] bg-[#1f0d0d] px-4 py-6 text-center">
+          <div className="mg-siren-zoom text-6xl leading-none" aria-hidden="true">🚨</div>
+          <h2 className="mt-3 text-4xl font-bold uppercase tracking-[0.15em] text-[#e63946]">EMERGENCY</h2>
+          <p className="mt-1 text-base text-[#9ca0b8]">Immediate actions &amp; contacts</p>
+        </div>
+        <div className="space-y-3 p-4">
+          <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-[0.15em] text-[#9ca0b8]"><span aria-hidden="true">🔴</span>Immediate actions</h3>
+          <ol className="space-y-3">
+            {IMMEDIATE_ACTIONS.map((a) => {
+              const [keyword, ...rest] = a.text.split(" ");
+              return (
+                <li key={a.id} className="flex items-center gap-4 rounded-xl border border-[#272a3f] bg-[#161829] p-4 text-base">
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[#e63946] text-lg font-bold text-white">{a.order}</span>
+                  <span className="text-[#9ca0b8]"><strong className="font-bold text-white">{keyword}</strong> {rest.join(" ")}</span>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
       </div>
       <EmergencyContacts />
       <div className="space-y-2">
