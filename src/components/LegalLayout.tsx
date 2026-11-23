@@ -43,7 +43,7 @@ export function LegalLinks({ className = "" }: { className?: string }) {
 function LegalTabs() {
   const { pathname } = useLocation();
   return (
-    <nav aria-label="Legal documents" className="mt-6 flex flex-wrap gap-1 border-b border-border">
+    <nav aria-label="Legal documents" className="mt-6 flex flex-nowrap gap-1 overflow-x-auto border-b border-border">
       {LEGAL_DOCS.map((d) => {
         const current = pathname === d.to;
         return (
@@ -51,7 +51,7 @@ function LegalTabs() {
             key={d.to}
             to={d.to}
             aria-current={current ? "page" : undefined}
-            className={`-mb-px min-h-9 border-b-2 px-3 py-2 text-sm ${
+            className={`-mb-px min-h-9 shrink-0 whitespace-nowrap border-b-2 px-2 py-2 text-sm sm:px-3 ${
               current
                 ? "border-foreground font-medium text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground"
