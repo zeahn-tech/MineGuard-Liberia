@@ -17,6 +17,7 @@ import { canReview, explainJsaError, jsaSites, listJsas, newKey, RISK_LEVELS, re
 import { EmptyState } from "@/components/EmptyState";
 import { PageLoading } from "@/components/PageLoading";
 import { PPE } from "@/data/safety-reference";
+import { PpeIcon } from "@/components/PpeIcon";
 
 interface Suggestion { id: string; hazard: string; consequences: string[]; controls: string[]; ppe: { id: string; name: string }[]; questions: string[] }
 interface SuggestionData { suggestions: Suggestion[]; generalQuestions: string[] }
@@ -118,7 +119,7 @@ function Editor({ sites, existing, onDone }: { sites: JsaSite[]; existing?: Jsa;
         <div className="flex flex-wrap gap-2">
           {PPE.map((p) => (
             <Button key={p.id} size="sm" variant={ppe.includes(p.id) ? "default" : "outline"} aria-pressed={ppe.includes(p.id)} onClick={() => setPpe((x) => (x.includes(p.id) ? x.filter((y) => y !== p.id) : [...x, p.id]))}>
-              <span aria-hidden="true">{p.emoji} </span>{p.name}
+              <PpeIcon ppe={p} className="size-5" /> {p.name}
             </Button>
           ))}
         </div>
@@ -222,24 +223,39 @@ export default function JsaPage() {
       {mode === "list" && (items.length === 0 ? <EmptyState title="No job safety analyses" why="Prepared JSAs, and any waiting for your review, will be listed here." /> : (
         <ul className="space-y-3">
           {items.map((j) => (
-            <li key={j.id} className="space-y-2 border border-border p-3">
+            <li key={j.id} className="space-y-3 border border-border p-4">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide">{STATUS_LABEL[j.status]}</span>
-                {j.ai_assisted && <span className="rounded-full border border-primary/40 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">AI-assisted</span>}
-                <span className="text-xs text-muted-foreground">{j.job_date}{j.location_area ? ` · ${j.location_area}` : ""}</span>
+                <span className="rounded border border-border px-2.5 py-1 text-xs font-medium uppercase tracking-wide">{STATUS_LABEL[j.status]}</span>
+                {j.ai_assisted && <span className="rounded-full border border-primary/40 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-primary">AI-assisted</span>}
+                <span className="text-sm text-muted-foreground">{j.job_date}{j.location_area ? ` · ${j.location_area}` : ""}</span>
               </div>
-              <p className="text-sm font-medium">{j.task_description}</p>
-              <ul className="space-y-1 text-sm">
+              <p className="text-lg font-semibold leading-snug">{j.task_description}</p>
+              <ul className="space-y-2 text-base leading-relaxed">
                 {j.hazards.map((h, i) => (
-                  <li key={i}><span className="font-medium">{h.hazard}</span> <span className="text-xs uppercase text-muted-foreground">({h.risk_level})</span>{h.source === "ai_suggested" ? <span className="text-xs text-primary"> · AI-suggested</span> : null}<br /><span className="text-muted-foreground">Control: {h.control}</span></li>
+                  <li key={i}><span className="font-medium">{h.hazard}</span> <span className="text-sm uppercase text-muted-foreground">({h.risk_level})</span>{h.source === "ai_suggested" ? <span className="text-sm text-primary"> · AI-suggested</span> : null}<br /><span className="text-muted-foreground"><strong className="font-bold text-foreground">Control Measure:</strong> {h.control}</span></li>
                 ))}
               </ul>
-              {j.ppe.length > 0 && <p className="text-xs text-muted-foreground">PPE: {j.ppe.map((id) => PPE.find((p) => p.id === id)?.name ?? id).join(", ")}</p>}
-              {j.review_note && <p className="text-xs"><span className="font-medium">Reviewer note:</span> {j.review_note}</p>}
-              {j.status === "approved" && <p className="text-xs text-muted-foreground">Reviewed {j.reviewed_at ? new Date(j.reviewed_at).toLocaleString() : ""} by a different authorised person.</p>}
+              {j.ppe.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-bold">PPE:</p>
+                  <ul className="flex flex-wrap gap-2">
+                    {j.ppe.map((id) => {
+                      const item = PPE.find((p) => p.id === id);
+                      return (
+                        <li key={id} className="flex items-center gap-2 rounded border border-border px-2.5 py-1.5 text-sm text-muted-foreground">
+                          {item ? <span className="flex size-7 shrink-0 items-center justify-center text-xl leading-none"><PpeIcon ppe={item} className="size-7" /></span> : null}
+                          <span>{item?.name ?? id}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+              {j.review_note && <p className="text-base"><span className="font-medium">Reviewer note:</span> {j.review_note}</p>}
+              {j.status === "approved" && <p className="text-sm text-muted-foreground">Reviewed {j.reviewed_at ? new Date(j.reviewed_at).toLocaleString() : ""} by a different authorised person.</p>}
               {(j.status === "draft" || j.status === "rejected") && j.prepared_by === me && <Button size="sm" variant="outline" onClick={() => setMode({ edit: j })}>Edit</Button>}
               {j.status === "submitted" && j.prepared_by !== me && reviewable.has(j.site_id) && <ReviewBox jsa={j} onDone={done} />}
-              {j.status === "submitted" && j.prepared_by === me && <p className="text-xs text-muted-foreground">Waiting for a different authorised person to review.</p>}
+              {j.status === "submitted" && j.prepared_by === me && <p className="text-sm text-muted-foreground">Waiting for a different authorised person to review.</p>}
             </li>
           ))}
         </ul>
