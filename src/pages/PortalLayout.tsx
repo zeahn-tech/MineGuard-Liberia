@@ -1,4 +1,5 @@
 import { acknowledgeEmergency } from "@/lib/emergency";
+import { ShareAppButton } from "@/components/ShareApp";
 import { Siren,
   BookOpen,
   ClipboardCheck,
@@ -358,6 +359,7 @@ export default function PortalLayout() {
                 <UserCog className="size-3.5" /> Assign roles
               </Button>
             )}
+            <ShareAppButton />
             <Button
               variant="ghost"
               size="sm"
@@ -533,6 +535,7 @@ export default function PortalLayout() {
                 <UserCog className="size-3.5" /> Assign roles
               </Button>
             )}
+            <ShareAppButton />
             <Button
               variant="ghost"
               size="sm"

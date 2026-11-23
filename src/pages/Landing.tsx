@@ -1,4 +1,5 @@
 import { LegalLinks } from "@/components/LegalLayout";
+import { ShareAppButton } from "@/components/ShareApp";
 import { Link } from "react-router";
 import { ApprovedStatistics } from "@/components/ApprovedStatistics";
 import { useAuth } from "@/hooks/use-auth";
@@ -192,6 +193,7 @@ export default function Landing() {
             MineGuard Liberia — v1.0 · Government-ready architecture, designed for
             potential government adoption.
           </span>
+          <ShareAppButton className="w-fit text-muted-foreground md:order-last" />
           <LegalLinks className="md:justify-end" />
         </div>
       </footer>

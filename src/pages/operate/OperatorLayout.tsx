@@ -14,6 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import { acknowledgeEmergency } from "@/lib/emergency";
+import { ShareAppButton } from "@/components/ShareApp";
 import { EmergencyBanner } from "@/components/emergency/EmergencyBanner";
 import { Siren,
   BookOpen,
@@ -299,6 +300,7 @@ export default function OperatorLayout() {
                 <br />
                 {identity}
               </div>
+              <ShareAppButton />
               <Button
                 variant="ghost"
                 size="sm"
@@ -435,6 +437,7 @@ export default function OperatorLayout() {
               />
             </nav>
             <div className="shrink-0 space-y-2 border-t border-border bg-sidebar p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+              <ShareAppButton />
               <Button
                 variant="ghost"
                 size="sm"

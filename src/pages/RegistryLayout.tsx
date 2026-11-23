@@ -11,6 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import { useState } from "react";
+import { ShareAppButton } from "@/components/ShareApp";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { RouteBoundary } from "@/components/RouteBoundary";
 import { useIntentLink } from "@/lib/route-preload";
@@ -121,6 +122,7 @@ export default function RegistryLayout() {
                 {identity}
               </div>
             </div>
+            <ShareAppButton />
             <Button
               variant="ghost"
               size="sm"
@@ -211,6 +213,7 @@ export default function RegistryLayout() {
             <NavLinks onNavigate={() => setMobileNavOpen(false)} />
           </nav>
           <div className="shrink-0 space-y-2 border-t border-border bg-sidebar p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            <ShareAppButton />
             <Button
               variant="ghost"
               size="sm"
