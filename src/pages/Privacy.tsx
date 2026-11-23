@@ -365,7 +365,6 @@ export default function Privacy() {
         </P>
       }
       sections={sections}
-      other={{ to: "/terms", label: "Terms of Use" }}
     />
   );
 }

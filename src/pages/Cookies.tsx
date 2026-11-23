@@ -110,18 +110,22 @@ const ROWS: Row[] = [
 function CookieSettingsButton() {
   const c = useConsent();
   return (
-    <p>
+    <div className="paper flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <p className="text-sm font-medium">Your cookie settings</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Essential storage: always on. Map background (OpenStreetMap):{" "}
+          <strong>{c.decided ? (c.mapTiles ? "allowed" : "off") : "off (no choice made yet)"}</strong>.
+        </p>
+      </div>
       <button
         type="button"
         onClick={reopenConsent}
-        className="min-h-10 rounded-sm border border-border px-3 text-sm font-medium hover:bg-muted"
+        className="min-h-10 shrink-0 rounded-sm border border-border px-3 text-sm font-medium hover:bg-muted"
       >
-        Open cookie settings
+        Change settings
       </button>
-      <span className="ml-3 text-xs text-muted-foreground">
-        {c.decided ? `Map background: ${c.mapTiles ? "allowed" : "off"}` : "No choice made yet — map background is off"}
-      </span>
-    </p>
+    </div>
   );
 }
 
@@ -239,7 +243,7 @@ const sections: LegalSection[] = [
             the same as choosing Essential only.
           </li>
           <li>
-            <strong>Change your mind at any time</strong> with the button below or the &quot;Cookie
+            <strong>Change your mind at any time</strong> with the settings panel at the top of this page or the &quot;Cookie
             settings&quot; link in the footer. Withdrawing the map background deletes the map tiles saved
             on your device and stops further requests to the map provider.
           </li>
@@ -249,7 +253,6 @@ const sections: LegalSection[] = [
             from working, and clearing it removes any offline work not yet sent.
           </li>
         </UL>
-        <CookieSettingsButton />
       </>
     ),
   },
@@ -277,14 +280,16 @@ export default function Cookies() {
       kicker="Legal"
       title="Cookie Policy"
       intro={
-        <P>
-          The short version: we set no cookies, use no analytics or advertising, and keep only what the app
-          needs on your device. The one optional item is the map background from OpenStreetMap, which is
-          off unless you allow it.
-        </P>
+        <>
+          <P>
+            The short version: we set no cookies, use no analytics or advertising, and keep only what the app
+            needs on your device. The one optional item is the map background from OpenStreetMap, which is
+            off unless you allow it.
+          </P>
+          <CookieSettingsButton />
+        </>
       }
       sections={sections}
-      other={{ to: "/privacy", label: "Privacy Policy" }}
     />
   );
 }

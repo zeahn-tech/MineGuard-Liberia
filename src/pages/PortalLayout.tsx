@@ -451,9 +451,13 @@ export default function PortalLayout() {
           </main>
 
           <footer className="border-t border-border px-4 py-4 text-[11px] text-muted-foreground md:px-8">
-            MineGuard Liberia — government-ready architecture, designed for potential
-            government adoption. Not an official Government of Liberia system.{" "}
-            <LegalLinks />
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <span>
+                MineGuard Liberia — government-ready architecture, designed for potential
+                government adoption. Not an official Government of Liberia system.
+              </span>
+              <LegalLinks />
+            </div>
           </footer>
         </div>
       </div>

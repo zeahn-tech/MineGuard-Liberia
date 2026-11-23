@@ -95,7 +95,8 @@ describe("routes and entry points", () => {
     expect(main.slice(main.indexOf('path="/cookies"'), main.indexOf('path="/cookies"') + 100)).not.toContain("RequireAuth");
     expect(main).toContain("<CookieBanner />");
     const layout = read("src/components/LegalLayout.tsx");
-    expect(layout).toContain('to="/cookies"');
+    expect(read("src/lib/legal.ts")).toContain('to: "/cookies"');
+    expect(layout).toContain("LEGAL_DOCS");
     expect(layout).toContain("Cookie settings");
   });
 });
