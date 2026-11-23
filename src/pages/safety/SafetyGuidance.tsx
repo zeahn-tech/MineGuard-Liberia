@@ -237,7 +237,7 @@ function EmergencyReference() {
       <div className="overflow-hidden rounded-xl border border-border bg-background">
         <div className="border-b-2 border-destructive/50 bg-destructive/5 px-4 py-6 text-center">
           <div className="mg-siren-zoom text-6xl leading-none" aria-hidden="true">🚨</div>
-          <h2 className="mt-3 text-4xl font-bold uppercase tracking-[0.15em] text-destructive">EMERGENCY</h2>
+          <h2 className="mt-3 text-2xl font-bold uppercase tracking-[0.15em] text-destructive">EMERGENCY</h2>
           <p className="mt-1 text-base text-muted-foreground">Immediate actions &amp; contacts</p>
         </div>
         <div className="space-y-3 p-4">
@@ -247,7 +247,7 @@ function EmergencyReference() {
               const [keyword, ...rest] = a.text.split(" ");
               return (
                 <li key={a.id} className="flex items-center gap-4 rounded-xl border border-border bg-card p-4 text-base">
-                  <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-destructive text-lg font-bold text-destructive-foreground">{a.order}</span>
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-destructive text-sm font-bold text-white">{a.order}</span>
                   <span className="text-muted-foreground"><strong className="font-bold text-foreground">{keyword}</strong> {rest.join(" ")}</span>
                 </li>
               );
