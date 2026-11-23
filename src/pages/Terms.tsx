@@ -288,7 +288,6 @@ export default function Terms() {
         </P>
       }
       sections={sections}
-      other={{ to: "/privacy", label: "Privacy Policy" }}
     />
   );
 }

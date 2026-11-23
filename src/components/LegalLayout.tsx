@@ -1,5 +1,6 @@
 import { PublicHeader } from "@/components/PublicHeader";
 import {
+  LEGAL_DOCS,
   LEGAL_PRODUCT,
   LEGAL_UPDATED,
   LEGAL_VERSION,
@@ -9,34 +10,58 @@ import {
 import { reopenConsent } from "@/lib/consent";
 import { ArrowLeft } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 
 export type LegalSection = { id: string; title: string; body: ReactNode };
 
-/** Footer / inline links to the two legal pages. */
+/** One consistent legal navigation: the three documents plus the cookie
+ *  settings action, separated and wrapping cleanly on small screens. */
 export function LegalLinks({ className = "" }: { className?: string }) {
+  const item = "underline-offset-4 hover:text-foreground hover:underline";
   return (
-    <span className={className}>
-      <Link to="/terms" className="underline underline-offset-4 hover:text-foreground">
-        Terms of Use
-      </Link>
-      <span aria-hidden="true"> · </span>
-      <Link to="/privacy" className="underline underline-offset-4 hover:text-foreground">
-        Privacy Policy
-      </Link>
-      <span aria-hidden="true"> · </span>
-      <Link to="/cookies" className="underline underline-offset-4 hover:text-foreground">
-        Cookie Policy
-      </Link>
-      <span aria-hidden="true"> · </span>
-      <button
-        type="button"
-        onClick={reopenConsent}
-        className="underline underline-offset-4 hover:text-foreground"
-      >
+    <nav
+      aria-label="Legal"
+      className={`flex flex-wrap items-center gap-x-3 gap-y-1 ${className}`}
+    >
+      {LEGAL_DOCS.map((d, i) => (
+        <span key={d.to} className="inline-flex items-center gap-3">
+          {i > 0 && <span aria-hidden="true" className="text-border">|</span>}
+          <Link to={d.to} className={item}>
+            {d.label}
+          </Link>
+        </span>
+      ))}
+      <span aria-hidden="true" className="text-border">|</span>
+      <button type="button" onClick={reopenConsent} className={item}>
         Cookie settings
       </button>
-    </span>
+    </nav>
+  );
+}
+
+/** Tab-style switcher between the legal documents, shown on each one. */
+function LegalTabs() {
+  const { pathname } = useLocation();
+  return (
+    <nav aria-label="Legal documents" className="mt-6 flex flex-wrap gap-1 border-b border-border">
+      {LEGAL_DOCS.map((d) => {
+        const current = pathname === d.to;
+        return (
+          <Link
+            key={d.to}
+            to={d.to}
+            aria-current={current ? "page" : undefined}
+            className={`-mb-px min-h-9 border-b-2 px-3 py-2 text-sm ${
+              current
+                ? "border-foreground font-medium text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {d.label}
+          </Link>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -74,13 +99,11 @@ export function LegalLayout({
   title,
   intro,
   sections,
-  other,
 }: {
   kicker: string;
   title: string;
   intro: ReactNode;
   sections: LegalSection[];
-  other: { to: string; label: string };
 }) {
   const navigate = useNavigate();
 
@@ -115,7 +138,8 @@ export function LegalLayout({
       </PublicHeader>
 
       <main className="mx-auto max-w-3xl min-w-0 px-4 py-10 md:px-8">
-        <p className="kicker">{kicker}</p>
+        <LegalTabs />
+        <p className="kicker mt-8">{kicker}</p>
         <h1 className="display mt-2 text-3xl break-words md:text-4xl">{title}</h1>
         <p className="mt-2 text-xs text-muted-foreground">
           Version {LEGAL_VERSION} · Effective {formatLegalDate(LEGAL_UPDATED)}
@@ -157,15 +181,13 @@ export function LegalLayout({
         </div>
 
         <footer className="mt-14 border-t border-border pt-6 text-xs text-muted-foreground">
-          <p>
+          <LegalLinks />
+          <p className="mt-3">
             {LEGAL_PRODUCT} · Terms, Privacy and Cookie Policy version {LEGAL_VERSION}, effective{" "}
             {formatLegalDate(LEGAL_UPDATED)}. Not an official Government of Liberia system;
             designed for potential government adoption.
           </p>
-          <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-            <Link to={other.to} className="underline underline-offset-4 hover:text-foreground">
-              {other.label}
-            </Link>
+          <p className="mt-2">
             <Link to="/" className="underline underline-offset-4 hover:text-foreground">
               Home
             </Link>

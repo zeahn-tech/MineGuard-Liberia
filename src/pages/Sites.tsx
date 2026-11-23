@@ -93,10 +93,6 @@ export default function Sites() {
         <div>
           <p className="kicker">Registry</p>
           <h1 className="display text-3xl">Mining sites</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Scope-filtered automatically: you only ever see sites your role and
-            geography permit.
-          </p>
         </div>
         {isAdmin && <RegisterSiteDialog open={registerOpen} onOpenChange={setRegisterOpen} />}
       </header>

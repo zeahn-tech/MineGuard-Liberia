@@ -30,3 +30,10 @@ export function formatLegalDate(iso: string = LEGAL_UPDATED): string {
     timeZone: "UTC",
   });
 }
+
+/** The three legal documents, in the order they are presented everywhere. */
+export const LEGAL_DOCS = [
+  { to: "/terms", label: "Terms of Use" },
+  { to: "/privacy", label: "Privacy Policy" },
+  { to: "/cookies", label: "Cookie Policy" },
+] as const;

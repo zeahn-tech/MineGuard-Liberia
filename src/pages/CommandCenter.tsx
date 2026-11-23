@@ -107,7 +107,7 @@ export default function CommandCenter() {
         <p className="kicker break-words">National command center — {stats.scope} scope</p>
         <h1 className="display text-2xl break-words sm:text-3xl">Oversight at a glance</h1>
         <p className="text-sm break-words text-muted-foreground">
-          All figures computed from live platform data. {user?.name ? `Welcome, ${user.name}.` : ""}
+          {user?.name ? `Welcome, ${user.name}.` : ""}
         </p>
       </header>
 

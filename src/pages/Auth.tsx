@@ -662,8 +662,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
             <div className="rounded-b-lg border-t border-border bg-muted px-6 py-3 text-center text-[11px] leading-relaxed text-muted-foreground">
               Access is for authorized oversight operations. By continuing you agree to
-              the <LegalLinks />.
+              our Terms of Use and Privacy Policy.
               {notice ? ` ${notice}` : ""}
+              <LegalLinks className="mt-2 justify-center" />
             </div>
           </Card>
 

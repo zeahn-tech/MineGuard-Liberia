@@ -26,7 +26,19 @@ export function CookieBanner() {
       aria-label="Cookie and storage settings"
       className="fixed inset-x-0 bottom-0 z-[2000] border-t border-border bg-background p-3 shadow-lg md:inset-x-auto md:right-4 md:bottom-4 md:max-w-md md:rounded-sm md:border"
     >
-      <p className="text-sm font-medium">Cookies and storage</p>
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-medium">{consent.decided ? "Cookie settings" : "Cookies and storage"}</p>
+        {consent.decided && (
+          <button
+            type="button"
+            onClick={() => setReopened(false)}
+            aria-label="Close cookie settings"
+            className="-mt-1 -mr-1 min-h-8 min-w-8 rounded-sm text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            ✕
+          </button>
+        )}
+      </div>
       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
         MineGuard sets <strong>no cookies</strong> and runs <strong>no analytics or advertising</strong>.
         It stores only what the app needs on your device: your sign-in, saved offline work and an app

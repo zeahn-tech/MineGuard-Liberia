@@ -192,10 +192,7 @@ export default function Landing() {
             MineGuard Liberia — v1.0 · Government-ready architecture, designed for
             potential government adoption.
           </span>
-          <span className="flex flex-col gap-1 md:items-end">
-            <LegalLinks className="flex flex-wrap gap-x-1" />
-            <span>Statistics shown, if any, are computed from live platform data only.</span>
-          </span>
+          <LegalLinks className="md:justify-end" />
         </div>
       </footer>
     </div>

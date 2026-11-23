@@ -83,12 +83,18 @@ describe("the documents match the app", () => {
     }
   });
 
-  test("both documents cross-link and share the layout (version + date shown)", async () => {
-    expect(await read("../src/pages/Terms.tsx")).toContain('to="/privacy"');
-    expect(await read("../src/pages/Privacy.tsx")).toContain('to="/terms"');
+  test("all three documents cross-link through the shared layout (version + date shown)", async () => {
     const layout = await read("../src/components/LegalLayout.tsx");
+    const legal = await read("../src/lib/legal.ts");
+    for (const to of ["/terms", "/privacy", "/cookies"]) expect(legal).toContain(`to: "${to}"`);
+    expect(layout).toContain("LEGAL_DOCS");
+    expect(layout).toContain("LegalTabs");
+    expect(layout).toContain("Cookie settings");
     expect(layout).toContain("LEGAL_VERSION");
     expect(layout).toContain("formatLegalDate");
+    for (const f of ["Terms", "Privacy", "Cookies"]) {
+      expect(await read(`../src/pages/${f}.tsx`)).toContain("<LegalLayout");
+    }
   });
 
   test("hash routing: contents use scrolling, not #anchors", async () => {
