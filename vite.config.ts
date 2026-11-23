@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 
 // Audit F6: GitHub Pages cannot send response headers, so ship a <meta> CSP in
 // PRODUCTION builds only (dev needs inline scripts/websockets for HMR). Note a
@@ -34,6 +34,36 @@ function cspPlugin(): Plugin {
         "<head>",
         `<head>\n  <meta http-equiv="Content-Security-Policy" content="${CSP}" />\n  <meta name="referrer" content="strict-origin-when-cross-origin" />`,
       ),
+  };
+}
+
+// Link previews: when the app address is pasted into WhatsApp, Facebook, X,
+// Telegram, LinkedIn, iMessage, Slack etc., those apps read the page's Open Graph
+// tags and need an ABSOLUTE image address (a relative one shows no icon). The
+// public address comes from VITE_PUBLIC_APP_URL, or — on GitHub Pages — from the
+// repository (https://<owner>.github.io/<repo>/). With neither, no image tag is
+// emitted rather than a broken relative one.
+function socialPreviewPlugin(siteUrl: string | undefined): Plugin {
+  return {
+    name: "mg-social-preview",
+    apply: "build",
+    transformIndexHtml: (html) => {
+      if (!siteUrl) return html;
+      const base = siteUrl.endsWith("/") ? siteUrl : `${siteUrl}/`;
+      const image = `${base}icons/pwa-512.v2.png`;
+      const tags = [
+        `<meta property="og:site_name" content="MineGuard Liberia" />`,
+        `<meta property="og:url" content="${base}" />`,
+        `<meta property="og:image" content="${image}" />`,
+        `<meta property="og:image:type" content="image/png" />`,
+        `<meta property="og:image:width" content="512" />`,
+        `<meta property="og:image:height" content="512" />`,
+        `<meta property="og:image:alt" content="MineGuard Liberia app icon" />`,
+        `<meta name="twitter:image" content="${image}" />`,
+        `<meta name="twitter:image:alt" content="MineGuard Liberia app icon" />`,
+      ].join("\n  ");
+      return html.replace("</head>", `  ${tags}\n</head>`);
+    },
   };
 }
 
@@ -81,7 +111,7 @@ function swPrecachePlugin(): Plugin {
 }
 
 // https://vite.dev/config/
-export default defineConfig(({ command }) => {
+export default defineConfig(({ command, mode }) => {
   // Repository-aware base path. On GitHub Pages project sites the app is served
   // from /<repo>/ — but ONLY for production builds: the dev/preview server
   // always serves from /, so a stray GITHUB_REPOSITORY in the sandbox can never
@@ -92,8 +122,13 @@ export default defineConfig(({ command }) => {
     process.env.PUBLIC_PATH ??
     (command === "build" && repoName ? `/${repoName}/` : "/");
 
+  const [owner, repo] = process.env.GITHUB_REPOSITORY?.split("/") ?? [];
+  const siteUrl =
+    (process.env.VITE_PUBLIC_APP_URL ?? loadEnv(mode, process.cwd(), "VITE_").VITE_PUBLIC_APP_URL) ||
+    (owner && repo ? `https://${owner}.github.io/${repo}/` : undefined);
+
   return {
-    plugins: [react(), tailwindcss(), cspPlugin(), swPrecachePlugin()],
+    plugins: [react(), tailwindcss(), cspPlugin(), socialPreviewPlugin(siteUrl), swPrecachePlugin()],
     base,
     // Short commit id of the deployed build, shown on error panels so a report
     // can say exactly which version of the app produced it.
