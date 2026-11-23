@@ -313,3 +313,16 @@
   0% { transform: translateX(-100%); }
   100% { transform: translateX(300%); }
 }
+
+/* Emergency tab siren: gentle zoom in and out (disabled for reduced-motion users). */
+@keyframes mg-siren-zoom {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.25); }
+}
+.mg-siren-zoom {
+  display: inline-block;
+  animation: mg-siren-zoom 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mg-siren-zoom { animation: none; }
+}
