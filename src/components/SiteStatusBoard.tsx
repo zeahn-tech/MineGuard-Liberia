@@ -25,6 +25,7 @@ import {
 } from "@/lib/site-status";
 import { TriangleAlert, WifiOff } from "lucide-react";
 import { PageLoading } from "@/components/PageLoading";
+import { alternate } from "@/lib/chart-orientation";
 import { BarList, ChartCard, type BarTone } from "@/components/BarList";
 import { countyLoad, incidentSeverityInPeriod, statusCounts, topIncidentSites, prettify } from "@/lib/admin-charts";
 
@@ -535,6 +536,7 @@ function BoardCharts({
     <div className="grid min-w-0 gap-3 md:grid-cols-2" aria-label="Site status charts">
       <ChartCard title="Sites by status" note="One primary status per site, most urgent first. Not a safety verdict.">
         <BarList
+          orientation={alternate(0)}
           items={statuses.map((s) => ({
             label: `${STATUS_META[s.status].glyph} ${STATUS_META[s.status].label}`,
             value: s.count,
@@ -546,6 +548,7 @@ function BoardCharts({
 
       <ChartCard title="Age of verified information" note={`Latest approved inspection; policy window ${STALE_AFTER_DAYS} days.`}>
         <BarList
+          orientation={alternate(1)}
           items={[
             { label: `Within ${STALE_AFTER_DAYS} days`, value: summary.recentApproved, tone: "primary" },
             { label: `Older than ${STALE_AFTER_DAYS} days`, value: summary.stale, tone: "muted" },
@@ -557,12 +560,13 @@ function BoardCharts({
 
       <ChartCard title={`Incidents by severity (${periodLabel})`} note="Reported by companies; not independently verified.">
         <BarList
+          orientation={alternate(2)}
           items={sev.map((s) => ({ label: prettify(s.severity), value: s.count, tone: SEV_TONE[s.severity] }))}
         />
       </ChartCard>
 
       <ChartCard title={`Sites with most incidents (${periodLabel})`}>
-        {topSites.length === 0 ? none : <BarList items={topSites} tone="primary" />}
+        {topSites.length === 0 ? none : <BarList items={topSites} tone="primary" orientation={alternate(3)} />}
       </ChartCard>
 
       <div className="md:col-span-2">
@@ -573,15 +577,15 @@ function BoardCharts({
             <div className="grid min-w-0 gap-6 sm:grid-cols-3">
               <div>
                 <p className="mb-2 text-xs font-medium">Open critical findings</p>
-                <BarList items={counties.map((c) => ({ label: c.county, value: c.openCritical }))} tone="critical" />
+                <BarList items={counties.map((c) => ({ label: c.county, value: c.openCritical }))} tone="critical" orientation={alternate(4)} />
               </div>
               <div>
                 <p className="mb-2 text-xs font-medium">Overdue corrective actions</p>
-                <BarList items={counties.map((c) => ({ label: c.county, value: c.overdue }))} tone="warn" />
+                <BarList items={counties.map((c) => ({ label: c.county, value: c.overdue }))} tone="warn" orientation={alternate(5)} />
               </div>
               <div>
                 <p className="mb-2 text-xs font-medium">Incidents ({periodLabel})</p>
-                <BarList items={counties.map((c) => ({ label: c.county, value: c.incidents }))} tone="primary" />
+                <BarList items={counties.map((c) => ({ label: c.county, value: c.incidents }))} tone="primary" orientation={alternate(6)} />
               </div>
             </div>
           )}
