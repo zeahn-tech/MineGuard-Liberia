@@ -52,7 +52,7 @@ export default function CommandCenterCharts({
       </ChartCard>
 
       <ChartCard title="Records by county" note="Records across your scope, top eight counties.">
-        {counties.length === 0 ? none : <BarList items={counties} tone="primary" />}
+        {counties.length === 0 ? none : <BarList items={counties} tone="ok" />}
       </ChartCard>
 
       <ChartCard title="Community reports by status">
@@ -61,7 +61,7 @@ export default function CommandCenterCharts({
         ) : reports.length === 0 ? (
           none
         ) : (
-          <BarList items={communityBy(reports, "status")} tone="primary" />
+          <BarList items={communityBy(reports, "status")} tone="accent" />
         )}
       </ChartCard>
 
