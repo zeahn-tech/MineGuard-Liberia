@@ -21,7 +21,7 @@ const TONE: Record<BarTone, string> = {
 };
 
 /** Height of the plotting area, in px. */
-const PLOT_PX = 144;
+const PLOT_PX = 96;
 
 export interface BarItem {
   label: string;
@@ -56,7 +56,7 @@ export function BarList({ items, max, tone = "primary", empty }: {
               <span className="flex w-full items-end justify-center" style={{ height: PLOT_PX }}>
                 <span
                   aria-hidden="true"
-                  className={`w-full max-w-[3.5rem] rounded-t-sm ${TONE[i.tone ?? tone]}`}
+                  className={`w-full max-w-[1.25rem] rounded-t-sm ${TONE[i.tone ?? tone]}`}
                   style={{ height: i.value <= 0 ? "3px" : `${(pct / 100) * PLOT_PX}px` }}
                 />
               </span>
