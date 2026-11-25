@@ -3,6 +3,7 @@
 // one the dashboard already loaded (command-center stats, risk indicators,
 // community reports); the numbers stay on screen as text beside each bar.
 // ---------------------------------------------------------------------------
+import { alternate } from "@/lib/chart-orientation";
 import { BarList, ChartCard } from "@/components/BarList";
 import { PageLoading } from "@/components/PageLoading";
 import type { CommandCenterStats } from "@/lib/backend";
@@ -30,6 +31,7 @@ export default function CommandCenterCharts({
     <section aria-label="Command center charts" className="grid min-w-0 gap-3 md:grid-cols-2">
       <ChartCard title="Corrective actions" note="Outstanding actions: overdue versus still within their deadline.">
         <BarList
+          orientation={alternate(0)}
           items={[
             { label: "Overdue", value: stats.correctiveActionsOverdue, tone: "critical" },
             { label: "Open, within deadline", value: onTime, tone: "primary" },
@@ -39,6 +41,7 @@ export default function CommandCenterCharts({
 
       <ChartCard title="Inspection coverage" note="Share of sites with an approved inspection.">
         <BarList
+          orientation={alternate(1)}
           items={[
             { label: "With approved inspection", value: cov.covered, suffix: "%", tone: "primary" },
             { label: "Without", value: cov.notCovered, suffix: "%", tone: "warn" },
@@ -48,11 +51,11 @@ export default function CommandCenterCharts({
       </ChartCard>
 
       <ChartCard title="Incidents by type" note={`${stats.incidentsTotal.toLocaleString()} reported; not independently verified.`}>
-        {types.length === 0 ? none : <BarList items={types} tone="primary" />}
+        {types.length === 0 ? none : <BarList items={types} tone="primary" orientation={alternate(2)} />}
       </ChartCard>
 
       <ChartCard title="Records by county" note="Records across your scope, top eight counties.">
-        {counties.length === 0 ? none : <BarList items={counties} tone="primary" />}
+        {counties.length === 0 ? none : <BarList items={counties} tone="ok" orientation={alternate(3)} />}
       </ChartCard>
 
       <ChartCard title="Community reports by status">
@@ -61,7 +64,7 @@ export default function CommandCenterCharts({
         ) : reports.length === 0 ? (
           none
         ) : (
-          <BarList items={communityBy(reports, "status")} tone="primary" />
+          <BarList items={communityBy(reports, "status")} tone="accent" orientation={alternate(4)} />
         )}
       </ChartCard>
 
@@ -71,19 +74,19 @@ export default function CommandCenterCharts({
         ) : reports.length === 0 ? (
           none
         ) : (
-          <BarList items={communityBy(reports, "category")} tone="warn" />
+          <BarList items={communityBy(reports, "category")} tone="warn" orientation={alternate(5)} />
         )}
       </ChartCard>
 
       {env.length > 0 && (
         <ChartCard title="Environmental alerts by category" note="Measured or verified only.">
-          <BarList items={env} tone="critical" />
+          <BarList items={env} tone="critical" orientation={alternate(6)} />
         </ChartCard>
       )}
 
       {priority.length > 0 && (
         <ChartCard title="Highest risk indicators" note="Decision support only — not a verdict on any site.">
-          <BarList items={priority} tone="warn" />
+          <BarList items={priority} tone="warn" orientation={alternate(env.length > 0 ? 7 : 6)} />
         </ChartCard>
       )}
     </section>
