@@ -36,7 +36,7 @@ afterEach(async () => {
     "0025_company_status_membership_invitations.sql",
     "0026_company_workforce.sql",
     "0027_site_scoped_access.sql",
-    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0040_emergency_alerts.sql", "0041_emergency_authority_corrections.sql", "0048_close_admin_bootstrap.sql", "0049_public_user_identity.sql", "0050_public_reports_feedback.sql", "0052_public_content.sql", "0062_site_code_hardening.sql",
+    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0040_emergency_alerts.sql", "0041_emergency_authority_corrections.sql", "0048_close_admin_bootstrap.sql", "0049_public_user_identity.sql", "0050_public_reports_feedback.sql", "0052_public_content.sql", "0065_site_code_hardening.sql",
   ]) {
     await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
   }
@@ -550,7 +550,7 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
       const READ_ONLY = new Set([
         "audit_log", "organization_members", "organization_invitations",
         "organization_imports", "organization_import_rows", "site_registration_requests",
-        // 0062: definer-only reference/counter tables (no client grant at all)
+        // 0065: definer-only reference/counter tables (no client grant at all)
         "county_codes", "site_code_counters",
         // 0040: emergency alerts are written only through self-authorizing RPCs
         "emergency_alerts", "emergency_alert_revisions", "emergency_alert_acks",
@@ -792,7 +792,7 @@ describe("GAP-0: function execute surface (0011)", () => {
     // 0031 (registrar): the company directory (self-authorizes on organizations.write)
     "mg_company_directory()",
     "mg_company_oversight()",
-    // 0062: registrar preview (hard errors, format warning, near-match duplicates) — self-authorizes on organizations.write
+    // 0065: registrar preview (hard errors, format warning, near-match duplicates) — self-authorizes on organizations.write
     "mg_company_registration_check(text, text)",
     "mg_company_workforce(uuid)",
     // 0014's five scale surfaces — SECURITY INVOKER row sources 0011 must
@@ -867,7 +867,7 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_role()",
     "mg_search_companies(text)",
     "mg_set_account_restriction(uuid, boolean, text)",
-    // 0062: registrar adds / corrects a company licence number — self-authorizes on organizations.write
+    // 0065: registrar adds / corrects a company licence number — self-authorizes on organizations.write
     "mg_set_company_licence(uuid, text)",
     "mg_set_company_status(uuid, text, text)",
     "mg_set_member_role(uuid, text)",

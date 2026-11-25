@@ -1,4 +1,4 @@
-# 27 — Site codes and company identity (migration 0062)
+# 27 — Site codes and company identity (migration 0065)
 
 ## What changed
 - **Site codes are allocated by the database.** Format `MGL-<county prefix>-<number, 4+ digits>`, e.g. `MGL-BOMI-0001`. A per-prefix counter row (`site_code_counters`) is incremented atomically inside a BEFORE INSERT trigger on `sites`; the app no longer computes codes. Existing codes are never rewritten; counters start at the current maximum per prefix.
@@ -8,18 +8,38 @@
 - **Not changed:** Worker Voice / Ministry Voice site codes, CR- tracking codes.
 
 ## Deployment runbook
-**Order:** backup → 0062 on a Supabase branch with a copy of production data → verify → production (low-traffic window) → deploy the app.
+
+### Environment state (verified read-only via the Supabase connector, 2026-11-25)
+| Environment | Applied migrations | Note |
+|---|---|---|
+| Repo `main` | 0001–0064 | 0062–0064 are the push migrations (PR #81). |
+| Production (`ewukneoblhogtreeekqc`) | 0001–0064 | 0062–0064 were applied from the **reconstructed** files in PR #81 (their header says "RECONSTRUCTED from the live staging schema"). |
+| Staging (`iwmgrcfmgqldrdkplbtr`) | 0001–0064, empty database (no rows) | 0062–0064 were applied earlier from the **original** files, which are not in the repo (their recorded sizes/hashes differ from the reconstructions). |
+
+This migration is therefore **`0065_site_code_hardening.sql`** (it was 0062 until the push migrations took 0062–0064). It touches none of the push objects: the three push files reference no `sites`, `organizations`, `county_codes`, `site_code_counters`, `mg_request_site` or `mg_register_company`; the only function shared with this change is `mg_notify` (called by `mg_request_site`), whose 7-argument signature is the same on staging.
+**Known drift to close separately:** staging ran the original push SQL, production/repo the reconstruction. A read-only schema comparison of the push objects (tables, functions, triggers, policies, grants) between the two projects should be done before relying on staging as a rehearsal of production for the push features.
+
+### Staging checklist (staging only; production NOT authorised)
+1. Confirm project = `iwmgrcfmgqldrdkplbtr`, status ACTIVE_HEALTHY, and `list_migrations` ends at 0064 with nothing after.
+2. Read-only audit: `site_code_prefix_audit.sql` (expected: all sections empty — staging has no data).
+3. Apply `0065_site_code_hardening.sql` as migration version `0065`, name `site_code_hardening`. Expect no errors and no WARNING (no legacy name collisions on an empty database).
+4. `verify_0065.sql`: every check PASS (counters, no duplicate codes, both triggers enabled, code update rejected, no anon/PUBLIC execute, internal helpers closed, tables closed, 15 counties, both unique indexes).
+5. Manual behaviour checks (create a throwaway registrar user and company admin first; staging is empty): register a company **without** a licence → `LICENCE_REQUIRED`; **with** `MEL 2111/16` → ok; again with `mel2111/16` and another name → `DUPLICATE_LICENCE`; with `APL-123` → `INVALID_LICENCE`; as a company administrator of a company with no licence, request a site → `LICENCE_REQUIRED`; create sites in two counties (e.g. Nimba and Lofa) as the Ministry → `MGL-NIMBA-0001` and `MGL-LOFA-0001`, then a second Nimba site → `MGL-NIMBA-0002`; `update sites set code = 'X'` → `CODE_IMMUTABLE`; an unknown county → `INVALID_COUNTY`.
+6. Re-apply the file once: no error, counters and codes unchanged.
+7. Record every result (including errors) in the PR. Leave the test rows (sites are never deleted).
+8. Production only after: the staging results above, a production backup, the read-only audit on production, and your explicit go-ahead.
+**Order:** backup → 0065 on staging (checklist above) → verify → production (low-traffic window) → deploy the app. A staging project with no data cannot prove behaviour on messy real data; use a copy of production data as well if you can.
 1. **Backup** production (point-in-time backup / `pg_dump`), note the time.
-2. **Audit before touching anything** (read-only): `psql "$DATABASE_URL" -f supabase/maintenance/site_code_prefix_audit.sql`. Sections 3 and 5 should be empty; section 6 lists companies that already collide on name (then 0062 skips the name index with a WARNING and the trigger still blocks new duplicates).
-3. **Staging branch with a copy of real data:** apply `0062_site_code_hardening.sql`, then run `supabase/maintenance/verify_0062.sql` (every line PASS), then the manual checks below. Re-apply 0062 once to confirm it is idempotent.
-4. **Production:** apply 0062 (one transaction), run `verify_0062.sql`.
+2. **Audit before touching anything** (read-only): `psql "$DATABASE_URL" -f supabase/maintenance/site_code_prefix_audit.sql`. Sections 3 and 5 should be empty; section 6 lists companies that already collide on name (then 0065 skips the name index with a WARNING and the trigger still blocks new duplicates).
+3. **Staging branch with a copy of real data:** apply `0065_site_code_hardening.sql`, then run `supabase/maintenance/verify_0065.sql` (every line PASS), then the manual checks below. Re-apply 0065 once to confirm it is idempotent.
+4. **Production:** apply 0065 (one transaction), run `verify_0065.sql`.
 5. **Deploy the app** (merge to `main`) right after. Keep the window between steps 4 and 5 short.
 6. **Registrar task, same day:** open Companies → "Companies without a licence number" and enter the Ministry licence number for each company. Until then, company administrators cannot request new sites (an intended consequence of the licence rule, not only a deploy-window effect).
 
-### The old-app window (after 0062, before the new app is live)
+### The old-app window (after 0065, before the new app is live)
 | Old-app action | Result |
 |---|---|
-| Register a site (sends a client-computed `code`) | Works. A signed-in insert always gets a database-allocated code; the client's value is ignored, so even a stale or duplicate client code cannot collide (`0062` lines 153–155, `sites_code_guard`). **Cosmetic effect:** the old app writes its own audit-log summary ("Registered site <code> …", old `backend.ts` line 3441) and any message it shows using the code IT computed, which can differ from the stored code for sites registered in the window. The stored `sites.code` and the database audit row carry the real code; the Mining sites list shows it. |
+| Register a site (sends a client-computed `code`) | Works. A signed-in insert always gets a database-allocated code; the client's value is ignored, so even a stale or duplicate client code cannot collide (`0065` lines 153–155, `sites_code_guard`). **Cosmetic effect:** the old app writes its own audit-log summary ("Registered site <code> …", old `backend.ts` line 3441) and any message it shows using the code IT computed, which can differ from the stored code for sites registered in the window. The stored `sites.code` and the database audit row carry the real code; the Mining sites list shows it. |
 | Approve a company site request | Works (it uses the same insert, then `mg_decide_site_request`, unchanged). |
 | Demo seed | Works; same insert. Seeded sites get database codes. |
 | Bulk import | Unaffected: it imports people against **existing** site codes and never creates sites. |
@@ -28,14 +48,14 @@
 | A company administrator requests a site | Fails (`LICENCE_REQUIRED`, and `INVALID_COUNTY` for a bad county) — shown generically by the old app. |
 
 ### Post-deploy verification
-`supabase/maintenance/verify_0062.sql` checks: (1) counters ≥ current maximum per prefix, (2) no duplicate codes, (3) `sites_code_guard` and `organizations_identity_guard` present and enabled, (4) a code update is rejected (rolled back), (5) the new functions have no PUBLIC / anon execute and the internal helpers are not executable by `authenticated`, (6) `county_codes` / `site_code_counters` are not readable by client roles, (7) exactly 15 counties, (8) the unique indexes exist.
+`supabase/maintenance/verify_0065.sql` checks: (1) counters ≥ current maximum per prefix, (2) no duplicate codes, (3) `sites_code_guard` and `organizations_identity_guard` present and enabled, (4) a code update is rejected (rolled back), (5) the new functions have no PUBLIC / anon execute and the internal helpers are not executable by `authenticated`, (6) `county_codes` / `site_code_counters` are not readable by client roles, (7) exactly 15 counties, (8) the unique indexes exist.
 Manual: register one site as the Ministry in each of two counties → codes continue from the previous maximum; try to edit a code in SQL → `CODE_IMMUTABLE`; register a company with a licence number already in use → "already registered to …".
 
 ### Rollback
-`supabase/maintenance/rollback_0062_site_code_hardening.sql` (data-safe for sites: issued codes stay valid; it drops the licence numbers and counters — export `select id, name, licence_number from organizations where licence_number is not null` first). Roll the app back at the same time (the 0062 app sends licence numbers and no site code). To go forward again, re-apply 0062: counters are rebuilt from the current maximum.
+`supabase/maintenance/rollback_0065_site_code_hardening.sql` (data-safe for sites: issued codes stay valid; it drops the licence numbers and counters — export `select id, name, licence_number from organizations where licence_number is not null` first). Roll the app back at the same time (the 0065 app sends licence numbers and no site code). To go forward again, re-apply 0065: counters are rebuilt from the current maximum.
 
 ### Tests
-In-memory PGlite (cannot reach any real database): `tests/site-code-hardening.test.ts`, `tests/site-code-idempotency.test.ts` (applies 0062 twice more with data), plus the adapted existing suites. Real parallelism: `tests/site-code-concurrency.pg.test.ts` spawns 50 `psql` sessions against a real Postgres; it only runs when `SITE_CODE_PG_URL` is set **and** passes `tests/helpers/disposable-pg.ts` (local host, database name containing test/scratch/disposable, not a Supabase/known-project URL, `SITE_CODE_PG_ALLOW_WRITES=yes`). The guard has its own test (`tests/disposable-pg-guard.test.ts`).
+In-memory PGlite (cannot reach any real database): `tests/site-code-hardening.test.ts`, `tests/site-code-idempotency.test.ts` (applies 0065 twice more with data), plus the adapted existing suites. Real parallelism: `tests/site-code-concurrency.pg.test.ts` spawns 50 `psql` sessions against a real Postgres; it only runs when `SITE_CODE_PG_URL` is set **and** passes `tests/helpers/disposable-pg.ts` (local host, database name containing test/scratch/disposable, not a Supabase/known-project URL, `SITE_CODE_PG_ALLOW_WRITES=yes`). The guard has its own test (`tests/disposable-pg-guard.test.ts`).
 
 ## Follow-ups (not in this branch)
 1. **Licences table** — one company can hold several licences; this branch stores one primary licence number per company.

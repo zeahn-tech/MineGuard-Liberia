@@ -1,4 +1,4 @@
-// Ministry licence number rules — a mirror of public.mg_validate_licence / mg_licence_format_recognised (0062), used only
+// Ministry licence number rules — a mirror of public.mg_validate_licence / mg_licence_format_recognised (0065), used only
 // for instant feedback. The database is the authority.
 
 /** Uppercase, spaces and hyphens removed, "/" kept — the form uniqueness is judged on. */

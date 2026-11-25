@@ -50,7 +50,7 @@ beforeEach(async () => {
   await ensureOfflineReady();
 });
 
-describe("site codes (0062)", () => {
+describe("site codes (0065)", () => {
   test("the app no longer computes site codes: the database allocates them", async () => {
     const types = await import("../src/lib/types");
     expect("nextSiteCodeFrom" in types).toBe(false);

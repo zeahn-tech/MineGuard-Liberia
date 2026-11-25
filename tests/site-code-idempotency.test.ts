@@ -1,4 +1,4 @@
-// Migration 0062 is idempotent: applying it again (once or twice) on a database that already has it must not error,
+// Migration 0065 is idempotent: applying it again (once or twice) on a database that already has it must not error,
 // duplicate counters, lower a counter, change any issued site code, or alter the county table.
 // Runs on its OWN in-memory PGlite (no URL, no path: it cannot reach any real database), so the committed re-applies
 // cannot disturb the shared fixture database used by other test files.
@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { MIGRATIONS, PLATFORM_STUB } from "./helpers/pglite-db";
 
 const DIR = join(import.meta.dir, "..", "supabase", "migrations");
-const M0062 = readFileSync(join(DIR, "0062_site_code_hardening.sql"), "utf8");
+const M0065 = readFileSync(join(DIR, "0065_site_code_hardening.sql"), "utf8");
 const USER = "aaaaaaaa-0000-4000-8000-0000000000d1";
 
 async function snapshot(db: PGlite) {
@@ -25,11 +25,11 @@ async function snapshot(db: PGlite) {
   };
 }
 
-describe("0062 re-applied", () => {
+describe("0065 re-applied", () => {
   test("twice more on a database that has data: no error, counters and codes unchanged, no counter lowered", async () => {
     const db = new PGlite({ extensions: { pgcrypto, pg_trgm } });
     await db.exec(PLATFORM_STUB);
-    for (const f of MIGRATIONS) await db.exec(readFileSync(join(DIR, f), "utf8")); // includes 0062 once
+    for (const f of MIGRATIONS) await db.exec(readFileSync(join(DIR, f), "utf8")); // includes 0065 once
 
     // data created after the first apply: signed-in allocations, an owner-run load, and a counter set HIGHER than the max
     await db.exec(`insert into auth.users (id, email) values ('${USER}', 'idem@x.test')`);
@@ -46,8 +46,8 @@ describe("0062 re-applied", () => {
     expect(before.counters).toEqual([{ prefix: "LOFA", last_number: 500 }, { prefix: "NIMBA", last_number: 3 }, ...before.counters.filter((c) => !["LOFA", "NIMBA"].includes(String(c.prefix)))]);
     expect(before.codes.map((c) => c.code)).toContain("MGL-NIMBA-0003");
 
-    await db.exec(M0062); // 2nd apply
-    await db.exec(M0062); // 3rd apply
+    await db.exec(M0065); // 2nd apply
+    await db.exec(M0065); // 3rd apply
     const after = await snapshot(db);
 
     expect(after).toEqual(before); // counters (incl. the raised LOFA = 500), codes, county table, triggers, indexes: identical
@@ -60,5 +60,5 @@ describe("0062 re-applied", () => {
     const lofa = await db.query(`insert into public.sites (name, operator_name, county, created_by) values ('AfterLofa', 'Idem Co', 'Lofa', '${USER}') returning code`);
     expect((lofa.rows[0] as { code: string }).code).toBe("MGL-LOFA-0501");
     await db.close();
-  });
+  }, 180_000); // boots a private database and replays every migration (now 65): slower than bun's 5 s default
 });

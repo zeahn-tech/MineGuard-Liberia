@@ -850,8 +850,8 @@ describe("SEC-5/SITE-1: tenancy on organization UUIDs (0010)", () => {
       "authenticated",
       { sub: f.admin, role: "authenticated" },
       async (run) => {
-        // Simulate the LEGACY state this test is about (same-name companies pre-date the 0062 duplicate rule):
-        // inside this always-rolled-back transaction the 0062 name guard is switched off.
+        // Simulate the LEGACY state this test is about (same-name companies pre-date the 0065 duplicate rule):
+        // inside this always-rolled-back transaction the 0065 name guard is switched off.
         await run("set local role postgres");
         await run("drop index if exists public.organizations_name_norm_uq");
         await run("alter table public.organizations disable trigger organizations_identity_guard");
@@ -1026,8 +1026,8 @@ describe("SEC-5/SITE-1: tenancy on organization UUIDs (0010)", () => {
         expect(site.organization_id).not.toBeNull();
         const orgA = String(site.organization_id);
 
-        // Simulate the LEGACY state this test is about (same-name companies pre-date the 0062 duplicate rule):
-        // inside this always-rolled-back transaction the 0062 name guard is switched off.
+        // Simulate the LEGACY state this test is about (same-name companies pre-date the 0065 duplicate rule):
+        // inside this always-rolled-back transaction the 0065 name guard is switched off.
         await run("set local role postgres");
         await run("drop index if exists public.organizations_name_norm_uq");
         await run("alter table public.organizations disable trigger organizations_identity_guard");

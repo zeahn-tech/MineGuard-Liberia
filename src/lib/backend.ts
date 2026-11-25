@@ -500,7 +500,7 @@ async function insertReturningId(
   return data.id as string;
 }
 
-/** Like insertReturningId, plus the columns the database fills in itself (e.g. sites.code, allocated by 0062). */
+/** Like insertReturningId, plus the columns the database fills in itself (e.g. sites.code, allocated by 0065). */
 async function insertReturningRow<T extends AnyRow>(
   table: string,
   values: AnyRow,
@@ -2306,7 +2306,7 @@ function friendlyInviteError(raw: string): Error {
   // FORBIDDEN carries a server-authored reason after the colon ("you cannot change your own role").
   const reason = code === "FORBIDDEN" ? /FORBIDDEN:\s*([^\n]{3,120})/.exec(raw)?.[1] : undefined;
   if (reason) return new Error(reason.charAt(0).toUpperCase() + reason.slice(1) + ".");
-  // 0062: these carry a server-authored explanation (which company holds the number, what is wrong with it)
+  // 0065: these carry a server-authored explanation (which company holds the number, what is wrong with it)
   if (code === "INVALID_LICENCE" || code === "DUPLICATE_LICENCE" || code === "DUPLICATE_ORGANIZATION" || code === "LICENCE_REQUIRED") {
     const why = new RegExp(`${code}:\\s*([^\\n]{3,260})`).exec(raw)?.[1];
     if (why) return new Error(why.charAt(0).toUpperCase() + why.slice(1).replace(/\.?$/, "."));
@@ -2995,7 +2995,7 @@ export const api = {
       return data as string;
     },
 
-    /** Registrar preview (0062): hard licence errors, the soft format warning and possible duplicates. Never blocks by itself. */
+    /** Registrar preview (0065): hard licence errors, the soft format warning and possible duplicates. Never blocks by itself. */
     checkRegistration: async (args: { name: string; licenceNumber: string }): Promise<CompanyRegistrationCheck> => {
       await requireCompanyAuthority();
       const { data, error } = await supabase.rpc("mg_company_registration_check", {
@@ -3017,7 +3017,7 @@ export const api = {
       };
     },
 
-    /** Registrar to-do (0062): approved/pending/suspended companies that still have no licence number. */
+    /** Registrar to-do (0065): approved/pending/suspended companies that still have no licence number. */
     missingLicence: () =>
       live<{ id: string; name: string; status: string }[]>(
         async () => {
@@ -3029,7 +3029,7 @@ export const api = {
             .neq("status", "deactivated")
             .order("name", { ascending: true })
             .limit(1000);
-          // release order: a database without 0062 has no such column — nothing to list
+          // release order: a database without 0065 has no such column — nothing to list
           if (error) return [];
           return ((data ?? []) as AnyRow[]).map((r) => ({ id: r.id as string, name: r.name as string, status: r.status as string }));
         },
@@ -3487,7 +3487,7 @@ export const api = {
         );
       assertSitePosition(args.latitude, args.longitude);
       assertPositionProvenance(args);
-      // the code is allocated by the database (0062) — never computed here
+      // the code is allocated by the database (0065) — never computed here
       const created = await insertReturningRow<{ id: string; code: string }>("sites", {
         name: args.name,
         operator_name: args.operatorName,

@@ -155,7 +155,7 @@ async function seedPilotScale(): Promise<Record<string, string[]>> {
     }
     setIdentity(f.admin);
     await adminExec(
-      // owner-run load (no signed-in session): a signed-in insert always gets a database-allocated code (0062),
+      // owner-run load (no signed-in session): a signed-in insert always gets a database-allocated code (0065),
       // and these fixtures need the stable MGL-PERF-… codes to find and clean their rows
       `insert into public.sites (id, code, name, operator_name, mineral_type, county, district, community, status, latitude, longitude, created_by)
        values ${rows.join(",")}`,

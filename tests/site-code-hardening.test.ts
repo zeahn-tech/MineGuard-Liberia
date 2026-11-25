@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Migration 0062 — database-allocated site codes, immutable codes, official counties, company licence numbers and
+// Migration 0065 — database-allocated site codes, immutable codes, official counties, company licence numbers and
 // duplicate-company rules. Every case rolls back (withRole), except the replay in beforeAll.
 //
 // PGlite is a single connection, so "50 parallel registrations" here proves the allocator has no gaps/duplicates when
@@ -282,7 +282,7 @@ describe("duplicate companies", () => {
   });
 
   const LEGACY_ADMIN = "aaaaaaaa-0000-4000-8000-000000000192";
-  /** A company that pre-dates 0062: approved, no licence number (the fixture companies were registered with one). */
+  /** A company that pre-dates 0065: approved, no licence number (the fixture companies were registered with one). */
   async function legacyCompany(run: Runner) {
     return (await run(`insert into public.organizations (name, status) values ('Legacy Mining Co', 'approved') returning id`))[0].id as string;
   }
@@ -320,7 +320,7 @@ describe("duplicate companies", () => {
 });
 
 describe("old app (client-computed codes, free-text county) against the new database", () => {
-  // The pre-0062 app inserts { code: nextSiteCodeFrom(county, allCodes), name, operator_name, county, … } as a signed-in user.
+  // The pre-0065 app inserts { code: nextSiteCodeFrom(county, allCodes), name, operator_name, county, … } as a signed-in user.
   test("an explicit client code is overridden: a stale/duplicate/malformed one never collides and never errors", async () => {
     await withRole("postgres", null, async (run) => {
       await run("delete from public.site_code_counters");

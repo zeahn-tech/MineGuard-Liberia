@@ -1,7 +1,7 @@
 -- ============================================================================
--- POST-DEPLOY VERIFICATION for migration 0062. Safe to run on staging and production: it only reads, and the one probe
+-- POST-DEPLOY VERIFICATION for migration 0065. Safe to run on staging and production: it only reads, and the one probe
 -- that tries to change a code runs inside a block that always rolls back. Every check prints PASS or FAIL; any FAIL = stop
--- and follow the rollback in docs/27.   psql "$DATABASE_URL" -f supabase/maintenance/verify_0062.sql
+-- and follow the rollback in docs/27.   psql "$DATABASE_URL" -f supabase/maintenance/verify_0065.sql
 -- ============================================================================
 \echo '== 1. counters match the current maximum per prefix (counter >= max; equal right after apply)'
 select case when count(*) = 0 then 'PASS' else 'FAIL' end as counters_cover_every_code, coalesce(string_agg(prefix || ': counter ' || coalesce(c.last_number::text,'MISSING') || ' < max ' || mx, '; '), '') as problems
@@ -61,5 +61,5 @@ from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 
 \echo '== 7. county table = the 15 official counties'
 select case when count(*) = 15 then 'PASS' else 'FAIL' end as fifteen_counties from public.county_codes;
 
-\echo '== 8. company identity: indexes present (name index may be absent if legacy duplicates existed: then 0062 printed a WARNING)'
+\echo '== 8. company identity: indexes present (name index may be absent if legacy duplicates existed: then 0065 printed a WARNING)'
 select indexname from pg_indexes where indexname in ('organizations_licence_norm_uq', 'organizations_name_norm_uq') order by 1;

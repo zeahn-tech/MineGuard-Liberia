@@ -1,10 +1,10 @@
 -- ===========================================================================
--- ROLLBACK of migration 0062 (site-code hardening + company licence numbers).
+-- ROLLBACK of migration 0065 (site-code hardening + company licence numbers).
 -- Not in supabase/migrations. Takes a backup first (see docs/27). Data-safe for sites: issued site codes are NOT touched
 -- and stay valid. LOSES: the licence_number column (all licence numbers entered by registrars) and the counters.
 -- Export first if the licence numbers matter:
 --   select id, name, licence_number from public.organizations where licence_number is not null;
--- After this script the app version that sends only the company name (the pre-0062 release) works again; the 0062 release
+-- After this script the app version that sends only the company name (the pre-0065 release) works again; the 0065 release
 -- must be rolled back at the same time (it sends licence numbers and no site code).
 -- ===========================================================================
 begin;
@@ -15,7 +15,7 @@ drop trigger if exists organizations_identity_guard on public.organizations;
 drop index if exists public.organizations_licence_norm_uq;
 drop index if exists public.organizations_name_norm_uq;
 
--- restore the pre-0062 functions (verbatim from 0025 / 0037) before dropping what they replaced
+-- restore the pre-0065 functions (verbatim from 0025 / 0037) before dropping what they replaced
 drop function if exists public.mg_register_company(text, text);
 create or replace function public.mg_register_company(p_name text)
 returns uuid

@@ -1,5 +1,5 @@
 -- ============================================================================
--- MINEGUARD LIBERIA — migration 0062: site-code hardening + company identity
+-- MINEGUARD LIBERIA — migration 0065: site-code hardening + company identity
 --
 -- WHAT. (1) Site codes are allocated IN THE DATABASE: a per-county-prefix counter row is incremented atomically
 -- (INSERT … ON CONFLICT DO UPDATE … RETURNING takes the row lock), so two simultaneous registrations can never receive the
@@ -97,7 +97,7 @@ declare
 begin
   select prefix into v_prefix from public.county_codes where county_key = v_key;
   if v_prefix is null then
-    -- SQLSTATE 22023 (invalid_parameter_value). NOTE: the pre-0062 app does not surface this text — backendError drops the
+    -- SQLSTATE 22023 (invalid_parameter_value). NOTE: the pre-0065 app does not surface this text — backendError drops the
     -- SQLSTATE and the user sees its generic "We couldn't register the site" message (documented in docs/27, deploy window).
     raise exception 'INVALID_COUNTY: "%" is not one of the 15 counties of Liberia', btrim(coalesce(p_county, ''))
       using errcode = '22023';
@@ -237,7 +237,7 @@ do $mg$
 begin
   if exists (select 1 from public.organizations where status <> 'deactivated'
               group by name_norm having count(*) > 1) then
-    raise warning 'organizations_name_norm_uq NOT created: existing companies share a normalised name. Resolve them (see the 0062 notes) and re-run this migration; new duplicates are still blocked by the trigger.';
+    raise warning 'organizations_name_norm_uq NOT created: existing companies share a normalised name. Resolve them (see the 0065 notes) and re-run this migration; new duplicates are still blocked by the trigger.';
   else
     create unique index if not exists organizations_name_norm_uq
       on public.organizations (name_norm) where status <> 'deactivated';

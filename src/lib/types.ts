@@ -83,7 +83,7 @@ export interface Company {
   members: CompanyAdminMember[];
 }
 
-/** Result of the registrar's pre-registration check (migration 0062). */
+/** Result of the registrar's pre-registration check (migration 0065). */
 export interface CompanyRegistrationCheck {
   licenceError: string | null;
   /** null = no licence typed yet (or it is invalid); false = shape not recognised (a warning, never a block). */

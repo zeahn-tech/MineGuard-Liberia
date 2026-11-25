@@ -394,7 +394,7 @@ describe("SEC-5/SITE-1 adversarial isolation through the data layer", () => {
     // Organizations are never deleted (mg_guard_org_write: "rename
     // instead"), so the sibling stays — harmless, because name-based
     // resolution always prefers the OLDEST match (the fixture tenant).
-    // (0062: a live same-name company can no longer be registered, so the sibling is a retired — deactivated —
+    // (0065: a live same-name company can no longer be registered, so the sibling is a retired — deactivated —
     //  entry: the one state in which a same normalised name may still exist, and exactly the legacy shape.)
     const orgRows = await adminSql(
       `insert into public.organizations (name, status) values ('AgriLib Mining', 'deactivated') returning id`,

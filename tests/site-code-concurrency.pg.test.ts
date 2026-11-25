@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Migration 0062 — site-code allocation under REAL parallelism, against a real PostgreSQL (not PGlite).
+// Migration 0065 — site-code allocation under REAL parallelism, against a real PostgreSQL (not PGlite).
 //
 // Skipped unless SITE_CODE_PG_URL is set. It spawns 50 independent `psql` sessions at once, each registering a site in the
 // same county as a signed-in user, and asserts: 50 distinct codes, zero errors, one contiguous run (no gaps).
@@ -31,7 +31,7 @@ async function psql(sql: string): Promise<{ out: string; err: string; code: numb
 
 describe.skipIf(!URL)("site-code allocation under real parallelism (real PostgreSQL)", () => {
   test("50 parallel signed-in registrations in one county: no duplicates, no errors, no gaps", async () => {
-    // the operator must be a registered company (0033); the licence number keeps the 0062 rules satisfied
+    // the operator must be a registered company (0033); the licence number keeps the 0065 rules satisfied
     const setup = await psql(`insert into auth.users (id, email) values ('${USER}', 'concurrency@x.test') on conflict do nothing;
       insert into public.organizations (name, status, licence_number)
         select 'Concurrency Op', 'approved', 'CON 1001/20' where not exists (select 1 from public.organizations where name = 'Concurrency Op');`);
