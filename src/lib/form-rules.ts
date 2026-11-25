@@ -5,6 +5,7 @@
 // person is told which field, right at the field, before anything is sent.
 // ---------------------------------------------------------------------------
 
+import { COUNTIES } from "./counties";
 import {
   chooseProblem,
   countProblem,
@@ -188,6 +189,6 @@ export function validateSite(f: { name: string; operatorName: string; county: st
   return compact<SiteField>({
     name: requiredProblem(f.name, "the site's name", "Zorzor Corridor Operation"),
     operatorName: chooseProblem(f.operatorName, "the operating company"),
-    county: requiredProblem(f.county, "the county", "Nimba"),
+    county: requiredProblem(f.county, "the county", "Nimba") ?? (COUNTIES.includes(f.county) ? undefined : "Choose one of Liberia's 15 counties from the list."),
   });
 }

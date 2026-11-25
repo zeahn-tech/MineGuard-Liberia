@@ -65,8 +65,8 @@ const uid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0"
 const SITE = uid(1);
 const SITE2 = uid(2);
 const sitesRows = [
-  { id: SITE, code: "LB-TST-001", name: "Test Site One" },
-  { id: SITE2, code: "LB-TST-002", name: "Test Site Two" },
+  { id: SITE, code: "MGL-TEST-0001", name: "Test Site One" },
+  { id: SITE2, code: "MGL-TEST-0002", name: "Test Site Two" },
 ];
 let seq = 100;
 const inc = (daysAgo: number, type: string, site = SITE, severity = "medium"): Row => ({
@@ -106,7 +106,7 @@ describe("incident_trend_summary — deterministic figures", () => {
     expect(data.incidents.change).toEqual({ absolute: 2, percent: 100 });
     expect(Object.fromEntries(data.incidents.byType)).toEqual({ injury: 2, fire: 1, near_miss: 1 });
     expect(Object.fromEntries(data.incidents.bySeverity)).toEqual({ medium: 2, high: 1, critical: 1 });
-    expect(data.repeatedFindings).toEqual([{ title: "Unguarded crusher", siteId: SITE, siteCode: "LB-TST-001", count: 3 }]);
+    expect(data.repeatedFindings).toEqual([{ title: "Unguarded crusher", siteId: SITE, siteCode: "MGL-TEST-0001", count: 3 }]);
     expect(data.outstandingActions).toEqual({ total: 3, overdue: 2, byStatus: [["open", 2], ["in_progress", 1]] });
     expect(data.computedBy).toBe("deterministic");
     // every citation is a record this request actually read
@@ -158,7 +158,7 @@ describe("risk_patterns — thresholds, evidence, limits", () => {
     const patterns = (d.data as any).patterns;
     const fire = patterns.find((p: any) => p.kind === "recurrence" && p.incidentType === "fire");
     expect(fire.count).toBe(4);
-    expect(fire.siteCode).toBe("LB-TST-001");
+    expect(fire.siteCode).toBe("MGL-TEST-0001");
     expect(fire.periodStart).toBe(iso(28).slice(0, 10));
     expect(fire.periodEnd).toBe(iso(5).slice(0, 10));
     expect(fire.evidenceIds.length).toBe(4);

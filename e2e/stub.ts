@@ -30,7 +30,7 @@ export function fakeSession(role: StubRole) {
 
 const NOW = new Date().toISOString();
 const SITE = {
-  id: "11111111-1111-4111-8111-111111111111", code: "LB-BOM-001", name: "Bomi Ridge Gold Concession", operator_name: "AgriLib Mining",
+  id: "11111111-1111-4111-8111-111111111111", code: "MGL-BOMI-0001", name: "Bomi Ridge Gold Concession", operator_name: "AgriLib Mining",
   county: "Bomi", district: "Klay", mineral: "gold", site_type: "industrial", status: "active", latitude: 6.75, longitude: -10.85,
   geo_verified: false, geo_source: "typed", geo_accuracy_m: null, created_at: NOW, updated_at: NOW, organization_id: "22222222-2222-4222-8222-222222222222",
 };

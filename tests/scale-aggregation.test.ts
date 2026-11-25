@@ -164,7 +164,7 @@ async function seedFixture() {
        (id, code, name, operator_name, mineral_type, county, district,
         community, status, latitude, longitude, created_by)
      values
-       ('${SITE}', 'LB-SCALE-001', 'Scale Probe Site',
+       ('${SITE}', 'MGL-SCALE-0001', 'Scale Probe Site',
         'OreCo Liberia', 'Gold', 'Grand Cape Mount', 'Garwula', 'Probe Hills',
         'active', 6.9, -10.9, '${f.admin}')
      on conflict (id) do nothing`,
@@ -624,7 +624,7 @@ describe("scale: the RPC surfaces are RLS-scoped (no privilege path)", () => {
     );
     for (const r of rows) expect(r.county).toBe("Bomi");
     // Multi-row walk never returned a row of another operator's site.
-    expect(rows.some((r) => r.siteCode?.startsWith("LB-SCALE"))).toBe(false);
+    expect(rows.some((r) => r.siteCode?.startsWith("MGL-SCALE"))).toBe(false);
   });
 
   test("admin sees the scale probe's page rows through the SAME RPC", async () => {

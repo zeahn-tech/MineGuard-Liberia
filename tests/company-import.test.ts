@@ -26,7 +26,7 @@ beforeAll(async () => {
     "0026_company_workforce.sql",
     "0027_site_scoped_access.sql",
     "0028_account_names_invitation_cleanup.sql",
-    "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0048_close_admin_bootstrap.sql", "0049_public_user_identity.sql", "0050_public_reports_feedback.sql", "0052_public_content.sql",
+    "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0048_close_admin_bootstrap.sql", "0049_public_user_identity.sql", "0050_public_reports_feedback.sql", "0052_public_content.sql", "0062_site_code_hardening.sql",
   ]) await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", m), "utf8"));
 });
 
@@ -60,7 +60,7 @@ async function world<T>(fn: (run: Runner, c: { orgA: string; orgB: string; site2
     const site2 = (
       await run(
         `insert into public.sites (code, name, operator_name, mineral_type, county, district, community, status, latitude, longitude, created_by)
-         values ('LB-BOM-002','Bomi North Pit','AgriLib Mining','Gold','Bomi','Senjeh','Bomi Hills','active',6.9,-10.9,'${f.admin}') returning id`,
+         values ('MGL-BOMI-0002','Bomi North Pit','AgriLib Mining','Gold','Bomi','Senjeh','Bomi Hills','active',6.9,-10.9,'${f.admin}') returning id`,
       )
     )[0].id as string;
     await run("set local role authenticated");
@@ -179,6 +179,10 @@ describe("bulk import: validation", () => {
       }
       expect(by[5].outcome).toBe("duplicate_in_file");
       expect(by[6]).toMatchObject({ outcome: "error", message: "Unknown site code for this company" });
+      // the screen adds the real format to that message (an import row never names a site by anything else)
+      const { importRowMessage } = await import("../src/lib/site-codes");
+      expect(importRowMessage(String(by[6].message))).toContain("MGL-BOMI-0001");
+      expect(importRowMessage("Some other message")).toBe("Some other message");
       // identical wording: nothing reveals whether the address is government or belongs to another company
       expect(by[7].message).toBe("This address cannot be invited");
       expect(by[8].message).toBe("This address cannot be invited");
@@ -308,11 +312,11 @@ describe("bulk import: boundaries", () => {
     await world(async (run, { orgA }) => {
       await as(run, OF);
       const imp = await startImport(run, orgA, 1);
-      await apply(run, imp, [{ row: 1, email: "p1@mail.test", role: "safety_officer", site_code: "lb-bom-002" }]);
+      await apply(run, imp, [{ row: 1, email: "p1@mail.test", role: "safety_officer", site_code: "mgl-bomi-0002" }]);
       await as(run, P1);
       await run(`select public.mg_accept_invitation((select id from public.mg_my_pending_invitations() limit 1))`);
       expect((await run("select org_role from public.organization_members where user_id = auth.uid() and status = 'active'"))[0].org_role).toBe("safety_officer");
-      expect((await run("select code from public.sites order by code")).map((r) => r.code)).toEqual(["LB-BOM-002"]); // scoped to the imported site, not the whole company
+      expect((await run("select code from public.sites order by code")).map((r) => r.code)).toEqual(["MGL-BOMI-0002"]); // scoped to the imported site, not the whole company
     });
   });
 });

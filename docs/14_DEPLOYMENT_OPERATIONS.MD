@@ -330,7 +330,7 @@ executed rehearsal (real clusters, real dump, not a simulation):
   19 triggers / 96 routines); all 14 row counts identical to baseline; drift
   rows ABSENT from the restore while present in the live source (point-in-
   time invariant proven); RLS live on the restored copy (anon 0 rows,
-  operator only own-tenant `LB-BOM-001`, admin 2 rows); guard trigger intact
+  operator only own-tenant `MGL-BOMI-0001`, admin 2 rows); guard trigger intact
   (operator site-write → `FORBIDDEN: admin required to modify the site
   registry`); a real INSERT round-trips; 0008's delete policy present.
 

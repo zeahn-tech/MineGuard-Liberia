@@ -95,8 +95,8 @@ update public.profiles
 set local role authenticated;
 set local request.jwt.claims = '{"sub":"${EDGE_IDS.admin}","role":"authenticated"}';
 -- Companies are registered, not typed (migration 0033).
-select public.mg_register_company('AgriLib Mining');
-select public.mg_register_company('OreCo Liberia');
+select public.mg_register_company('AgriLib Mining', 'TST1001/20');
+select public.mg_register_company('OreCo Liberia', 'TST1002/20');
 update public.profiles set role = 'operator', scope = 'operator',
        operator_name = 'AgriLib Mining', county = 'Bomi', profile_complete = true
  where id = '${EDGE_IDS.opA}';
@@ -127,9 +127,9 @@ set local request.jwt.claims = '{"sub":"${EDGE_IDS.admin}","role":"authenticated
 insert into public.sites
   (id, code, name, operator_name, mineral_type, county, district, community,
    status, latitude, longitude, created_by) values
-  ('${EDGE_IDS.siteA}', 'LB-BOM-001', 'Bomi River Wash Plant', 'AgriLib Mining',
+  ('${EDGE_IDS.siteA}', 'MGL-BOMI-0001', 'Bomi River Wash Plant', 'AgriLib Mining',
    'Gold', 'Bomi', 'Senjeh', 'Bomi Hills', 'active', 6.85, -10.85, '${EDGE_IDS.admin}'),
-  ('${EDGE_IDS.siteB}', 'LB-GCM-001', 'Cape Mount Ore Site', 'OreCo Liberia',
+  ('${EDGE_IDS.siteB}', 'MGL-GRANDC-0001', 'Cape Mount Ore Site', 'OreCo Liberia',
    'Iron ore', 'Grand Cape Mount', 'Garwula', 'Kerry Town', 'active',
    7.10, -11.10, '${EDGE_IDS.admin}');
 

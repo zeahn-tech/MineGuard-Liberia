@@ -7,6 +7,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/backend";
@@ -91,8 +92,10 @@ export default function OperatorSiteRequests() {
             <div className="space-y-1"><Label htmlFor="sr-name">Site name *</Label><Input id="sr-name" value={form.name} maxLength={120} onChange={set("name")} /></div>
             <div className="space-y-1">
               <Label htmlFor="sr-county">County *</Label>
-              <Input id="sr-county" value={form.county} list="sr-counties" onChange={set("county")} placeholder="Nimba" />
-              <datalist id="sr-counties">{COUNTIES.map((c) => <option key={c} value={c} />)}</datalist>
+              <Select value={form.county} onValueChange={(v) => setForm({ ...form, county: v })}>
+                <SelectTrigger id="sr-county" aria-label="County"><SelectValue placeholder="Choose the county" /></SelectTrigger>
+                <SelectContent>{COUNTIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+              </Select>
             </div>
             <div className="space-y-1"><Label htmlFor="sr-district">District</Label><Input id="sr-district" value={form.district} onChange={set("district")} /></div>
             <div className="space-y-1"><Label htmlFor="sr-community">Community</Label><Input id="sr-community" value={form.community} onChange={set("community")} /></div>

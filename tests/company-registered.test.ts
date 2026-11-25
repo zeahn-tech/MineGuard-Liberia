@@ -52,7 +52,7 @@ describe("registering a site", () => {
 
   test("a company that is not approved cannot receive a NEW site; its existing sites stay editable", async () => {
     await asUser(f.admin, async (run) => {
-      const org = (await run("select public.mg_register_company('Pending Co') as id"))[0].id as string;
+      const org = (await run("select public.mg_register_company('Pending Co', 'TST1003/20') as id"))[0].id as string;
       await run(`select public.mg_set_company_status('${org}', 'pending_review')`);
       expect(await fails(insertSite(run, "T-004", "Pending Co"))).toMatch(/COMPANY_NOT_APPROVED/);
       await run(`select public.mg_set_company_status('${org}', 'approved')`);

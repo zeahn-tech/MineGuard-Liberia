@@ -36,7 +36,7 @@ afterEach(async () => {
     "0025_company_status_membership_invitations.sql",
     "0026_company_workforce.sql",
     "0027_site_scoped_access.sql",
-    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0040_emergency_alerts.sql", "0041_emergency_authority_corrections.sql", "0048_close_admin_bootstrap.sql", "0049_public_user_identity.sql", "0050_public_reports_feedback.sql", "0052_public_content.sql",
+    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0040_emergency_alerts.sql", "0041_emergency_authority_corrections.sql", "0048_close_admin_bootstrap.sql", "0049_public_user_identity.sql", "0050_public_reports_feedback.sql", "0052_public_content.sql", "0062_site_code_hardening.sql",
   ]) {
     await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
   }
@@ -80,7 +80,7 @@ describe("migrations apply to a clean database", () => {
       // two GIS boundary tables (admin_boundaries, site_boundaries) + 0019's
       // risk_config_versions + 0020's ai_request_log + 0021's notifications.
       // …+ 0025's organization_members and organization_invitations.
-      expect(Number(scalar(tables))).toBe(61); // 0054 adds organization_member_blocks; …0051 adds public_content + public_content_events; 0051 adds three ministry_voice_* tables; 0049 adds public_feedback; 0048 adds account_restriction_events; 0037 adds site_registration_requests; 0040 adds six emergency tables; 0043 adds job_safety_analyses; 0044 adds emergency_contacts; 0046 adds four worker_voice_* tables
+      expect(Number(scalar(tables))).toBe(63); // 0062 adds county_codes + site_code_counters; 0054 adds organization_member_blocks; …0051 adds public_content + public_content_events; 0051 adds three ministry_voice_* tables; 0049 adds public_feedback; 0048 adds account_restriction_events; 0037 adds site_registration_requests; 0040 adds six emergency tables; 0043 adds job_safety_analyses; 0044 adds emergency_contacts; 0046 adds four worker_voice_* tables
 
       const rls = await one(
         run,
@@ -90,7 +90,7 @@ describe("migrations apply to a clean database", () => {
       // every table above has RLS, including 0015's two boundary tables and
       // 0019's risk_config_versions + 0020's ai_request_log + 0021's notifications
       // …and 0025's two RPC-only tables.
-      expect(Number(scalar(rls))).toBe(61); // 0054: organization_member_blocks (RLS, administrator-read); 0051: public_content + public_content_events (RLS); 0051: three ministry_voice_* tables (RLS; reports/events reviewer-read, identity closed); 0049: public_feedback (RLS, reviewer read); 0048: account_restriction_events (RLS, admin read); 0040: six emergency tables, all RLS-closed; 0043: job_safety_analyses; 0044: emergency_contacts; 0046: four worker_voice_* tables, all RLS-closed
+      expect(Number(scalar(rls))).toBe(63); // 0062: county_codes + site_code_counters (RLS on, no policy: definer-only); 0054: organization_member_blocks (RLS, administrator-read); 0051: public_content + public_content_events (RLS); 0051: three ministry_voice_* tables (RLS; reports/events reviewer-read, identity closed); 0049: public_feedback (RLS, reviewer read); 0048: account_restriction_events (RLS, admin read); 0040: six emergency tables, all RLS-closed; 0043: job_safety_analyses; 0044: emergency_contacts; 0046: four worker_voice_* tables, all RLS-closed
 
       const guards = await one(
         run,
@@ -550,6 +550,8 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
       const READ_ONLY = new Set([
         "audit_log", "organization_members", "organization_invitations",
         "organization_imports", "organization_import_rows", "site_registration_requests",
+        // 0062: definer-only reference/counter tables (no client grant at all)
+        "county_codes", "site_code_counters",
         // 0040: emergency alerts are written only through self-authorizing RPCs
         "emergency_alerts", "emergency_alert_revisions", "emergency_alert_acks",
         "emergency_alert_views", "emergency_alert_deliveries", "push_subscriptions",
@@ -790,6 +792,8 @@ describe("GAP-0: function execute surface (0011)", () => {
     // 0031 (registrar): the company directory (self-authorizes on organizations.write)
     "mg_company_directory()",
     "mg_company_oversight()",
+    // 0062: registrar preview (hard errors, format warning, near-match duplicates) — self-authorizes on organizations.write
+    "mg_company_registration_check(text, text)",
     "mg_company_workforce(uuid)",
     // 0014's five scale surfaces — SECURITY INVOKER row sources 0011 must
     // keep granted when it re-runs (see 0011 header, bullet E).
@@ -846,7 +850,7 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_prepare_account_deletion()",
     "mg_prepare_invitation_send(uuid)",
     "mg_profile()",
-    "mg_register_company(text)",
+    "mg_register_company(text, text)",
     "mg_register_push_subscription(text, text, text, text)",
     "mg_release_invitation_send(uuid)",
     "mg_request_membership(uuid)",
@@ -863,6 +867,8 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_role()",
     "mg_search_companies(text)",
     "mg_set_account_restriction(uuid, boolean, text)",
+    // 0062: registrar adds / corrects a company licence number — self-authorizes on organizations.write
+    "mg_set_company_licence(uuid, text)",
     "mg_set_company_status(uuid, text, text)",
     "mg_set_member_role(uuid, text)",
     "mg_set_my_avatar(boolean)",

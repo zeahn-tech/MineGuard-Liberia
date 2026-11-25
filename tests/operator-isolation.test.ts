@@ -394,8 +394,10 @@ describe("SEC-5/SITE-1 adversarial isolation through the data layer", () => {
     // Organizations are never deleted (mg_guard_org_write: "rename
     // instead"), so the sibling stays — harmless, because name-based
     // resolution always prefers the OLDEST match (the fixture tenant).
+    // (0062: a live same-name company can no longer be registered, so the sibling is a retired — deactivated —
+    //  entry: the one state in which a same normalised name may still exist, and exactly the legacy shape.)
     const orgRows = await adminSql(
-      `insert into public.organizations (name) values ('AgriLib Mining') returning id`,
+      `insert into public.organizations (name, status) values ('AgriLib Mining', 'deactivated') returning id`,
     );
     const sibling = String(orgRows[0].id);
     const own = await adminSql(
@@ -406,7 +408,8 @@ describe("SEC-5/SITE-1 adversarial isolation through the data layer", () => {
     try {
       // Re-point the fixture site at the same-named sibling: the display
       // string stays byte-identical while the TENANT UUID changes.
-      await adminClaims(
+      // owner-run: a signed-in session may only bind a site to an APPROVED company (0033), and the retired sibling is not
+      await adminSql(
         `update public.sites set organization_id = '${sibling}' where id = '${f.siteA}'`,
       );
       const shown = await adminSql(
@@ -435,7 +438,7 @@ describe("SEC-5/SITE-1 adversarial isolation through the data layer", () => {
       expect(all!.some((s) => s._id === f.siteA)).toBe(true);
     } finally {
       // Restore the binding — display cascades back automatically.
-      await adminClaims(
+      await adminSql(
         `update public.sites set organization_id = '${orgId}' where id = '${f.siteA}'`,
       );
     }

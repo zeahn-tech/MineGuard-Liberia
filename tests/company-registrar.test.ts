@@ -25,7 +25,7 @@ beforeAll(async () => {
     "0028_account_names_invitation_cleanup.sql",
     "0029_onboarding_officer_bulk_import.sql",
     "0030_registrar_role_value.sql",
-    "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0048_close_admin_bootstrap.sql", "0049_public_user_identity.sql", "0050_public_reports_feedback.sql", "0052_public_content.sql",
+    "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0048_close_admin_bootstrap.sql", "0049_public_user_identity.sql", "0050_public_reports_feedback.sql", "0052_public_content.sql", "0062_site_code_hardening.sql",
   ]) await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
 });
 
@@ -91,7 +91,7 @@ describe("the registrar's permissions are exactly what the role is for", () => {
 describe("what a registrar can do", () => {
   test("register + approve a company, nominate its first administrator, resend and revoke, suspend and reactivate", async () => {
     await world(async (run, { orgA }) => {
-      const org = (await run("select public.mg_register_company('Atlas Iron Liberia') as id"))[0].id as string;
+      const org = (await run("select public.mg_register_company('Atlas Iron Liberia', 'TST1004/20') as id"))[0].id as string;
       const inv = (await run(`select public.mg_create_company_admin_invitation('${org}', 'boss@atlas.test') as id`))[0].id as string;
       expect((await run(`select public.mg_prepare_invitation_send('${inv}') as r`))[0].r).toMatchObject({ email: "boss@atlas.test" });
       await run(`select public.mg_release_invitation_send('${inv}')`);

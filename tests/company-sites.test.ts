@@ -24,7 +24,7 @@ beforeAll(async () => {
     "0025_company_status_membership_invitations.sql",
     "0026_company_workforce.sql",
     "0027_site_scoped_access.sql",
-    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0048_close_admin_bootstrap.sql", "0049_public_user_identity.sql", "0050_public_reports_feedback.sql", "0052_public_content.sql",
+    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0048_close_admin_bootstrap.sql", "0049_public_user_identity.sql", "0050_public_reports_feedback.sql", "0052_public_content.sql", "0062_site_code_hardening.sql",
   ]) {
     await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", m), "utf8"));
   }
@@ -65,12 +65,12 @@ async function world<T>(fn: (run: Runner, ctx: { siteA: string; site2: string; s
     );
     const orgA = (await run("select id from public.organizations where name = 'AgriLib Mining'"))[0].id as string;
     const orgB = (await run("select id from public.organizations where name = 'OreCo Liberia'"))[0].id as string;
-    const siteA = (await run("select id from public.sites where code = 'LB-BOM-001'"))[0].id as string;
-    const siteB = (await run("select id from public.sites where code = 'LB-GCM-001'"))[0].id as string;
+    const siteA = (await run("select id from public.sites where code = 'MGL-BOMI-0001'"))[0].id as string;
+    const siteB = (await run("select id from public.sites where code = 'MGL-GRANDC-0001'"))[0].id as string;
     const site2 = (
       await run(
         `insert into public.sites (code, name, operator_name, mineral_type, county, district, community, status, latitude, longitude, created_by)
-         values ('LB-BOM-002','Bomi North Pit','AgriLib Mining','Gold','Bomi','Senjeh','Bomi Hills','active',6.9,-10.9,'${f.admin}')
+         values ('MGL-BOMI-0002','Bomi North Pit','AgriLib Mining','Gold','Bomi','Senjeh','Bomi Hills','active',6.9,-10.9,'${f.admin}')
          returning id`,
       )
     )[0].id as string;
@@ -111,16 +111,16 @@ describe("site manager is scoped to assigned sites", () => {
       await as(run, XA);
       await run(`select public.mg_assign_member_site('${await memberId(run, SM)}', '${site2}')`);
       await as(run, SM);
-      expect(await codes(run)).toEqual(["LB-BOM-002"]); // not the company's other site, not OreCo's
+      expect(await codes(run)).toEqual(["MGL-BOMI-0002"]); // not the company's other site, not OreCo's
       expect((await run("select title from public.findings")).map((r) => r.title)).toEqual(["Loose bench edge"]);
     });
   });
 
   test("the company administrator reaches every company site; the other company's administrator reaches none of them", async () => {
     await world(async (run) => {
-      expect(await codes(run)).toEqual(["LB-BOM-001", "LB-BOM-002"]);
+      expect(await codes(run)).toEqual(["MGL-BOMI-0001", "MGL-BOMI-0002"]);
       await as(run, YA);
-      expect(await codes(run)).toEqual(["LB-GCM-001"]);
+      expect(await codes(run)).toEqual(["MGL-GRANDC-0001"]);
     });
   });
 
@@ -171,15 +171,15 @@ describe("workers: company-wide until scoped", () => {
     await world(async (run, { site2 }) => {
       const mWK = await memberId(run, WK);
       await as(run, WK);
-      expect(await codes(run)).toEqual(["LB-BOM-001", "LB-BOM-002"]);
+      expect(await codes(run)).toEqual(["MGL-BOMI-0001", "MGL-BOMI-0002"]);
       await as(run, XA);
       await run(`select public.mg_assign_member_site('${mWK}', '${site2}')`);
       await as(run, WK);
-      expect(await codes(run)).toEqual(["LB-BOM-002"]);
+      expect(await codes(run)).toEqual(["MGL-BOMI-0002"]);
       await as(run, XA);
       await run(`select public.mg_unassign_member_site('${mWK}', '${site2}')`);
       await as(run, WK);
-      expect(await codes(run)).toEqual(["LB-BOM-001", "LB-BOM-002"]);
+      expect(await codes(run)).toEqual(["MGL-BOMI-0001", "MGL-BOMI-0002"]);
     });
   });
 
@@ -207,7 +207,7 @@ describe("lifecycle and invariants", () => {
       const inv = (await run(`select public.mg_create_org_invitation('${orgA}', 'wk@agrilib.test', 'worker') as id`))[0].id;
       await as(run, WK);
       await run(`select public.mg_accept_invitation('${inv}')`);
-      expect(await codes(run)).toEqual(["LB-BOM-001", "LB-BOM-002"]); // old assignment did not resurrect
+      expect(await codes(run)).toEqual(["MGL-BOMI-0001", "MGL-BOMI-0002"]); // old assignment did not resurrect
     });
   });
 
@@ -241,9 +241,9 @@ describe("lifecycle and invariants", () => {
   test("legacy operators (opA/opB) keep exactly their company's data", async () => {
     await world(async (run) => {
       await as(run, f.opA);
-      expect(await codes(run)).toEqual(["LB-BOM-001", "LB-BOM-002"]);
+      expect(await codes(run)).toEqual(["MGL-BOMI-0001", "MGL-BOMI-0002"]);
       await as(run, f.opB);
-      expect(await codes(run)).toEqual(["LB-GCM-001"]);
+      expect(await codes(run)).toEqual(["MGL-GRANDC-0001"]);
     });
   });
 });
