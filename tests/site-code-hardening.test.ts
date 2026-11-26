@@ -299,22 +299,83 @@ describe("duplicate companies", () => {
     });
   });
 
-  test("a company without a licence number cannot REQUEST a site; with one it can; the county must be official", async () => {
+  const GRACE = "licence_grace_until_for_site_requests";
+  async function legacyAdmin(run: Runner, legacy: string) {
+    await run(`insert into auth.users (id, email) values ('${LEGACY_ADMIN}', 'legacy-admin@x.test')`);
+    await run(`update public.profiles set role = 'operator', profile_complete = true where id = '${LEGACY_ADMIN}'`);
+    await run(`insert into public.organization_members (organization_id, user_id, org_role, status) values ('${legacy}', '${LEGACY_ADMIN}', 'company_admin', 'active')`);
+  }
+  const requestAs = (run: Runner, org: string, name: string, county: string) =>
+    run(`select public.mg_request_site('${org}', '${name}', '${county}', null, null, null, null, null, null) as id`);
+  const setGrace = (run: Runner, v: string | null) =>
+    run(`update public.platform_settings set value = ${v === null ? "null" : `'${v}'`} where key = '${GRACE}'`);
+
+  test("grace period: the setting exists with a default roughly 30 days out, and the registrar can read it", async () => {
+    await withRole("postgres", null, async (run) => {
+      const v = (await run(`select value, (value::date - current_date) as days from public.platform_settings where key = '${GRACE}'`))[0];
+      expect(Number(v.days)).toBeGreaterThanOrEqual(29);
+      expect(Number(v.days)).toBeLessThanOrEqual(30);
+      await registrar(run);
+      expect((await run("select to_char(public.mg_licence_grace_until(), 'YYYY-MM-DD') as d"))[0].d).toBe(v.value);
+    });
+  });
+
+  test("grace ON (default): a company without a licence can still request a site, and the county must still be official", async () => {
     await withRole("postgres", null, async (run) => {
       const legacy = await legacyCompany(run);
-      await run(`insert into auth.users (id, email) values ('${LEGACY_ADMIN}', 'legacy-admin@x.test')`);
-      await run(`update public.profiles set role = 'operator', profile_complete = true where id = '${LEGACY_ADMIN}'`);
-      await run(`insert into public.organization_members (organization_id, user_id, org_role, status) values ('${legacy}', '${LEGACY_ADMIN}', 'company_admin', 'active')`);
+      await legacyAdmin(run, legacy);
       await run("set local role authenticated");
       await signedIn(run, LEGACY_ADMIN);
-      const req = (county: string) =>
-        run(`select public.mg_request_site('${legacy}', 'New Pit', '${county}', null, null, null, null, null, null) as id`);
-      expect(await fails(req("Nimba"))).toContain("LICENCE_REQUIRED");
+      expect(await fails(requestAs(run, legacy, "Grace Pit", "Atlantis"))).toContain("INVALID_COUNTY");
+      expect((await requestAs(run, legacy, "Grace Pit", "Nimba"))[0].id).toBeTruthy();
+    });
+  });
+
+  test("grace OFF (null, past date, blank or malformed value): the same company is refused with LICENCE_REQUIRED", async () => {
+    for (const off of [null, "2020-01-01", "", "next month", "2099-13-45x"]) {
+      await withRole("postgres", null, async (run) => {
+        const legacy = await legacyCompany(run);
+        await legacyAdmin(run, legacy);
+        await setGrace(run, off);
+        await run("set local role authenticated");
+        await signedIn(run, LEGACY_ADMIN);
+        expect(await fails(requestAs(run, legacy, "Off Pit", "Nimba"))).toContain("LICENCE_REQUIRED");
+      });
+    }
+  });
+
+  test("grace ends exactly after its last day; a licence number always works, with the grace period off", async () => {
+    await withRole("postgres", null, async (run) => {
+      const legacy = await legacyCompany(run);
+      await legacyAdmin(run, legacy);
+      await run("set local role authenticated");
+      await signedIn(run, LEGACY_ADMIN);
       await run("reset role");
+      await setGrace(run, "9999-12-31");
+      await run("set local role authenticated");
+      expect((await requestAs(run, legacy, "Far Pit", "Nimba"))[0].id).toBeTruthy();
+      await run("reset role");
+      await run(`update public.platform_settings set value = to_char(current_date - 1, 'YYYY-MM-DD') where key = '${GRACE}'`); // yesterday
+      await run("set local role authenticated");
+      expect(await fails(requestAs(run, legacy, "Late Pit", "Nimba"))).toContain("LICENCE_REQUIRED");
+      await run("reset role");
+      await run(`update public.platform_settings set value = to_char(current_date, 'YYYY-MM-DD') where key = '${GRACE}'`); // today = last day
+      await run("set local role authenticated");
+      expect((await requestAs(run, legacy, "Last Day Pit", "Nimba"))[0].id).toBeTruthy();
+      await run("reset role");
+      await setGrace(run, null);
       await run(`update public.organizations set licence_number = 'MEL 2111/16' where id = '${legacy}'`);
       await run("set local role authenticated");
-      expect(await fails(req("Atlantis"))).toContain("INVALID_COUNTY");
-      expect((await req("Nimba"))[0].id).toBeTruthy();
+      expect((await requestAs(run, legacy, "Licensed Pit", "Nimba"))[0].id).toBeTruthy(); // licence present: grace is irrelevant
+    });
+  });
+
+  test("the setting table is closed to every client role", async () => {
+    await withRole("postgres", null, async (run) => {
+      const r = (await run(`select c.relrowsecurity as rls, has_table_privilege('anon', c.oid, 'SELECT') as anon, has_table_privilege('authenticated', c.oid, 'SELECT') as auth, has_table_privilege('authenticated', c.oid, 'UPDATE') as upd from pg_class c where c.relname = 'platform_settings'`))[0];
+      expect(r).toEqual({ rls: true, anon: false, auth: false, upd: false });
+      await run("set local role authenticated");
+      expect(await fails(run("select * from public.platform_settings"))).toContain("permission denied");
     });
   });
 });

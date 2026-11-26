@@ -323,6 +323,7 @@ export default function Companies() {
   const companies = useQuery(api.companies.list);
   const register = useMutation(api.companies.register);
   const missingLicence = useQuery(api.companies.missingLicence);
+  const graceUntil = useQuery(api.companies.licenceGraceUntil);
   const setLicence = useMutation(api.companies.setLicence);
   const [licence, setLicenceText] = useState("");
   const [licenceError, setLicenceError] = useState<string | undefined>();
@@ -450,7 +451,10 @@ export default function Companies() {
           <CardHeader><CardTitle className="text-base">Companies without a licence number ({missingLicence.length})</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              These companies cannot request new sites until a Ministry licence number is recorded. Their existing sites and operations are not affected.
+              {graceUntil
+                ? `These companies may keep requesting new sites until ${graceUntil}; after that a Ministry licence number must be recorded first.`
+                : "These companies cannot request new sites until a Ministry licence number is recorded."}{" "}
+              Their existing sites and operations are not affected.
             </p>
             <ul className="space-y-3">
               {missingLicence.map((m) => (

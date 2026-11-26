@@ -80,7 +80,7 @@ describe("migrations apply to a clean database", () => {
       // two GIS boundary tables (admin_boundaries, site_boundaries) + 0019's
       // risk_config_versions + 0020's ai_request_log + 0021's notifications.
       // …+ 0025's organization_members and organization_invitations.
-      expect(Number(scalar(tables))).toBe(66); // 0065 adds county_codes + site_code_counters; 0063 adds push_preferences + general_push_outbox + general_push_deliveries; 0054 adds organization_member_blocks; …0051 adds public_content + public_content_events; 0051 adds three ministry_voice_* tables; 0049 adds public_feedback; 0048 adds account_restriction_events; 0037 adds site_registration_requests; 0040 adds six emergency tables; 0043 adds job_safety_analyses; 0044 adds emergency_contacts; 0046 adds four worker_voice_* tables
+      expect(Number(scalar(tables))).toBe(67); // 0065 adds county_codes + site_code_counters + platform_settings; 0063 adds push_preferences + general_push_outbox + general_push_deliveries; 0054 adds organization_member_blocks; …0051 adds public_content + public_content_events; 0051 adds three ministry_voice_* tables; 0049 adds public_feedback; 0048 adds account_restriction_events; 0037 adds site_registration_requests; 0040 adds six emergency tables; 0043 adds job_safety_analyses; 0044 adds emergency_contacts; 0046 adds four worker_voice_* tables
 
       const rls = await one(
         run,
@@ -90,7 +90,7 @@ describe("migrations apply to a clean database", () => {
       // every table above has RLS, including 0015's two boundary tables and
       // 0019's risk_config_versions + 0020's ai_request_log + 0021's notifications
       // …and 0025's two RPC-only tables.
-      expect(Number(scalar(rls))).toBe(66); // 0065: county_codes + site_code_counters (RLS on, no policy, no client grant: definer-only); 0063: push_preferences + general_push_outbox + general_push_deliveries (RLS on, no client grants; reachable only through definer functions); 0054: organization_member_blocks (RLS, administrator-read); 0051: public_content + public_content_events (RLS); 0051: three ministry_voice_* tables (RLS; reports/events reviewer-read, identity closed); 0049: public_feedback (RLS, reviewer read); 0048: account_restriction_events (RLS, admin read); 0040: six emergency tables, all RLS-closed; 0043: job_safety_analyses; 0044: emergency_contacts; 0046: four worker_voice_* tables, all RLS-closed
+      expect(Number(scalar(rls))).toBe(67); // 0065: county_codes + site_code_counters + platform_settings (RLS on, no policy, no client grant: definer-only); 0063: push_preferences + general_push_outbox + general_push_deliveries (RLS on, no client grants; reachable only through definer functions); 0054: organization_member_blocks (RLS, administrator-read); 0051: public_content + public_content_events (RLS); 0051: three ministry_voice_* tables (RLS; reports/events reviewer-read, identity closed); 0049: public_feedback (RLS, reviewer read); 0048: account_restriction_events (RLS, admin read); 0040: six emergency tables, all RLS-closed; 0043: job_safety_analyses; 0044: emergency_contacts; 0046: four worker_voice_* tables, all RLS-closed
 
       const guards = await one(
         run,
@@ -551,7 +551,7 @@ describe("0009 audit & integrity foundation (SEC-1/2/3)", () => {
         "audit_log", "organization_members", "organization_invitations",
         "organization_imports", "organization_import_rows", "site_registration_requests",
         // 0065: definer-only reference/counter tables (no client grant at all)
-        "county_codes", "site_code_counters",
+        "county_codes", "site_code_counters", "platform_settings",
         // 0040: emergency alerts are written only through self-authorizing RPCs
         "emergency_alerts", "emergency_alert_revisions", "emergency_alert_acks",
         "emergency_alert_views", "emergency_alert_deliveries", "push_subscriptions",
@@ -836,6 +836,8 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_is_reviewer()",
     "mg_is_staff()",
     "mg_is_verified_public_user()",
+    // 0065: the date the licence grace period ends (NULL = off) — signed-in callers only
+    "mg_licence_grace_until()",
     "mg_my_access_class()",
     // 0049: an account's own reports and feedback
     "mg_my_community_reports()",

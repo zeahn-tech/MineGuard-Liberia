@@ -40,14 +40,14 @@ with f as (select p.oid, p.proname || '(' || pg_get_function_identity_arguments(
              from pg_proc p join pg_namespace n on n.oid = p.pronamespace
             where n.nspname = 'public' and p.proname in ('mg_county_prefix','mg_allocate_site_code','mg_sites_code_guard','mg_organizations_identity_guard',
               'mg_norm_name','mg_norm_licence','mg_licence_format_recognised','mg_validate_licence','mg_company_registration_check',
-              'mg_register_company','mg_set_company_licence','mg_request_site'))
+              'mg_register_company','mg_set_company_licence','mg_request_site','mg_licence_grace_until'))
 select sig,
        has_function_privilege('anon', oid, 'EXECUTE') as anon_can_execute,
        exists (select 1 from pg_proc p2, aclexplode(coalesce(p2.proacl, acldefault('f', p2.proowner))) a where p2.oid = f.oid and a.grantee = 0) as public_can_execute,
        has_function_privilege('authenticated', oid, 'EXECUTE') as authenticated_can_execute,
        case when has_function_privilege('anon', oid, 'EXECUTE')
               or exists (select 1 from pg_proc p2, aclexplode(coalesce(p2.proacl, acldefault('f', p2.proowner))) a where p2.oid = f.oid and a.grantee = 0) then 'FAIL'
-            when proname in ('mg_company_registration_check','mg_register_company','mg_set_company_licence','mg_request_site') then 'PASS (client RPC)'
+            when proname in ('mg_company_registration_check','mg_register_company','mg_set_company_licence','mg_request_site','mg_licence_grace_until') then 'PASS (client RPC)'
             when has_function_privilege('authenticated', oid, 'EXECUTE') then 'FAIL (internal helper exposed)'
             else 'PASS (internal)' end as verdict
 from f order by sig;
@@ -56,7 +56,7 @@ from f order by sig;
 select c.relname, c.relrowsecurity as rls_on,
        has_table_privilege('anon', c.oid, 'SELECT') as anon_select, has_table_privilege('authenticated', c.oid, 'SELECT') as auth_select,
        case when c.relrowsecurity and not has_table_privilege('anon', c.oid, 'SELECT') and not has_table_privilege('authenticated', c.oid, 'SELECT') then 'PASS' else 'FAIL' end as verdict
-from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname in ('county_codes', 'site_code_counters');
+from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname in ('county_codes', 'site_code_counters', 'platform_settings');
 
 \echo '== 7. county table = the 15 official counties'
 select case when count(*) = 15 then 'PASS' else 'FAIL' end as fifteen_counties from public.county_codes;

@@ -20,6 +20,7 @@ async function snapshot(db: PGlite) {
     counters: await q("select prefix, last_number from public.site_code_counters order by prefix"),
     codes: await q("select id, code, county from public.sites order by code"),
     counties: await q("select county, prefix, county_key from public.county_codes order by county"),
+    settings: await q("select key, value from public.platform_settings order by key"),
     triggers: await q("select tgname from pg_trigger where tgname in ('sites_code_guard','organizations_identity_guard') order by 1"),
     indexes: await q("select indexname from pg_indexes where indexname like 'organizations_%_norm_uq' order by 1"),
   };
@@ -42,6 +43,8 @@ describe("0065 re-applied", () => {
     await db.exec(`insert into public.sites (code, name, operator_name, county, created_by) values ('MGL-LOFA-0040', 'Loaded', 'Idem Co', 'Lofa', '${USER}')`);
     await db.exec(`update public.site_code_counters set last_number = 500 where prefix = 'LOFA'`); // e.g. numbers burned by rolled-back work
 
+    // the owner switches the grace period off; a re-apply must not turn it back on or move the date
+    await db.exec(`update public.platform_settings set value = null where key = 'licence_grace_until_for_site_requests'`);
     const before = await snapshot(db);
     expect(before.counters).toEqual([{ prefix: "LOFA", last_number: 500 }, { prefix: "NIMBA", last_number: 3 }, ...before.counters.filter((c) => !["LOFA", "NIMBA"].includes(String(c.prefix)))]);
     expect(before.codes.map((c) => c.code)).toContain("MGL-NIMBA-0003");
@@ -51,6 +54,7 @@ describe("0065 re-applied", () => {
     const after = await snapshot(db);
 
     expect(after).toEqual(before); // counters (incl. the raised LOFA = 500), codes, county table, triggers, indexes: identical
+    expect(after.settings).toEqual([{ key: "licence_grace_until_for_site_requests", value: null }]); // still OFF after two re-applies
     expect(after.counters.filter((c) => c.prefix === "NIMBA")).toHaveLength(1); // no duplicated counter rows
 
     // and allocation continues from where it was, never from a lowered counter

@@ -8,7 +8,10 @@
 -- (public.county_codes) frozen to the prefixes the app has always produced ("first 6 letters"), so every existing code stays
 -- valid and unchanged. (4) Companies gain a Ministry licence number (mandatory for NEW companies, NULL allowed for existing),
 -- unique on a normalised form among every company except deactivated ones, plus a unique normalised name under the same rule.
--- Existing companies without a number cannot REQUEST new sites until one is added (their sites and operations are untouched).
+-- Existing companies without a number may keep REQUESTING new sites only during a time-limited GRACE PERIOD (one named setting,
+-- platform_settings.licence_grace_until_for_site_requests, a date; default = 30 days after this migration first runs; set it to
+-- NULL or a past date to switch the grace period off at any time). After that they cannot request new sites until a number is
+-- added. Their existing sites and operations are never affected.
 --
 -- NOT CHANGED. Worker Voice / Ministry Voice site codes (0047/0053) and community-report tracking codes (CR-…) are separate
 -- and untouched. Existing sites.code values are never rewritten. No existing site's county is rewritten or validated.
@@ -383,8 +386,37 @@ begin
 end;
 $mg$;
 
+-- E2. grace period for existing companies without a licence number ------------------------------------------------------
+-- ONE named setting. Value = the last day (inclusive) on which a company with no licence number may still REQUEST a site.
+-- Switch it off at any time:   update public.platform_settings set value = null where key = 'licence_grace_until_for_site_requests';
+-- Extend it:                   update public.platform_settings set value = '2027-01-31' where key = 'licence_grace_until_for_site_requests';
+-- A missing, blank or malformed value means OFF (fails closed). Re-applying this migration never changes the value.
+create table if not exists public.platform_settings (
+  key        text primary key check (key ~ '^[a-z0-9_]+$'),
+  value      text,
+  updated_by uuid,
+  updated_at timestamptz not null default now()
+);
+alter table public.platform_settings enable row level security;
+revoke all on public.platform_settings from public, anon, authenticated;
+
+insert into public.platform_settings (key, value)
+values ('licence_grace_until_for_site_requests', to_char(current_date + 30, 'YYYY-MM-DD'))
+on conflict (key) do nothing;
+
+-- the date the grace period ends, or NULL when it is off; signed-in callers only (the registrar screen shows it)
+create or replace function public.mg_licence_grace_until()
+returns date
+language sql stable
+security definer set search_path = public
+as $mg$
+  select case when value ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then value::date end
+    from public.platform_settings
+   where key = 'licence_grace_until_for_site_requests' and auth.uid() is not null
+$mg$;
+
 -- F. company site requests: a licence number is required, and the county must be official ----------------------------
--- (body of 0037's mg_request_site plus the two checks marked NEW)
+-- (body of 0037's mg_request_site plus the two checks marked NEW; the licence check honours the grace period above)
 create or replace function public.mg_request_site(
   p_org uuid, p_name text, p_county text, p_district text, p_community text,
   p_mineral text, p_lat double precision, p_lng double precision, p_notes text)
@@ -407,7 +439,7 @@ begin
   select * into v_org from public.organizations where id = p_org;
   if not found or v_org.status <> 'approved' then raise exception 'ORG_NOT_APPROVED'; end if;
   -- NEW: legacy companies must have a Ministry licence number before asking for another site
-  if v_org.licence_number is null then
+  if v_org.licence_number is null and not coalesce(public.mg_licence_grace_until() >= current_date, false) then
     raise exception 'LICENCE_REQUIRED: the Ministry has not recorded a licence number for this company yet. Ask the Ministry registrar to add it before requesting new sites';
   end if;
   if char_length(v_name) < 2 or char_length(v_name) > 120 then
@@ -464,6 +496,7 @@ begin
   -- client RPCs: signed-in only, each self-authorizes
   foreach f in array array[
     'mg_company_registration_check(text, text)',
+    'mg_licence_grace_until()',
     'mg_register_company(text, text)',
     'mg_set_company_licence(uuid, text)',
     'mg_request_site(uuid, text, text, text, text, text, double precision, double precision, text)'

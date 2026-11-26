@@ -2,6 +2,7 @@
 -- ROLLBACK of migration 0065 (site-code hardening + company licence numbers).
 -- Not in supabase/migrations. Takes a backup first (see docs/27). Data-safe for sites: issued site codes are NOT touched
 -- and stay valid. LOSES: the licence_number column (all licence numbers entered by registrars) and the counters.
+-- (It also drops platform_settings, the grace-period setting — it holds nothing else.)
 -- Export first if the licence numbers matter:
 --   select id, name, licence_number from public.organizations where licence_number is not null;
 -- After this script the app version that sends only the company name (the pre-0065 release) works again; the 0065 release
@@ -100,6 +101,7 @@ end;
 $mg$;
 
 drop function if exists public.mg_company_registration_check(text, text);
+drop function if exists public.mg_licence_grace_until();
 drop function if exists public.mg_set_company_licence(uuid, text);
 drop function if exists public.mg_sites_code_guard();
 drop function if exists public.mg_organizations_identity_guard();
@@ -114,6 +116,7 @@ alter table public.organizations drop column if exists licence_number_norm;
 alter table public.organizations drop column if exists name_norm;
 alter table public.organizations drop column if exists licence_number;
 
+drop table if exists public.platform_settings;
 drop table if exists public.site_code_counters;
 drop table if exists public.county_codes;
 

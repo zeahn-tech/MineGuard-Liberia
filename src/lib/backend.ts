@@ -3036,6 +3036,19 @@ export const api = {
         ["organizations"],
       ),
 
+    /** The last day a company without a licence number may still request a site; null = the grace period is off (0065). */
+    licenceGraceUntil: () =>
+      live<string | null>(
+        async () => {
+          await requireCompanyAuthority(true);
+          const { data, error } = await supabase.rpc("mg_licence_grace_until");
+          // release order: a database without 0065 has no such function — behave as "no grace period"
+          if (error) return null;
+          return (data as string | null) ?? null;
+        },
+        ["organizations"],
+      ),
+
     /** Licence numbers by company id, for display on company records. */
     licences: () =>
       live<Record<string, string>>(
