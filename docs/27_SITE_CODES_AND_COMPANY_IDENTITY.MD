@@ -47,6 +47,35 @@ This migration is therefore **`0065_site_code_hardening.sql`** (it was 0062 unti
 | Register a company (old app sends only the name) | Fails with `LICENCE_REQUIRED` (accepted by decision); the old app shows a generic error. The new app has the licence field. |
 | A company administrator requests a site | Fails (`LICENCE_REQUIRED`, and `INVALID_COUNTY` for a bad county) — shown generically by the old app. |
 
+### Staging rehearsal — 2026-11-25 (staging `iwmgrcfmgqldrdkplbtr` only; production untouched)
+**Data used:** a registry-only copy of production (12 companies and 9 sites: names, statuses, codes, counties, locations). No profiles, emails or reports were copied; a placeholder account satisfies `created_by`. Production's own audit was clean (no non-standard codes, no unresolved counties, no company name collisions), so this proved the migration on real-shaped data but not on messy data.
+**Applied:** `0065` (executable statements of the file; comment lines omitted from the executed text; recorded in staging's history as `0065 site_code_hardening`). No errors, no WARNING.
+**Result on the copied data:** counters initialised exactly to the maximum per prefix (BONG 1, GBARPO 3, GRANDB 2, NIMBA 2, SINOE 1); all 9 existing codes unchanged; both unique indexes created; 0 of 12 companies have a licence number (the registrar to-do list). Verification checks 1, 2, 3, 5, 6, 7, 8 all PASS (check 4, the immutability probe, was exercised as B6/B7 below).
+**Behaviour (each run as a signed-in user inside a transaction that was rolled back; staging unchanged afterwards):**
+| Step | Result |
+|---|---|
+| Register company without licence / one-argument (old client) call | refused: `LICENCE_REQUIRED` |
+| Licence `APL-123` | refused: `INVALID_LICENCE` (cadastre application number) |
+| Register with `MEL 2111/16` | accepted |
+| Same licence as `mel-2111/16` under another name | refused: `DUPLICATE_LICENCE` (names the holder) |
+| Same name as `staging test MINING one!` | refused: `DUPLICATE_ORGANIZATION` |
+| Valid licence in an unrecognised format (`XYZ-12345`) | accepted (soft warning only) |
+| Preview for "Nimba Builder sand" | three near matches flagged `similar_name` |
+| Registrar adds a licence to a copied company; same number on another | accepted; second refused |
+| Sites: Nimba, Lofa, Nimba again | `MGL-NIMBA-0003`, `MGL-LOFA-0001`, `MGL-NIMBA-0004` (continuing from the copied 0001/0002) |
+| Old-app insert sending an existing code `MGL-NIMBA-0001` | accepted, stored as `MGL-NIMBA-0005` (client code ignored) |
+| County `Grand Cape Mt` / update to `Narnia` | refused: `INVALID_COUNTY` |
+| Update `sites.code` (alone, and with county + operator) | refused: `CODE_IMMUTABLE` |
+| Update another column of a copied legacy row | accepted |
+| Ten sequential Grand Kru sites | `MGL-GRANDK-0001`..`0010`, all distinct |
+| Company admin without licence requests a site | refused: `LICENCE_REQUIRED` |
+| After licence added: county `Atlantis` / `Nimba` | refused `INVALID_COUNTY` / accepted |
+**Not tested here:** real parallelism (the connector runs one session; the 50-way parallel test passed on a local PostgreSQL 16) and re-applying the file on staging (idempotency is covered by `tests/site-code-idempotency.test.ts` and was run on local PostgreSQL).
+
+### Findings from the rehearsal (not caused by 0065)
+1. **Staging reference data is empty.** `permissions` (production: 32 rows), `admin_areas`, `admin_boundaries`, `meta`, `risk_config_versions`, `voice_retention_policy`, `inspection_templates` all have 0 rows on staging, so every permission-gated function refuses there (the registrar tests needed `organizations.write` inserted inside a rolled-back transaction). Staging's migrations are recorded as applied but its reference/seed rows were never loaded; staging is not a functional copy of production until they are.
+2. **Push-schema drift, one difference** (everything else matched: 42 functions with grants, 8 triggers, 3 policies, 18 indexes, 6 tables, RLS/ACL): `push_subscriptions.user_id` references `profiles(id)` **with `ON DELETE CASCADE` on staging** (original 0062/0063/0064 files) but **without it on production and in the repo** (0040 defines it plain; the reconstructed 0062 says it does not change the table shape). Decide which is intended and fix with a separate migration; it is not part of this PR.
+
 ### Post-deploy verification
 `supabase/maintenance/verify_0065.sql` checks: (1) counters ≥ current maximum per prefix, (2) no duplicate codes, (3) `sites_code_guard` and `organizations_identity_guard` present and enabled, (4) a code update is rejected (rolled back), (5) the new functions have no PUBLIC / anon execute and the internal helpers are not executable by `authenticated`, (6) `county_codes` / `site_code_counters` are not readable by client roles, (7) exactly 15 counties, (8) the unique indexes exist.
 Manual: register one site as the Ministry in each of two counties → codes continue from the previous maximum; try to edit a code in SQL → `CODE_IMMUTABLE`; register a company with a licence number already in use → "already registered to …".
