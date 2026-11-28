@@ -603,8 +603,8 @@ describe("SEC-1: the audit trail is written only by the server", () => {
       async (run) => {
         const [created] = await run(
           `insert into public.sites (code, name, operator_name, county, created_by)
-             values ('LB-AUDIT-PROBE', 'Audit probe', 'AgriLib Mining', 'Bomi', '${f.admin}')
-             returning id, row_version, updated_by`,
+             values ('MGL-BOMI-9001', 'Audit probe', 'AgriLib Mining', 'Bomi', '${f.admin}')
+             returning id, code, row_version, updated_by`,
         );
         // SEC-2: INSERT stamps are server-written, not client-supplied.
         expect(Number(created.row_version)).toBe(1);
@@ -631,7 +631,7 @@ describe("SEC-1: the audit trail is written only by the server", () => {
         expect(insertRows[0].entity_type).toBe("sites");
         expect(
           j(insertRows[0].details).after,
-        ).toMatchObject({ code: "LB-AUDIT-PROBE" });
+        ).toMatchObject({ code: String(created.code) });
 
         const updateRows = await run(
           `select actor_id, details from public.audit_log
@@ -669,7 +669,7 @@ describe("SEC-1: the audit trail is written only by the server", () => {
       async (run) => {
         const [site] = await run(
           `insert into public.sites (code, name, operator_name, county, created_by)
-             values ('LB-STATUS-PROBE', 'Status probe', 'AgriLib Mining', 'Bomi', '${f.admin}')
+             values ('MGL-BOMI-9002', 'Status probe', 'AgriLib Mining', 'Bomi', '${f.admin}')
              returning id, status`,
         );
         const siteId = String(site.id);
@@ -850,6 +850,13 @@ describe("SEC-5/SITE-1: tenancy on organization UUIDs (0010)", () => {
       "authenticated",
       { sub: f.admin, role: "authenticated" },
       async (run) => {
+        // Simulate the LEGACY state this test is about (same-name companies pre-date the 0065 duplicate rule):
+        // inside this always-rolled-back transaction the 0065 name guard is switched off.
+        await run("set local role postgres");
+        await run("drop index if exists public.organizations_name_norm_uq");
+        await run("alter table public.organizations disable trigger organizations_identity_guard");
+        await run("set local role authenticated");
+        await run(claims(f.admin));
         // Two registry entries deliberately sharing one display name…
         const [o1] = await run(
           `insert into public.organizations (name) values ('Twin Mining') returning id`,
@@ -1019,6 +1026,13 @@ describe("SEC-5/SITE-1: tenancy on organization UUIDs (0010)", () => {
         expect(site.organization_id).not.toBeNull();
         const orgA = String(site.organization_id);
 
+        // Simulate the LEGACY state this test is about (same-name companies pre-date the 0065 duplicate rule):
+        // inside this always-rolled-back transaction the 0065 name guard is switched off.
+        await run("set local role postgres");
+        await run("drop index if exists public.organizations_name_norm_uq");
+        await run("alter table public.organizations disable trigger organizations_identity_guard");
+        await run("set local role authenticated");
+        await run(claims(f.admin));
         // A same-named sibling registry row, minted AFTER orgA — the
         // name-based resolver prefers the oldest match, and a bound row
         // must never re-resolve at all.
@@ -1133,7 +1147,7 @@ describe("SEC-5/SITE-1: tenancy on organization UUIDs (0010)", () => {
         await affectedRows(
           run,
           `insert into public.sites (code, name, operator_name, county, created_by)
-             values ('LB-PERM-PROBE','Perm probe','AgriLib Mining','Bomi','${f.admin}')
+             values ('MGL-BOMI-9003','Perm probe','AgriLib Mining','Bomi','${f.admin}')
              returning 1`,
         ),
       ).toBe(1);
@@ -1156,7 +1170,7 @@ describe("SEC-5/SITE-1: tenancy on organization UUIDs (0010)", () => {
       try {
         await run(
           `insert into public.sites (code, name, operator_name, county, created_by)
-             values ('LB-PERM-PROBE-2','Perm probe 2','AgriLib Mining','Bomi','${f.admin}')
+             values ('MGL-BOMI-9004','Perm probe 2','AgriLib Mining','Bomi','${f.admin}')
              returning 1`,
         );
       } catch (e) {

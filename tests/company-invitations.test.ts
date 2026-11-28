@@ -18,7 +18,7 @@ beforeAll(async () => {
     "0025_company_status_membership_invitations.sql",
     "0026_company_workforce.sql",
     "0027_site_scoped_access.sql",
-    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0048_close_admin_bootstrap.sql", "0049_public_user_identity.sql", "0050_public_reports_feedback.sql", "0052_public_content.sql",
+    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0048_close_admin_bootstrap.sql", "0049_public_user_identity.sql", "0050_public_reports_feedback.sql", "0052_public_content.sql", "0065_site_code_hardening.sql",
   ]) {
     await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", m), "utf8"));
   }
@@ -44,7 +44,7 @@ const asPostgres = <T>(fn: (run: (s: string) => Promise<Record<string, unknown>[
   withRole("postgres", null, fn);
 
 async function adminFlow(run: (s: string) => Promise<Record<string, unknown>[]>) {
-  const org = (await run("select public.mg_register_company('Atlas Iron Liberia') as id"))[0].id as string;
+  const org = (await run("select public.mg_register_company('Atlas Iron Liberia', 'TST1004/20') as id"))[0].id as string;
   const inv = (
     await run(`select public.mg_create_company_admin_invitation('${org}', ' New.Admin@Atlas.test ') as id`)
   )[0].id as string;
@@ -55,7 +55,7 @@ describe("Ministry: company registration and administrator nomination", () => {
   test("only an administrator can register a company or nominate an administrator", async () => {
     for (const uid of [f.opA, f.county, f.national, f.guest]) {
       await asUser(uid, async (run) => {
-        expect(await fails(run("select public.mg_register_company('Hostile Co')"))).toMatch(/FORBIDDEN/);
+        expect(await fails(run("select public.mg_register_company('Hostile Co', 'TST1006/20')"))).toMatch(/FORBIDDEN/);
         expect(
           await fails(run(`select public.mg_create_company_admin_invitation((select id from public.organizations limit 1), 'x@y.zz')`)),
         ).toMatch(/FORBIDDEN/);
@@ -65,9 +65,9 @@ describe("Ministry: company registration and administrator nomination", () => {
 
   test("registration is validated and duplicate names are refused", async () => {
     await asUser(f.admin, async (run) => {
-      expect(await fails(run("select public.mg_register_company(' ')"))).toMatch(/INVALID_NAME/);
-      await run("select public.mg_register_company('Atlas Iron Liberia')");
-      expect(await fails(run("select public.mg_register_company('ATLAS IRON LIBERIA')"))).toMatch(/DUPLICATE_ORGANIZATION/);
+      expect(await fails(run("select public.mg_register_company(' ', 'TST1007/20')"))).toMatch(/INVALID_NAME/);
+      await run("select public.mg_register_company('Atlas Iron Liberia', 'TST1004/20')");
+      expect(await fails(run("select public.mg_register_company('ATLAS IRON LIBERIA', 'TST1008/20')"))).toMatch(/DUPLICATE_ORGANIZATION/);
     });
   });
 
@@ -88,7 +88,7 @@ describe("Ministry: company registration and administrator nomination", () => {
 
   test("government accounts and other companies' members cannot be nominated", async () => {
     await asUser(f.admin, async (run) => {
-      const org = (await run("select public.mg_register_company('Atlas Iron Liberia') as id"))[0].id;
+      const org = (await run("select public.mg_register_company('Atlas Iron Liberia', 'TST1004/20') as id"))[0].id;
       expect(
         await fails(run(`select public.mg_create_company_admin_invitation('${org}', 'dave@mineguard.test')`)),
       ).toMatch(/INELIGIBLE_ACCOUNT/);
@@ -97,7 +97,7 @@ describe("Ministry: company registration and administrator nomination", () => {
 
   test("a suspended company cannot receive an administrator", async () => {
     await asUser(f.admin, async (run) => {
-      const org = (await run("select public.mg_register_company('Atlas Iron Liberia') as id"))[0].id;
+      const org = (await run("select public.mg_register_company('Atlas Iron Liberia', 'TST1004/20') as id"))[0].id;
       await run(`select public.mg_set_company_status('${org}', 'suspended', 'Pending licence review')`);
       expect(await fails(run(`select public.mg_create_company_admin_invitation('${org}', 'a@b.cc')`))).toMatch(/ORG_NOT_APPROVED/);
     });
@@ -179,7 +179,7 @@ describe("Invitee: accept", () => {
 
   test("one company per user: an active member of another company is refused (0026 backfills legacy operators)", async () => {
     await asUser(f.admin, async (run) => {
-      const org = (await run("select public.mg_register_company('Atlas Iron Liberia') as id"))[0].id;
+      const org = (await run("select public.mg_register_company('Atlas Iron Liberia', 'TST1004/20') as id"))[0].id;
       expect(
         await fails(run(`select public.mg_create_company_admin_invitation('${org}', 'bob@agrilib.test')`)),
       ).toMatch(/ALREADY_MEMBER_OTHER_ORG/);
@@ -198,7 +198,7 @@ describe("Invitee: accept", () => {
       expect((await run("select id from public.sites")).length).toBe(0); // new company has no sites
       expect((await run("select id from public.audit_log")).length).toBe(0);
       expect(await fails(run("update public.profiles set role = 'admin' where id = auth.uid()"))).toMatch(/FORBIDDEN/);
-      expect(await fails(run("select public.mg_register_company('Another')"))).toMatch(/FORBIDDEN/);
+      expect(await fails(run("select public.mg_register_company('Another', 'TST1009/20')"))).toMatch(/FORBIDDEN/);
       expect(
         await fails(run(`update public.profiles set organization_id = (select id from public.organizations where name = 'OreCo Liberia') where id = auth.uid()`)),
       ).toMatch(/FORBIDDEN/);

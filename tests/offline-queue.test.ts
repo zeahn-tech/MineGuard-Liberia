@@ -50,15 +50,13 @@ beforeEach(async () => {
   await ensureOfflineReady();
 });
 
-describe("site code generator (types.ts)", () => {
-  test("nextSiteCodeFrom increments per-county sequence", async () => {
-    const { nextSiteCodeFrom } = await import("../src/lib/types");
-    expect(nextSiteCodeFrom("Nimba", [])).toBe("MGL-NIMBA-0001");
-    expect(nextSiteCodeFrom("Nimba", ["MGL-NIMBA-0001"])).toBe("MGL-NIMBA-0002");
-    expect(
-      nextSiteCodeFrom("Nimba", ["MGL-NIMBA-0007", "MGL-LOFA-0002"]),
-    ).toBe("MGL-NIMBA-0008");
-    expect(nextSiteCodeFrom("Grand Cape Mount", [])).toBe("MGL-GRANDC-0001");
+describe("site codes (0065)", () => {
+  test("the app no longer computes site codes: the database allocates them", async () => {
+    const types = await import("../src/lib/types");
+    expect("nextSiteCodeFrom" in types).toBe(false);
+    const { isSiteCodeFormat } = await import("../src/lib/site-codes");
+    expect(isSiteCodeFormat("MGL-BOMI-0001")).toBe(true);
+    expect(isSiteCodeFormat("LB-BOM-001")).toBe(false);
   });
 });
 

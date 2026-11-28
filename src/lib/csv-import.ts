@@ -10,7 +10,7 @@ export const IMPORT_MAX_ROWS = 2000;
 export const IMPORT_BATCH = 100;
 
 export const IMPORT_TEMPLATE =
-  "email,role,full_name,site_code\nworker.one@example.com,worker,Worker One,\nsafety.lead@example.com,safety_officer,Safety Lead,LB-BOM-001\n";
+  "email,role,full_name,site_code\nworker.one@example.com,worker,Worker One,\nsafety.lead@example.com,safety_officer,Safety Lead,MGL-BOMI-0001\n";
 
 export interface ImportRow {
   /** 1-based data-row number (header excluded), stable across retries. */

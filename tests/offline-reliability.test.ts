@@ -199,7 +199,7 @@ describe("OFF-1/2: quota exhaustion surfaces as NOT_SAVED (blocks saved UI)", ()
       await enqueueIncidentReport({
         clientRef: "mgoff4-quota",
         siteId: f.siteA,
-        siteCode: "LB-BOM-0001",
+        siteCode: "MGL-BOMI-0001",
         type: "near_miss",
         severity: "low",
         description: "Should never be reported as saved",
@@ -220,7 +220,7 @@ describe("OFF-1/2: quota exhaustion surfaces as NOT_SAVED (blocks saved UI)", ()
       await upsertDraft({
         clientRef: "mgoff4-draft",
         siteId: f.siteA,
-        siteCode: "LB-BOM-0001",
+        siteCode: "MGL-BOMI-0001",
         templateId: f.template,
         answers: {},
         updatedAt: Date.now(),
@@ -288,7 +288,7 @@ describe("OFF-3: mid-sync crash recovery", () => {
     await enqueueIncidentReport({
       clientRef: "mgoff4-crash",
       siteId: f.siteA,
-      siteCode: "LB-BOM-0001",
+      siteCode: "MGL-BOMI-0001",
       type: "fire",
       severity: "high",
       description: "Crash mid-sync",
@@ -345,7 +345,7 @@ describe("OFF-3: mid-sync crash recovery", () => {
     await enqueueIncidentReport({
       clientRef: "mgoff4-first",
       siteId: f.siteA,
-      siteCode: "LB-BOM-0001",
+      siteCode: "MGL-BOMI-0001",
       type: "fire",
       severity: "low",
       description: "first",
@@ -354,7 +354,7 @@ describe("OFF-3: mid-sync crash recovery", () => {
     await enqueueIncidentReport({
       clientRef: "mgoff4-second",
       siteId: f.siteA,
-      siteCode: "LB-BOM-0001",
+      siteCode: "MGL-BOMI-0001",
       type: "fire",
       severity: "low",
       description: "second",
@@ -386,7 +386,7 @@ describe("duplicate replay after a lost response", () => {
     await enqueueIncidentReport({
       clientRef: "mgoff4-replay",
       siteId: f.siteA,
-      siteCode: "LB-BOM-0001",
+      siteCode: "MGL-BOMI-0001",
       type: "near_miss",
       severity: "medium",
       description: "Committed server-side, response lost",
@@ -452,7 +452,7 @@ describe("OFF-4: 409 conflict detection and human resolution", () => {
     await enqueueCaResponse({
       clientRef: "mgoff4-conflict",
       siteId: f.siteA,
-      siteCode: "LB-BOM-0001",
+      siteCode: "MGL-BOMI-0001",
       caId: CA_ID,
       operatorNote: "Guard rail replaced, photos attached",
       expectedRowVersion: 99, // stale: someone else has the row
@@ -500,7 +500,7 @@ describe("OFF-4: 409 conflict detection and human resolution", () => {
     await enqueueCaResponse({
       clientRef: "mgoff4-conflict-2",
       siteId: f.siteA,
-      siteCode: "LB-BOM-0001",
+      siteCode: "MGL-BOMI-0001",
       caId: CA_ID,
       operatorNote: "manual retry check",
     });
@@ -534,7 +534,7 @@ describe("OFF-6: evidence queued against an offline-created parent", () => {
     await enqueueIncidentReport({
       clientRef,
       siteId: f.siteA,
-      siteCode: "LB-BOM-0001",
+      siteCode: "MGL-BOMI-0001",
       type: "environmental",
       severity: "medium",
       description: "Discoloured discharge seen offline",
@@ -779,7 +779,7 @@ describe("OFF-3: retry policy", () => {
     await enqueueIncidentReport({
       clientRef: "mgoff4-max",
       siteId: f.siteA,
-      siteCode: "LB-BOM-0001",
+      siteCode: "MGL-BOMI-0001",
       type: "fire",
       severity: "low",
       description: "Never succeeds",
@@ -809,7 +809,7 @@ describe("scheduler and queue manager wiring", () => {
     await enqueueIncidentReport({
       clientRef: "mgoff4-sched",
       siteId: f.siteA,
-      siteCode: "LB-BOM-0001",
+      siteCode: "MGL-BOMI-0001",
       type: "other",
       severity: "low",
       description: "Synced by the scheduler",

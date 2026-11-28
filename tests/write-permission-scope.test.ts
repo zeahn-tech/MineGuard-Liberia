@@ -36,7 +36,8 @@ const ADMIN_ONLY = ["sites", "site_boundaries", "site_assignments", "admin_areas
 // triggers, hence a real value; everything is rolled back with the transaction.)
 const CHANGE: Record<string, string> = {
   sites: "name = 'PROBE'",
-  organizations: "name = 'PROBE'",
+  // a non-identity column: renaming every company to one name would now (rightly) trip the 0065 duplicate-name rule
+  organizations: "description = 'PROBE'",
   admin_areas: "name = 'PROBE'",
   inspection_templates: "name = 'PROBE'",
 };

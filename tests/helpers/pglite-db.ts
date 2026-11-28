@@ -325,8 +325,8 @@ set local role authenticated;
 set local request.jwt.claims = '${adminClaims}';
 -- Companies are REGISTERED (migration 0033: a signed-in session can no longer type
 -- a company into existence) — exactly what the Ministry does in Companies.
-select public.mg_register_company('AgriLib Mining');
-select public.mg_register_company('OreCo Liberia');
+select public.mg_register_company('AgriLib Mining', 'TST1001/20');
+select public.mg_register_company('OreCo Liberia', 'TST1002/20');
 -- scope='operator' (migration 0010): operator tenancy is organization-
 -- based; 'site' now means staff with explicit site_assignments.
 update public.profiles set role = 'operator', scope = 'operator',
@@ -354,9 +354,9 @@ update public.profiles set role = 'supervisor', scope = 'national',
 insert into public.sites
   (id, code, name, operator_name, mineral_type, county, district, community,
    status, latitude, longitude, created_by) values
-  ('${IDS.siteA}', 'LB-BOM-001', 'Bomi River Wash Plant', 'AgriLib Mining',
+  ('${IDS.siteA}', 'MGL-BOMI-0001', 'Bomi River Wash Plant', 'AgriLib Mining',
    'Gold', 'Bomi', 'Senjeh', 'Bomi Hills', 'active', 6.85, -10.85, '${IDS.admin}'),
-  ('${IDS.siteB}', 'LB-GCM-001', 'Cape Mount Ore Site', 'OreCo Liberia',
+  ('${IDS.siteB}', 'MGL-GRANDC-0001', 'Cape Mount Ore Site', 'OreCo Liberia',
    'Iron ore', 'Grand Cape Mount', 'Garwula', 'Kerry Town', 'active',
    7.10, -11.10, '${IDS.admin}');
 

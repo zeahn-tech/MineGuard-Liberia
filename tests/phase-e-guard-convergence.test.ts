@@ -62,13 +62,13 @@ describe("0058 — guard triggers production lacks", () => {
     await withRole("postgres", null, async (run) => {
       await exec(PRODUCTION_STATE);
       const site = (await run(`insert into public.sites (code, name, operator_name, mineral_type, county, district, community, status, latitude, longitude, created_by)
-        values ('LB-TMP-001','Temp','Tmp Co','Gold','Bomi','Senjeh','X','active',6.9,-10.9,'${f.admin}') returning id`))[0].id as string;
+        values ('MGL-BOMI-0091','Temp','Tmp Co','Gold','Bomi','Senjeh','X','active',6.9,-10.9,'${f.admin}') returning id`))[0].id as string;
       const tpl = (await run(`select id from public.inspection_templates limit 1`))[0].id as string;
       // unguarded: a delete of a childless site goes through
       expect(await savepointed(() => run(`delete from public.sites where id = '${site}'`))).toBe("");
       await exec(mig);
       const site2 = (await run(`insert into public.sites (code, name, operator_name, mineral_type, county, district, community, status, latitude, longitude, created_by)
-        values ('LB-TMP-002','Temp2','Tmp Co','Gold','Bomi','Senjeh','X','active',6.9,-10.9,'${f.admin}') returning id`))[0].id as string;
+        values ('MGL-BOMI-0092','Temp2','Tmp Co','Gold','Bomi','Senjeh','X','active',6.9,-10.9,'${f.admin}') returning id`))[0].id as string;
       expect(await savepointed(() => run(`delete from public.sites where id = '${site2}'`))).toMatch(/never deleted/);
       expect(await savepointed(() => run(`delete from public.inspection_templates where id = '${tpl}'`))).toMatch(/ARCHIVE_ONLY/);
       // re-scope restamps child rows

@@ -83,6 +83,20 @@ export interface Company {
   members: CompanyAdminMember[];
 }
 
+/** Result of the registrar's pre-registration check (migration 0065). */
+export interface CompanyRegistrationCheck {
+  licenceError: string | null;
+  /** null = no licence typed yet (or it is invalid); false = shape not recognised (a warning, never a block). */
+  formatRecognised: boolean | null;
+  duplicates: {
+    id: string;
+    name: string;
+    status: string;
+    licenceNumber: string | null;
+    reason: "same_licence" | "same_name" | "similar_name";
+  }[];
+}
+
 /** One row of the Ministry's cross-company oversight summary (migration 0039). */
 export interface CompanyOversightRow {
   organizationId: string;
@@ -663,16 +677,4 @@ export function makeTrackingCode(): string {
       ? c.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()
       : Math.random().toString(36).slice(2, 10).toUpperCase();
   return `CR-${t}${r}`;
-}
-
-export function nextSiteCodeFrom(county: string, existingCodes: string[]): string {
-  const prefix = `MGL-${county.replace(/[^A-Za-z]/g, "").slice(0, 6).toUpperCase() || "XX"}-`;
-  let max = 0;
-  for (const code of existingCodes) {
-    if (code.startsWith(prefix)) {
-      const n = parseInt(code.slice(prefix.length), 10);
-      if (!Number.isNaN(n) && n > max) max = n;
-    }
-  }
-  return `${prefix}${String(max + 1).padStart(4, "0")}`;
 }

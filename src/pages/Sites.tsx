@@ -29,7 +29,6 @@ import { EmptyState } from "@/components/EmptyState";
 import { FormField } from "@/components/FormField";
 import { FieldError } from "@/components/ui/field";
 import { useFormDraft } from "@/hooks/use-form-draft";
-import { suggestFromList } from "@/lib/did-you-mean";
 import { toastError, toastSuccess } from "@/lib/feedback";
 import { SITE_FIELD_ORDER, validateSite, type SiteField } from "@/lib/form-rules";
 import { firstInvalid, focusField, hasErrors, type FieldErrors } from "@/lib/validation";
@@ -301,9 +300,6 @@ function RegisterSiteDialog({
     setForm(next);
     if (attempted) setErrors(validateSite(next));
   };
-  // A typo in the county is pointed out, but never blocks the form: the list is
-  // a guide, and rejecting free text could lock out a legitimate spelling.
-  const countyHint = suggestFromList(form.county, COUNTIES);
 
   const submit = async () => {
     if (saving) return;
@@ -430,38 +426,22 @@ function RegisterSiteDialog({
               </FormField>
             )}
           </div>
-          <FormField
-            label="County"
-            required
-            id={SITE_IDS.county}
-            error={errors.county}
-            hint={
-              countyHint ? (
-                <>
-                  Did you mean{" "}
-                  <button
-                    type="button"
-                    className="font-medium text-foreground underline underline-offset-2"
-                    onClick={() => {
-                      const next = { ...form, county: countyHint };
-                      setForm(next);
-                      if (attempted) setErrors(validateSite(next));
-                    }}
-                  >
-                    {countyHint}
-                  </button>
-                  ?
-                </>
-              ) : undefined
-            }
-          >
+          <FormField label="County" required id={SITE_IDS.county} error={errors.county}
+            hint="Only Liberia's 15 official counties can be chosen. The site code is assigned automatically.">
             {(a11y) => (
-              <>
-                <Input {...a11y} value={form.county} onChange={set("county")} placeholder="Nimba" list="mg-counties" />
-                <datalist id="mg-counties">
-                  {COUNTIES.map((c) => <option key={c} value={c} />)}
-                </datalist>
-              </>
+              <Select
+                value={form.county}
+                onValueChange={(v) => {
+                  const next = { ...form, county: v };
+                  setForm(next);
+                  if (attempted) setErrors(validateSite(next));
+                }}
+              >
+                <SelectTrigger {...a11y} aria-label="County"><SelectValue placeholder="Choose the county" /></SelectTrigger>
+                <SelectContent>
+                  {COUNTIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
             )}
           </FormField>
           <div className="space-y-1.5">

@@ -24,9 +24,10 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/lib/backend";
 import { useMutation, useQuery } from "@/lib/backend-react";
-import type { Company, CompanyInvitation, CompanyStatus } from "@/lib/types";
+import type { Company, CompanyInvitation, CompanyRegistrationCheck, CompanyStatus } from "@/lib/types";
+import { LICENCE_FORMAT_WARNING, licenceFormatRecognised, licenceProblem } from "@/lib/licence";
 import { Building2, Loader2, MailPlus, RotateCw, ShieldAlert, XCircle } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { PageLoading } from "@/components/PageLoading";
@@ -52,6 +53,43 @@ function invitationState(i: CompanyInvitation): { label: string; live: boolean }
   if (i.status === "pending" && i.expiresAt <= Date.now()) return { label: "Expired", live: false };
   if (i.status === "pending") return { label: "Pending", live: true };
   return { label: i.status[0].toUpperCase() + i.status.slice(1), live: false };
+}
+
+function MissingLicenceRow({ org, onSave }: { org: { id: string; name: string; status: string }; onSave: (v: string) => Promise<unknown> }) {
+  const [v, setV] = useState("");
+  const [err, setErr] = useState<string | undefined>();
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    const p = licenceProblem(v);
+    setErr(p);
+    if (p) return;
+    setBusy(true);
+    try {
+      await onSave(v.trim());
+      toast.success(`Licence number saved for ${org.name}.`);
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <li className="space-y-1">
+      <FormField label={org.name} id={`lic-${org.id}`} error={err} className="space-y-1">
+        {(a11y) => (
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input {...a11y} value={v} maxLength={40} placeholder="Ministry licence number" onChange={(e) => { setV(e.target.value); if (err) setErr(undefined); }} />
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void save()}>
+              {busy && <Loader2 className="size-4 animate-spin" />} Save
+            </Button>
+          </div>
+        )}
+      </FormField>
+      {v.trim() && !licenceProblem(v) && !licenceFormatRecognised(v) && (
+        <p className="text-xs text-amber-700 dark:text-amber-400">{LICENCE_FORMAT_WARNING}</p>
+      )}
+    </li>
+  );
 }
 
 function InvitationRow({ inv, busy, onResend, onRevoke }: {
@@ -99,6 +137,7 @@ export function CompanyCard({
   const invite = useMutation(api.companies.inviteAdmin);
   const resend = useMutation(api.companies.resendInvitation);
   const revoke = useMutation(api.companies.revokeInvitation);
+  const licences = useQuery(api.companies.licences);
   const setStatus = useMutation(api.companies.setStatus);
   const [email, setEmail] = useState("");
   const [emailError, setEmailError] = useState<string | undefined>();
@@ -159,6 +198,11 @@ export function CompanyCard({
           {pendingCount > 0 ? ` · ${pendingCount} awaiting approval` : ""}
           {company.statusReason ? ` · ${company.statusReason}` : ""}
         </p>
+        {licences && (
+          <p className="text-xs text-muted-foreground">
+            {licences[company.id] ? `Ministry licence ${licences[company.id]}` : "No Ministry licence number recorded"}
+          </p>
+        )}
       </CardHeader>
       <CardContent className="space-y-5">
         <section aria-label="Company administrators" className="space-y-2">
@@ -278,7 +322,24 @@ export default function Companies() {
   const { user } = useAuth();
   const companies = useQuery(api.companies.list);
   const register = useMutation(api.companies.register);
+  const missingLicence = useQuery(api.companies.missingLicence);
+  const graceUntil = useQuery(api.companies.licenceGraceUntil);
+  const setLicence = useMutation(api.companies.setLicence);
+  const [licence, setLicenceText] = useState("");
+  const [licenceError, setLicenceError] = useState<string | undefined>();
+  const [check, setCheck] = useState<CompanyRegistrationCheck | null>(null);
   const [name, setName] = useState("");
+  // possible-duplicate warning for the registrar: debounced, advisory only (the database refuses true duplicates)
+  useEffect(() => {
+    const n = name.trim();
+    const l = licence.trim();
+    if (n.length < 4 && !l) return;
+    let live = true;
+    const t = setTimeout(() => {
+      api.companies.checkRegistration({ name: n, licenceNumber: l }).then((r) => { if (live) setCheck(r); }, () => { if (live) setCheck(null); });
+    }, 400);
+    return () => { live = false; clearTimeout(t); };
+  }, [name, licence]);
   const [nameError, setNameError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
 
@@ -304,14 +365,21 @@ export default function Companies() {
       focusField("company-name");
       return;
     }
+    const lp = licenceProblem(licence);
+    setLicenceError(lp);
+    if (lp) {
+      focusField("company-licence");
+      return;
+    }
     setBusy(true);
     try {
-      await register({ name });
+      await register({ name, licenceNumber: licence.trim() });
       toastSuccess({
         title: `${name.trim()} registered and approved.`,
         reassure: "Next, nominate its administrator below — they'll receive an email invitation to accept.",
       });
       setName("");
+      setLicenceText("");
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -335,11 +403,21 @@ export default function Companies() {
         <CardContent className="space-y-2">
           <FormField label="Company name" id="company-name" error={nameError} className="space-y-2">
             {(a11y) => (
+              <Input {...a11y} value={name} maxLength={200} placeholder="e.g. ArcelorMittal Liberia"
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (nameError) setNameError(validateCompanyName({ name: e.target.value }).name);
+                }}
+                onKeyDown={(e) => { if (e.key === "Enter") void add(); }} />
+            )}
+          </FormField>
+          <FormField label="Ministry licence number" id="company-licence" error={licenceError} className="space-y-2">
+            {(a11y) => (
               <div className="flex flex-col gap-2 sm:flex-row">
-                <Input {...a11y} value={name} maxLength={200} placeholder="e.g. ArcelorMittal Liberia"
+                <Input {...a11y} value={licence} maxLength={40} placeholder="e.g. MEL 2111/16"
                   onChange={(e) => {
-                    setName(e.target.value);
-                    if (nameError) setNameError(validateCompanyName({ name: e.target.value }).name);
+                    setLicenceText(e.target.value);
+                    if (licenceError) setLicenceError(licenceProblem(e.target.value));
                   }}
                   onKeyDown={(e) => { if (e.key === "Enter") void add(); }} />
                 <Button disabled={busy} onClick={() => void add()}>
@@ -348,8 +426,44 @@ export default function Companies() {
               </div>
             )}
           </FormField>
+          {licence.trim() && !licenceProblem(licence) && !licenceFormatRecognised(licence) && (
+            <p className="text-xs text-amber-700 dark:text-amber-400" role="status">{LICENCE_FORMAT_WARNING}</p>
+          )}
+          {check && (name.trim().length >= 4 || licence.trim()) && check.duplicates.length > 0 && (
+            <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm" role="status">
+              <p className="font-medium">Possible duplicate — check before registering</p>
+              <ul className="mt-1 space-y-0.5 text-xs">
+                {check.duplicates.map((d) => (
+                  <li key={d.id}>
+                    {d.name} ({STATUS_LABEL[d.status as CompanyStatus] ?? d.status}
+                    {d.licenceNumber ? ` · ${d.licenceNumber}` : ""}) —{" "}
+                    {d.reason === "same_licence" ? "same licence number" : d.reason === "same_name" ? "same name" : "similar name"}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      {missingLicence && missingLicence.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Companies without a licence number ({missingLicence.length})</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              {graceUntil
+                ? `These companies may keep requesting new sites until ${graceUntil}; after that a Ministry licence number must be recorded first.`
+                : "These companies cannot request new sites until a Ministry licence number is recorded."}{" "}
+              Their existing sites and operations are not affected.
+            </p>
+            <ul className="space-y-3">
+              {missingLicence.map((m) => (
+                <MissingLicenceRow key={m.id} org={m} onSave={(v) => setLicence({ organizationId: m.id, licenceNumber: v })} />
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       {companies === undefined ? (
         <PageLoading shape="list" label="companies" />

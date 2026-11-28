@@ -56,7 +56,7 @@ async function render(path: string) {
 
 describe("New JSA button", () => {
   test("a worker with an available site sees an enabled New JSA button", async () => {
-    sitesImpl = async () => [{ id: "s1", name: "Bomi Hills Pit", code: "LB-BOM-001" }];
+    sitesImpl = async () => [{ id: "s1", name: "Bomi Hills Pit", code: "MGL-BOMI-0001" }];
     const btns = await render("/operate/jsa");
     expect(btns).toHaveLength(1);
     expect(btns[0].disabled).toBe(false);

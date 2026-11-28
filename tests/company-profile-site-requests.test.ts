@@ -146,7 +146,7 @@ describe("site registration requests", () => {
       expect(await fails(run(`select public.mg_decide_site_request('${id}', 'approved', null, '${siteB}')`))).toMatch(/INVALID_SITE/);
       // register the real site (as the Ministry does), then approve
       const site = (await run(`insert into public.sites (code, name, operator_name, mineral_type, county, district, community, status, created_by)
-        values ('LB-BOM-777', 'Bomi North Pit', 'AgriLib Mining', 'Gold', 'Bomi', 'Senjeh', 'Bomi Hills', 'pending_verification', '${f.admin}') returning id`))[0].id;
+        values ('MGL-BOMI-0777', 'Bomi North Pit', 'AgriLib Mining', 'Gold', 'Bomi', 'Senjeh', 'Bomi Hills', 'pending_verification', '${f.admin}') returning id`))[0].id;
       await run(`select public.mg_decide_site_request('${id}', 'approved', null, '${site}')`);
       expect(await fails(run(`select public.mg_decide_site_request('${id}', 'rejected', 'changed my mind')`))).toMatch(/REQUEST_NOT_PENDING/);
       const q = (await run(`select status, site_id, decided_by from public.site_registration_requests where id = '${id}'`))[0];

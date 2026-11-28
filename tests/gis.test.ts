@@ -134,7 +134,7 @@ beforeAll(async () => {
   __testSetSupabaseClient(createEdgeClient());
   // Sites are registered for REGISTERED companies (migration 0033): the probe company
   // exists as it would after the Ministry registered it in Companies.
-  await adminExec("select public.mg_resolve_organization('Probe Op')");
+  await adminExec("insert into public.organizations (name, status) values ('Probe Op', 'approved')");
 
   // siteA: VERIFIED by an authoritative source (geo.write act as admin);
   // siteB stays unverified. Both have coordinates in the base seed.
@@ -765,7 +765,7 @@ describe("site coordinates: nothing silently unmappable", () => {
   });
 
   test("a site that already has unusable coordinates is NOT plotted but IS counted for the user", async () => {
-    await insertSite(SITE_BAD, "MGL-BOM-9901", "Positive Longitude Probe", 9.43, null);
+    await insertSite(SITE_BAD, "MGL-BOMI-9901", "Positive Longitude Probe", 9.43, null);
     try {
       setIdentity(f.admin);
       const d = await feed();
@@ -777,8 +777,8 @@ describe("site coordinates: nothing silently unmappable", () => {
   });
 
   test("migration 0017 repairs ONLY labelled demo rows (real data is never touched)", async () => {
-    await insertSite(SITE_DEMO, "MGL-BOM-9902", "Demo Probe — Zorzor", 9.4236, DEMO_NOTE);
-    await insertSite(SITE_REAL, "MGL-BOM-9903", "Real Operator Site", 9.4236, null);
+    await insertSite(SITE_DEMO, "MGL-BOMI-9902", "Demo Probe — Zorzor", 9.4236, DEMO_NOTE);
+    await insertSite(SITE_REAL, "MGL-BOMI-9903", "Real Operator Site", 9.4236, null);
     try {
       const sql = readFileSync(join(ROOT, "supabase/migrations/0017_fix_demo_site_longitudes.sql"), "utf8");
       await adminExec(sql);

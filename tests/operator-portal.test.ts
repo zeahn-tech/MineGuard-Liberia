@@ -57,7 +57,7 @@ describe("operator portal: obligation feed", () => {
     const feed = await first(api.inspections.listMyCorrectiveActions());
     expect(feed!.length).toBeGreaterThanOrEqual(1);
     expect(feed!.every((o) => o.siteId === f.siteA)).toBe(true);
-    expect(feed!.every((o) => o.siteCode.startsWith("LB-BOM"))).toBe(true);
+    expect(feed!.every((o) => o.siteCode.startsWith("MGL-BOMI"))).toBe(true);
     // The join worked: finding title and site identity are present.
     expect(feed![0].findingTitle).toBeTruthy();
     expect(feed![0].county).toBe("Bomi");

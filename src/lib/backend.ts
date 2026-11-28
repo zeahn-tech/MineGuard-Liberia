@@ -76,7 +76,6 @@ import {
   canAccessSite,
   isStaffRole,
   makeTrackingCode,
-  nextSiteCodeFrom,
   type AdminBoundary,
   type AuditEntry,
   type CommunityReport,
@@ -100,6 +99,7 @@ import {
   type ActivityItem,
   type AdminUserRow,
   type CompanyOversightRow,
+  type CompanyRegistrationCheck,
   type CompanyProfile,
   type CompanySearchResult,
   type SiteRequest,
@@ -500,6 +500,21 @@ async function insertReturningId(
   return data.id as string;
 }
 
+/** Like insertReturningId, plus the columns the database fills in itself (e.g. sites.code, allocated by 0065). */
+async function insertReturningRow<T extends AnyRow>(
+  table: string,
+  values: AnyRow,
+  columns: string,
+): Promise<T> {
+  const { data, error } = await supabase
+    .from(table)
+    .insert(values)
+    .select(columns)
+    .single();
+  if (error) throw backendError(error);
+  return data as unknown as T;
+}
+
 // ---------------------------------------------------------------------------
 // SEC-4 — paged reads: hosted PostgREST caps an unranged response
 // (db-max-rows, default 1,000 rows). A bare `select("*")` therefore
@@ -543,20 +558,6 @@ async function allRows<T>(table: string): Promise<T[]> {
       .order("id", { ascending: true })
       .range(from, to),
   );
-}
-
-/** Every site code in the registry — paged for the same SEC-4 reason: a
- *  truncated scan would re-propose an existing code once a lineage passes
- *  the row cap (the unique constraint would then refuse the insert). */
-async function allSiteCodes(): Promise<string[]> {
-  const rows = await pagedRows<{ code: string }>((from, to) =>
-    supabase
-      .from("sites")
-      .select("code")
-      .order("id", { ascending: true })
-      .range(from, to),
-  );
-  return rows.map((r) => r.code);
 }
 
 /** Paged read of one parent's children (or any eq-filtered slice) — the
@@ -2269,6 +2270,13 @@ const INVITE_ERRORS: Record<string, string> = {
   INVALID_EMAIL: "Enter a valid email address.",
   INVALID_NAME: "Enter a company name of 2–200 characters.",
   DUPLICATE_ORGANIZATION: "A company with this name already exists.",
+  DUPLICATE_LICENCE: "This licence number is already registered to another company.",
+  LICENCE_REQUIRED: "Enter the Ministry licence number.",
+  INVALID_LICENCE: "That is not a valid Ministry licence number.",
+  INVALID_COUNTY: "Choose one of the 15 counties of Liberia.",
+  LICENCE_CLEAR_BLOCKED: "A licence number cannot be removed; correct it with a reason instead.",
+  LICENCE_VIA_FUNCTION_ONLY: "Licence numbers are changed through the registrar screen, which records who and why.",
+  NOT_FOUND: "That company could not be found.",
   ORG_NOT_APPROVED: "Only an approved company can receive an administrator.",
   INELIGIBLE_ACCOUNT: "Government accounts cannot be company administrators.",
   ALREADY_MEMBER_OTHER_ORG: "This account already belongs to another company.",
@@ -2300,6 +2308,11 @@ function friendlyInviteError(raw: string): Error {
   // FORBIDDEN carries a server-authored reason after the colon ("you cannot change your own role").
   const reason = code === "FORBIDDEN" ? /FORBIDDEN:\s*([^\n]{3,120})/.exec(raw)?.[1] : undefined;
   if (reason) return new Error(reason.charAt(0).toUpperCase() + reason.slice(1) + ".");
+  // 0065: these carry a server-authored explanation (which company holds the number, what is wrong with it)
+  if (code === "INVALID_LICENCE" || code === "DUPLICATE_LICENCE" || code === "DUPLICATE_ORGANIZATION" || code === "LICENCE_REQUIRED" || code === "REASON_REQUIRED") {
+    const why = new RegExp(`${code}:\\s*([^\\n]{3,260})`).exec(raw)?.[1];
+    if (why) return new Error(why.charAt(0).toUpperCase() + why.slice(1).replace(/\.?$/, "."));
+  }
   return new Error(INVITE_ERRORS[code] ?? "The request could not be completed. Try again.");
 }
 
@@ -2974,11 +2987,92 @@ export const api = {
         ["organizations"],
       ),
 
-    register: async (args: { name: string }): Promise<string> => {
+    register: async (args: { name: string; licenceNumber: string }): Promise<string> => {
       await requireCompanyAuthority();
-      const { data, error } = await supabase.rpc("mg_register_company", { p_name: args.name });
+      const { data, error } = await supabase.rpc("mg_register_company", {
+        p_name: args.name,
+        p_licence: args.licenceNumber,
+      });
       if (error) throw friendlyInviteError(error.message);
       return data as string;
+    },
+
+    /** Registrar preview (0065): hard licence errors, the soft format warning and possible duplicates. Never blocks by itself. */
+    checkRegistration: async (args: { name: string; licenceNumber: string }): Promise<CompanyRegistrationCheck> => {
+      await requireCompanyAuthority();
+      const { data, error } = await supabase.rpc("mg_company_registration_check", {
+        p_name: args.name,
+        p_licence: args.licenceNumber || null,
+      });
+      if (error) throw friendlyInviteError(error.message);
+      const d = (data ?? {}) as AnyRow;
+      return {
+        licenceError: (d.licenceError as string | null) ?? null,
+        formatRecognised: (d.formatRecognised as boolean | null) ?? null,
+        duplicates: ((d.duplicates ?? []) as AnyRow[]).map((r) => ({
+          id: r.id as string,
+          name: r.name as string,
+          status: r.status as string,
+          licenceNumber: (r.licenceNumber as string | null) ?? null,
+          reason: r.reason as "same_licence" | "same_name" | "similar_name",
+        })),
+      };
+    },
+
+    /** Registrar to-do (0065): approved/pending/suspended companies that still have no licence number. */
+    missingLicence: () =>
+      live<{ id: string; name: string; status: string }[]>(
+        async () => {
+          await requireCompanyAuthority(true);
+          const { data, error } = await supabase
+            .from("organizations")
+            .select("id,name,status")
+            .is("licence_number", null)
+            .neq("status", "deactivated")
+            .order("name", { ascending: true })
+            .limit(1000);
+          // release order: a database without 0065 has no such column — nothing to list
+          if (error) return [];
+          return ((data ?? []) as AnyRow[]).map((r) => ({ id: r.id as string, name: r.name as string, status: r.status as string }));
+        },
+        ["organizations"],
+      ),
+
+    /** The last day a company without a licence number may still request a site; null = the grace period is off (0065). */
+    licenceGraceUntil: () =>
+      live<string | null>(
+        async () => {
+          await requireCompanyAuthority(true);
+          const { data, error } = await supabase.rpc("mg_licence_grace_until");
+          // release order: a database without 0065 has no such function — behave as "no grace period"
+          if (error) return null;
+          return (data as string | null) ?? null;
+        },
+        ["organizations"],
+      ),
+
+    /** Licence numbers by company id, for display on company records. */
+    licences: () =>
+      live<Record<string, string>>(
+        async () => {
+          await requireCompanyAuthority(true);
+          const { data, error } = await supabase.from("organizations").select("id,licence_number").not("licence_number", "is", null).limit(1000);
+          if (error) return {};
+          return Object.fromEntries(((data ?? []) as AnyRow[]).map((r) => [r.id as string, r.licence_number as string]));
+        },
+        ["organizations"],
+      ),
+
+    /** Add a company's licence number, or correct an existing one (a correction needs a reason of at least 5 characters, 0065). */
+    setLicence: async (args: { organizationId: string; licenceNumber: string; reason?: string }): Promise<void> => {
+      await requireCompanyAuthority();
+      const { error } = await supabase.rpc("mg_set_company_licence", {
+        p_org: args.organizationId,
+        p_licence: args.licenceNumber,
+        p_reason: args.reason?.trim() || null,
+      });
+      if (error) throw friendlyInviteError(error.message);
+      notifyLocalWrite("organizations");
     },
 
     /** Create (or reuse) the company-administrator invitation and send the email. */
@@ -3413,9 +3507,8 @@ export const api = {
         );
       assertSitePosition(args.latitude, args.longitude);
       assertPositionProvenance(args);
-      const existingCodes = await allSiteCodes();
-      const code = nextSiteCodeFrom(args.county, existingCodes);
-      const id = await insertReturningId("sites", {
+      // the code is allocated by the database (0065) — never computed here
+      const created = await insertReturningRow<{ id: string; code: string }>("sites", {
         name: args.name,
         operator_name: args.operatorName,
         county: args.county,
@@ -3428,9 +3521,9 @@ export const api = {
         geo_accuracy_m: hasLat ? (args.geoAccuracyM ?? null) : null,
         notes: args.notes ?? null,
         status: "pending_verification",
-        code,
         created_by: user.uid,
-      });
+      }, "id, code");
+      const { id, code } = created;
       notifyLocalWrite("sites");
       await logAudit({
         actorId: user.uid,
@@ -6211,12 +6304,8 @@ async function runSeed() {
   const uid = user.uid;
 
   const siteIds: Record<string, { id: string; code: string }> = {};
-  const existingCodes = await allSiteCodes();
   for (const def of DEMO_SITE_DEFS) {
-    const code = nextSiteCodeFrom(def.county, existingCodes);
-    existingCodes.push(code);
-    const id = await insertReturningId("sites", {
-      code,
+    const row = await insertReturningRow<{ id: string; code: string }>("sites", {
       name: def.name,
       operator_name: def.operatorName,
       mineral_type: def.mineralType,
@@ -6228,8 +6317,8 @@ async function runSeed() {
       longitude: def.lng,
       notes: "Synthetic demonstration record — not real operational data.",
       created_by: uid,
-    });
-    siteIds[def.name] = { id, code };
+    }, "id, code");
+    siteIds[def.name] = { id: row.id, code: row.code };
   }
 
   const templateId = await insertReturningId("inspection_templates", {

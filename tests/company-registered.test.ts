@@ -10,7 +10,7 @@ let f: Awaited<ReturnType<typeof getFixture>>;
 beforeAll(async () => {
   f = await getFixture();
   const db = await getDb();
-  for (const m of ["0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql"]) {
+  for (const m of ["0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0065_site_code_hardening.sql"]) {
     await db.exec(readFileSync(join(import.meta.dir, "..", "supabase", "migrations", m), "utf8"));
   }
 });
@@ -52,7 +52,7 @@ describe("registering a site", () => {
 
   test("a company that is not approved cannot receive a NEW site; its existing sites stay editable", async () => {
     await asUser(f.admin, async (run) => {
-      const org = (await run("select public.mg_register_company('Pending Co') as id"))[0].id as string;
+      const org = (await run("select public.mg_register_company('Pending Co', 'TST1003/20') as id"))[0].id as string;
       await run(`select public.mg_set_company_status('${org}', 'pending_review')`);
       expect(await fails(insertSite(run, "T-004", "Pending Co"))).toMatch(/COMPANY_NOT_APPROVED/);
       await run(`select public.mg_set_company_status('${org}', 'approved')`);
@@ -77,11 +77,19 @@ describe("assigning an operator role", () => {
   });
 });
 
-describe("owner-run maintenance keeps its historical behaviour", () => {
-  test("SQL-editor / seed contexts (no signed-in user) can still create a company from a name", async () => {
+describe("owner-run maintenance (0065: never auto-approves)", () => {
+  test("SQL-editor / seed contexts (no signed-in user) can still create a company from a name — PENDING REVIEW, not approved", async () => {
     await withRole("postgres", null, async (run) => {
       const id = (await run("select public.mg_resolve_organization('Seeded By Owner Ltd') as id"))[0].id;
       expect(id).toBeTruthy();
+      expect((await run(`select status from public.organizations where id = '${id}'`))[0].status).toBe("pending_review");
+    });
+  });
+  test("the explicit seed path (mg.seed_mode = on) creates an approved demonstration company", async () => {
+    await withRole("postgres", null, async (run) => {
+      await run("select set_config('mg.seed_mode', 'on', true)");
+      const id = (await run("select public.mg_resolve_organization('Seeded Demo Ltd') as id"))[0].id;
+      expect((await run(`select status from public.organizations where id = '${id}'`))[0].status).toBe("approved");
     });
   });
 });

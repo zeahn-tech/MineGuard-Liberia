@@ -35,9 +35,9 @@ async function world<T>(fn: (run: Runner) => Promise<T>) {
       ('${OF}','of@agrilib.test','{"name":"Ola Officer"}'), ('${REG}','reg@ministry.test','{"name":"Rita Registrar"}')`);
     await run(`update public.profiles set role = 'registrar', scope = 'national', profile_complete = true where id = '${REG}'`);
     const orgA = (await run("select id from public.organizations where name = 'AgriLib Mining'"))[0].id as string;
-    const siteA = (await run("select id from public.sites where code = 'LB-BOM-001'"))[0].id as string;
+    const siteA = (await run("select id from public.sites where code = 'MGL-BOMI-0001'"))[0].id as string;
     const site2 = (await run(`insert into public.sites (code, name, operator_name, mineral_type, county, district, community, status, latitude, longitude, created_by)
-      values ('LB-BOM-002','Bomi North Pit','AgriLib Mining','Gold','Bomi','Senjeh','Bomi Hills','active',6.9,-10.9,'${f.admin}') returning id`))[0].id as string;
+      values ('MGL-BOMI-0002','Bomi North Pit','AgriLib Mining','Gold','Bomi','Senjeh','Bomi Hills','active',6.9,-10.9,'${f.admin}') returning id`))[0].id as string;
     await run("set local role authenticated");
     await as(run, REG);
     const inv = (await run(`select public.mg_create_company_admin_invitation('${orgA}', 'xa@agrilib.test') as id`))[0].id;

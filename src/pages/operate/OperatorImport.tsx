@@ -6,6 +6,7 @@
 // The browser parses for fast feedback; the DATABASE re-validates every row.
 // ---------------------------------------------------------------------------
 
+import { importRowMessage } from "@/lib/site-codes";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -256,7 +257,7 @@ export default function OperatorImport() {
                       <tr key={row} className="border-t">
                         <td className="p-2">{row}</td>
                         <td className="break-all p-2">{preview.rows[row - 1]?.email}</td>
-                        <td className="p-2">{v.message}</td>
+                        <td className="p-2">{importRowMessage(v.message)}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -145,7 +145,7 @@ test.describe("F3 staff: command center → sites → site", () => {
     await shot(page, ti, "f3-command-center");
 
     await page.goto("/#/portal/sites");
-    const row = page.getByRole("row", { name: /LB-BOM-001|Bomi Ridge/ }).first();
+    const row = page.getByRole("row", { name: /MGL-BOMI-0001|Bomi Ridge/ }).first();
     await expect(row).toBeVisible();
     await expectNoHorizontalScroll(page);
     await shot(page, ti, "f3-sites");

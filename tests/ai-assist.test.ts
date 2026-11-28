@@ -107,7 +107,7 @@ describe("AI output stays inside the caller's authorization", () => {
       const blob = JSON.stringify(out);
       for (const id of [f.siteA, f.findingA, f.caA, f.incidentA, f.inspection]) expect(blob).not.toContain(id);
       expect(blob).not.toContain("Bomi River Wash Plant");
-      expect(blob).not.toContain("LB-BOM-001");
+      expect(blob).not.toContain("MGL-BOMI-0001");
     }
   });
 
@@ -504,7 +504,7 @@ describe("capabilities", () => {
     const text = out.claims.map((c) => c.text).join(" ");
     const n = Number((await adminSql(`select count(*)::int n from public.findings where site_id='${f.siteA}'`))[0].n);
     expect(text).toContain(`${n} finding`);
-    expect(text).toContain("Bomi River Wash Plant (LB-BOM-001)");
+    expect(text).toContain("Bomi River Wash Plant (MGL-BOMI-0001)");
   });
 
   test("inspection priorities rank deterministically and cite the site", async () => {
