@@ -2265,6 +2265,14 @@ async function deriveNotifications(
 // narrow server-side RPC / edge function; the client never sends a role, a
 // company binding or a status directly.
 // ---------------------------------------------------------------------------
+export interface GraceStatus {
+  until: string | null;
+  isActive: boolean;
+  daysLeft: number | null;
+  companiesWithoutLicence: number;
+}
+export type GraceStatusResult = { state: "ok"; status: GraceStatus } | { state: "forbidden" } | { state: "error" };
+
 const INVITE_ERRORS: Record<string, string> = {
   FORBIDDEN: "You do not have permission to do that.",
   INVALID_EMAIL: "Enter a valid email address.",
@@ -2287,6 +2295,8 @@ const INVITE_ERRORS: Record<string, string> = {
   RESEND_TOO_SOON: "Wait a minute before resending.",
   SEND_LIMIT: "Too many sends. Revoke this invitation and create a new one.",
   REASON_REQUIRED: "Record a reason (at least 5 characters).",
+  PAST_DATE: "The date cannot be in the past. To end the grace period, use Switch off grace period.",
+  MAX_GRACE_EXCEEDED: "The date is too far ahead. Choose a date within 365 days from today.",
   EMAIL_FAILED: "The invitation was saved but the email could not be sent. Try resending.",
   NOT_CONFIGURED: "Invitation email is not configured yet. Contact the platform operator.",
   INVALID_TARGET: "That person does not work on sites.",
@@ -2309,7 +2319,7 @@ function friendlyInviteError(raw: string): Error {
   const reason = code === "FORBIDDEN" ? /FORBIDDEN:\s*([^\n]{3,120})/.exec(raw)?.[1] : undefined;
   if (reason) return new Error(reason.charAt(0).toUpperCase() + reason.slice(1) + ".");
   // 0065: these carry a server-authored explanation (which company holds the number, what is wrong with it)
-  if (code === "INVALID_LICENCE" || code === "DUPLICATE_LICENCE" || code === "DUPLICATE_ORGANIZATION" || code === "LICENCE_REQUIRED" || code === "REASON_REQUIRED") {
+  if (code === "INVALID_LICENCE" || code === "DUPLICATE_LICENCE" || code === "DUPLICATE_ORGANIZATION" || code === "LICENCE_REQUIRED" || code === "REASON_REQUIRED" || code === "PAST_DATE" || code === "MAX_GRACE_EXCEEDED") {
     const why = new RegExp(`${code}:\\s*([^\\n]{3,260})`).exec(raw)?.[1];
     if (why) return new Error(why.charAt(0).toUpperCase() + why.slice(1).replace(/\.?$/, "."));
   }
@@ -3050,6 +3060,39 @@ export const api = {
         },
         ["organizations"],
       ),
+
+    /** The licence grace period as the Ministry sees it (0067). "forbidden" = this account does not hold platform_settings.write. */
+    graceStatus: () =>
+      live<GraceStatusResult>(
+        async () => {
+          await requireCompanyAuthority(true);
+          const { data, error } = await supabase.rpc("mg_licence_grace_status");
+          if (error) {
+            // release order: a database without 0067 has no such function — the card simply does not appear
+            if (/FORBIDDEN/.test(error.message) || error.code === "42883" || error.code === "PGRST202") return { state: "forbidden" };
+            return { state: "error" };
+          }
+          const d = (data ?? {}) as { until?: string | null; is_active?: boolean; days_left?: number | null; companies_without_licence?: number };
+          return {
+            state: "ok",
+            status: {
+              until: d.until ?? null,
+              isActive: d.is_active === true,
+              daysLeft: typeof d.days_left === "number" ? d.days_left : null,
+              companiesWithoutLicence: Number(d.companies_without_licence ?? 0),
+            },
+          };
+        },
+        ["organizations"],
+      ),
+
+    /** Set the grace date (YYYY-MM-DD) or switch it off (null). The reason is required and recorded in the audit log (0067). */
+    setGraceUntil: async (args: { until: string | null; reason: string }): Promise<void> => {
+      await requireCompanyAuthority();
+      const { error } = await supabase.rpc("mg_set_licence_grace_until", { p_date: args.until, p_reason: args.reason.trim() });
+      if (error) throw friendlyInviteError(error.message);
+      notifyLocalWrite("organizations");
+    },
 
     /** Licence numbers by company id, for display on company records. */
     licences: () =>

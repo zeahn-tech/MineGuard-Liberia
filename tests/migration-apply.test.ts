@@ -36,7 +36,7 @@ afterEach(async () => {
     "0025_company_status_membership_invitations.sql",
     "0026_company_workforce.sql",
     "0027_site_scoped_access.sql",
-    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0040_emergency_alerts.sql", "0041_emergency_authority_corrections.sql", "0048_close_admin_bootstrap.sql", "0049_public_user_identity.sql", "0050_public_reports_feedback.sql", "0052_public_content.sql", "0065_site_code_hardening.sql", "0066_county_reject_digits.sql",
+    "0028_account_names_invitation_cleanup.sql", "0029_onboarding_officer_bulk_import.sql", "0030_registrar_role_value.sql", "0031_company_registrar.sql", "0032_government_roles_hold_no_company.sql", "0033_companies_are_registered_not_typed.sql", "0034_company_notifications.sql", "0035_profile_settings_photo_deletion.sql", "0036_site_scoped_update_policies.sql", "0037_company_profile_and_site_requests.sql", "0038_company_activity_history.sql", "0039_oversight_and_admin_user_removal.sql", "0040_emergency_alerts.sql", "0041_emergency_authority_corrections.sql", "0048_close_admin_bootstrap.sql", "0049_public_user_identity.sql", "0050_public_reports_feedback.sql", "0052_public_content.sql", "0065_site_code_hardening.sql", "0066_county_reject_digits.sql", "0067_grace_period_control.sql",
   ]) {
     await db.exec(readFileSync(join(ROOT, "supabase", "migrations", m), "utf8"));
   }
@@ -694,7 +694,7 @@ describe("0010 organizations, scopes & permissions (SEC-5/SITE-1)", () => {
     // + 4 supervisor + 3 inspector + 1 operator, then 0031 adds admin's
     // workforce.oversee and the registrar's single organizations.write) — the
     // unique constraint is the backstop, the count is the drift alarm.
-    expect(Number(first.perms)).toBe(32); // 0051: content.author/review for admin+supervisor, content.publish for admin; 0040: emergency.read for admin, supervisor and inspector (no role holds emergency.manage — owner decision); 0043: jsa.read for the same three
+    expect(Number(first.perms)).toBe(34); // 0067: platform_settings.write for admin and registrar; 0051: content.author/review for admin+supervisor, content.publish for admin; 0040: emergency.read for admin, supervisor and inspector (no role holds emergency.manage — owner decision); 0043: jsa.read for the same three
     // The scope enum stands at its six values: the rename-and-repoint
     // sequence skips straight through on re-run (no seven-value creep, no
     // resurrection of the three-value predecessor).
@@ -836,6 +836,8 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_is_reviewer()",
     "mg_is_staff()",
     "mg_is_verified_public_user()",
+    // 0067: Ministry-only grace period control (permission platform_settings.write, enforced inside the functions)
+    "mg_licence_grace_status()",
     // 0065: the date the licence grace period ends (NULL = off) — signed-in callers only
     "mg_licence_grace_until()",
     "mg_my_access_class()",
@@ -872,6 +874,8 @@ describe("GAP-0: function execute surface (0011)", () => {
     // 0065: registrar adds / corrects a company licence number — self-authorizes on organizations.write
     "mg_set_company_licence(uuid, text, text)",
     "mg_set_company_status(uuid, text, text)",
+    // 0067: change or switch off the platform-wide grace date (reason required, audited, admins notified)
+    "mg_set_licence_grace_until(date, text)",
     "mg_set_member_role(uuid, text)",
     "mg_set_my_avatar(boolean)",
     "mg_site_roster(uuid)",
