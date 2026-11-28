@@ -27,7 +27,7 @@ union all
 select '4 code prefix differs from its county (informational)', s.code, s.county || ' (county prefix ' || m.prefix || ')'
   from s join m on m.county_key = s.k where (regexp_match(s.code, '^MGL-([A-Z]+)-'))[1] is distinct from m.prefix
 union all
-select '5 code not MGL-<LETTERS>-<4+ digits> (expect none)', code, coalesce(county, '(empty)')
+select '5 code not MGL-<LETTERS>-<at least 4 digits> (expect none)', code, coalesce(county, '(empty)')
   from public.sites where code !~ '^MGL-[A-Z]+-[0-9]{4,}$'
 union all
 select '6 company names that collide (expect none)', lower(regexp_replace(name, '[^[:alnum:]]', '', 'g')), string_agg(name, '  |  ' order by name)

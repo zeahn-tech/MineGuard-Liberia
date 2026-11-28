@@ -2274,6 +2274,8 @@ const INVITE_ERRORS: Record<string, string> = {
   LICENCE_REQUIRED: "Enter the Ministry licence number.",
   INVALID_LICENCE: "That is not a valid Ministry licence number.",
   INVALID_COUNTY: "Choose one of the 15 counties of Liberia.",
+  LICENCE_CLEAR_BLOCKED: "A licence number cannot be removed; correct it with a reason instead.",
+  LICENCE_VIA_FUNCTION_ONLY: "Licence numbers are changed through the registrar screen, which records who and why.",
   NOT_FOUND: "That company could not be found.",
   ORG_NOT_APPROVED: "Only an approved company can receive an administrator.",
   INELIGIBLE_ACCOUNT: "Government accounts cannot be company administrators.",
@@ -2307,7 +2309,7 @@ function friendlyInviteError(raw: string): Error {
   const reason = code === "FORBIDDEN" ? /FORBIDDEN:\s*([^\n]{3,120})/.exec(raw)?.[1] : undefined;
   if (reason) return new Error(reason.charAt(0).toUpperCase() + reason.slice(1) + ".");
   // 0065: these carry a server-authored explanation (which company holds the number, what is wrong with it)
-  if (code === "INVALID_LICENCE" || code === "DUPLICATE_LICENCE" || code === "DUPLICATE_ORGANIZATION" || code === "LICENCE_REQUIRED") {
+  if (code === "INVALID_LICENCE" || code === "DUPLICATE_LICENCE" || code === "DUPLICATE_ORGANIZATION" || code === "LICENCE_REQUIRED" || code === "REASON_REQUIRED") {
     const why = new RegExp(`${code}:\\s*([^\\n]{3,260})`).exec(raw)?.[1];
     if (why) return new Error(why.charAt(0).toUpperCase() + why.slice(1).replace(/\.?$/, "."));
   }
@@ -3061,9 +3063,14 @@ export const api = {
         ["organizations"],
       ),
 
-    setLicence: async (args: { organizationId: string; licenceNumber: string }): Promise<void> => {
+    /** Add a company's licence number, or correct an existing one (a correction needs a reason of at least 5 characters, 0065). */
+    setLicence: async (args: { organizationId: string; licenceNumber: string; reason?: string }): Promise<void> => {
       await requireCompanyAuthority();
-      const { error } = await supabase.rpc("mg_set_company_licence", { p_org: args.organizationId, p_licence: args.licenceNumber });
+      const { error } = await supabase.rpc("mg_set_company_licence", {
+        p_org: args.organizationId,
+        p_licence: args.licenceNumber,
+        p_reason: args.reason?.trim() || null,
+      });
       if (error) throw friendlyInviteError(error.message);
       notifyLocalWrite("organizations");
     },

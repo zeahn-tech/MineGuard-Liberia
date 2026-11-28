@@ -49,7 +49,7 @@ select s.id, s.code, s.county, m.prefix as county_prefix
  where (regexp_match(s.code, '^MGL-([A-Z]+)-'))[1] is distinct from m.prefix
  order by s.code;
 
-\echo '== 5. Codes that do not match MGL-<LETTERS>-<4+ digits> (must be empty before any strict format check is considered)'
+\echo '== 5. Codes that do not match MGL-<LETTERS>-<at least 4 digits> (must be empty before any strict format check is considered)'
 select id, code, county from public.sites where code !~ '^MGL-[A-Z]+-[0-9]{4,}$' order by code;
 
 \echo '== 6. Companies that already collide on normalised name (non-deactivated). If any: 0065 skips the name index with a WARNING, still blocks NEW duplicates'

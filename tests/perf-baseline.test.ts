@@ -39,6 +39,7 @@ import {
 
 // ---------------------------------------------------------------- the scale
 
+const PREFIX: Record<string, string> = { Bomi: "BOMI", "Grand Cape Mount": "GRANDC", Montserrado: "MONTSE", Nimba: "NIMBA" };
 const SCALE = {
   counties: ["Bomi", "Grand Cape Mount", "Montserrado", "Nimba"],
   operators: ["AgriLib Mining", "OreCo Liberia"],
@@ -108,7 +109,7 @@ async function seedPilotScale(): Promise<Record<string, string[]>> {
   const state = await adminSql(`select key from public.meta where key = 'perf_scale_v1' limit 1`);
   if (state.length > 0) {
     console.log("[perf] pilot-scale dataset already present, reusing");
-    const siteRows = await adminSql(`select id from public.sites where code like 'MGL-PERF-%' order by code`);
+    const siteRows = await adminSql(`select id from public.sites where name like 'Perf Site %' order by code`);
     return { siteIds: siteRows.map((r) => String(r.id)) };
   }
 
@@ -149,14 +150,14 @@ async function seedPilotScale(): Promise<Record<string, string[]>> {
         siteIds.push(id);
         const county = SCALE.counties[n % SCALE.counties.length];
         rows.push(
-          `('${id}', 'MGL-PERF-${String(n).padStart(4, "0")}', 'Perf Site ${n}', '${op}', 'Gold', '${county}', 'Senjeh', 'Community ${n}', 'active', 6.8, -10.8, '${f.admin}')`,
+          `('${id}', 'MGL-${PREFIX[county]}-${String(9000 + n)}', 'Perf Site ${n}', '${op}', 'Gold', '${county}', 'Senjeh', 'Community ${n}', 'active', 6.8, -10.8, '${f.admin}')`,
         );
       }
     }
     setIdentity(f.admin);
     await adminExec(
       // owner-run load (no signed-in session): a signed-in insert always gets a database-allocated code (0065),
-      // and these fixtures need the stable MGL-PERF-… codes to find and clean their rows
+      // and these fixtures need stable codes (the prefix of each site's own county, numbers 9001+) to find and clean their rows
       `insert into public.sites (id, code, name, operator_name, mineral_type, county, district, community, status, latitude, longitude, created_by)
        values ${rows.join(",")}`,
     );
@@ -248,7 +249,7 @@ async function seedPilotScale(): Promise<Record<string, string[]>> {
   // Sanity: the seed must be visible to ordinary SQL before any measurement
   // — a baseline over silently-missing data would be worthless.
   const check = await adminSql(`select
-    (select count(*) from public.sites where code like 'MGL-PERF-%') s,
+    (select count(*) from public.sites where name like 'Perf Site %') s,
     (select count(*) from public.inspections where id::text like 'dddddddd-7000-%') i,
     (select count(*) from public.findings where id::text like 'eeeeeeee-7000-%') f2,
     (select count(*) from public.corrective_actions where id::text like 'eeeeeeee-8000-%') c,
@@ -291,7 +292,7 @@ describe("performance baseline at pilot scale", () => {
     await adminSql(`delete from public.incidents where id::text like 'ffffffff-7000-%' or client_ref like 'perf-%'`);
     await adminSql(`delete from public.environmental_observations where id::text like 'cccccccc-7000-%'`);
     await adminSql(`alter table public.sites disable trigger sites_guard;`);
-    await adminSql(`delete from public.sites where code like 'MGL-PERF-%'`);
+    await adminSql(`delete from public.sites where name like 'Perf Site %'`);
     await adminSql(`alter table public.sites enable trigger sites_guard;`);
     await adminSql(`delete from public.community_reports where tracking_code like 'CR-PERF%'`);
     await adminSql(`delete from public.audit_log where action = 'perf.seed' or (action = 'incident.report' and summary like 'Perf%')`);

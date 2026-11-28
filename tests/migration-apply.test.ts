@@ -870,7 +870,7 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_search_companies(text)",
     "mg_set_account_restriction(uuid, boolean, text)",
     // 0065: registrar adds / corrects a company licence number — self-authorizes on organizations.write
-    "mg_set_company_licence(uuid, text)",
+    "mg_set_company_licence(uuid, text, text)",
     "mg_set_company_status(uuid, text, text)",
     "mg_set_member_role(uuid, text)",
     "mg_set_my_avatar(boolean)",
@@ -886,6 +886,8 @@ describe("GAP-0: function execute surface (0011)", () => {
     "mg_update_my_profile(text, text)",
     // 0015 (GIS): pure definer validator the boundary CHECK constraints call.
     "mg_valid_geojson_polygon(jsonb)",
+    // 0065: pure invoker-rights licence-number validator (no table access) — used by the licence guard trigger
+    "mg_validate_licence(text)",
     "provision_user_by_email(text, text, text, text, text)",
     "refresh_public_stats()",
     "submit_community_report(text, text, text, text, text, text, double precision, double precision, text)",

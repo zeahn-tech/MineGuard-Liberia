@@ -47,4 +47,34 @@ describe.skipIf(!URL)("site-code allocation under real parallelism (real Postgre
     const nums = codes.map((c) => Number(c.split("-")[2])).sort((a, b) => a - b);
     expect(nums[49] - nums[0]).toBe(49); // contiguous: the counter never skipped or repeated
   });
+
+  test("F-1: 50 parallel signed-in registrations CROSSING 9999: distinct, contiguous, 4 digits up to 9999 and 5 digits from 10000", async () => {
+    // The sites this test writes are permanent, so it needs a county prefix that has never been taken past 9000 in this database.
+    // It picks the first clean one; a rerun uses the next. If none is left, use a fresh disposable database.
+    const candidates: [string, string][] = [["River Gee", "RIVERG"], ["Grand Kru", "GRANDK"], ["Maryland", "MARYLA"], ["Margibi", "MARGIB"], ["Grand Gedeh", "GRANDG"], ["Grand Cape Mount", "GRANDC"]];
+    let pick: [string, string] | undefined;
+    for (const c of candidates) {
+      const r = await psql(`select count(*) from public.sites where code like 'MGL-${c[1]}-%' and ((regexp_match(code, '-([0-9]+)$'))[1])::bigint >= 9000;`);
+      if (r.out === "0") { pick = c; break; }
+    }
+    expect(pick, "no clean county prefix left: rebuild the disposable database and rerun").toBeTruthy();
+    const [county, prefix] = pick!;
+    const prep = await psql(`insert into public.site_code_counters (prefix, last_number) values ('${prefix}', 9990)
+      on conflict (prefix) do update set last_number = excluded.last_number;`);
+    expect(prep.err).toBe("");
+    const session = (i: number) =>
+      psql(`select set_config('request.jwt.claims', '{"sub":"${USER}","role":"authenticated"}', false);
+            insert into public.sites (name, operator_name, county, created_by) values ('Edge ${i}', 'Concurrency Op', lower('${county}') || ' ', '${USER}') returning code, county;`);
+    const results = await Promise.all(Array.from({ length: 50 }, (_, i) => session(i)));
+    expect(results.filter((r) => r.code !== 0).map((r) => r.err)).toEqual([]);
+    const rows = results.map((r) => r.out.split("\n").find((l) => l.startsWith("MGL-"))!);
+    const codes = rows.map((l) => l.split("|")[0]);
+    expect(new Set(codes).size).toBe(50);
+    expect(rows.every((l) => l.endsWith(`|${county}`))).toBe(true); // F-2: canonical county under load
+    const nums = codes.map((c) => Number(c.split("-")[2])).sort((a, b) => a - b);
+    expect(nums[0]).toBe(9991);
+    expect(nums[49]).toBe(10040);
+    for (const c of codes) expect(c.split("-")[2].length).toBe(Number(c.split("-")[2]) < 10000 ? 4 : 5);
+    expect(codes.some((c) => c === `MGL-${prefix}-1000` || c === `MGL-${prefix}-1001`)).toBe(false); // the truncated forms the auditor saw
+  });
 });

@@ -294,7 +294,7 @@ describe("duplicate companies", () => {
       expect((await run(`select licence_number from public.organizations where id = '${legacy}'`))[0].licence_number).toBeNull();
       await registrar(run);
       await run(`select public.mg_set_company_licence('${legacy}', 'MEL 2111/16')`);
-      expect(await fails(run(`select public.mg_set_company_licence('${other}', 'mel2111/16')`))).toContain("DUPLICATE_LICENCE");
+      expect(await fails(run(`select public.mg_set_company_licence('${other}', 'mel2111/16', 'correcting a typing error')`))).toContain("DUPLICATE_LICENCE");
       expect(await fails(run(`select public.mg_set_company_licence('${other}', 'CLC-5')`))).toContain("INVALID_LICENCE");
     });
   });
@@ -331,11 +331,12 @@ describe("duplicate companies", () => {
     });
   });
 
-  test("grace OFF (null, past date, blank or malformed value): the same company is refused with LICENCE_REQUIRED", async () => {
+  test("grace OFF (null, past date, blank or — with the write guard bypassed — malformed value): refused with LICENCE_REQUIRED", async () => {
     for (const off of [null, "2020-01-01", "", "next month", "2099-13-45x"]) {
       await withRole("postgres", null, async (run) => {
         const legacy = await legacyCompany(run);
         await legacyAdmin(run, legacy);
+        await run("alter table public.platform_settings disable trigger platform_settings_guard"); // a malformed value can only exist by tampering
         await setGrace(run, off);
         await run("set local role authenticated");
         await signedIn(run, LEGACY_ADMIN);

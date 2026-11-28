@@ -63,6 +63,13 @@ describe("0065 re-applied", () => {
     expect((next.rows[0] as { code: string }).code).toBe("MGL-NIMBA-0004");
     const lofa = await db.query(`insert into public.sites (name, operator_name, county, created_by) values ('AfterLofa', 'Idem Co', 'Lofa', '${USER}') returning code`);
     expect((lofa.rows[0] as { code: string }).code).toBe("MGL-LOFA-0501");
+
+    // G-1: deleting the setting row and re-applying must NOT bring the 30-day default back (grace stays off)
+    await db.exec(`delete from public.platform_settings where key = 'licence_grace_until_for_site_requests'`);
+    await db.exec(M0065);
+    expect((await db.query(`select count(*)::int as n from public.platform_settings`)).rows[0]).toEqual({ n: 0 });
+    await db.exec(`select set_config('request.jwt.claims', '{"sub":"${USER}","role":"authenticated"}', false)`);
+    expect((await db.query(`select public.mg_licence_grace_until() as d`)).rows[0]).toEqual({ d: null });
     await db.close();
   }, 180_000); // boots a private database and replays every migration (now 65): slower than bun's 5 s default
 });
