@@ -31,6 +31,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { PageLoading } from "@/components/PageLoading";
+import LicenceGraceCard from "@/components/LicenceGraceCard";
 import { EmptyState } from "@/components/EmptyState";
 import { FormField } from "@/components/FormField";
 import { errorSentence } from "@/lib/error-messages";
@@ -445,6 +446,8 @@ export default function Companies() {
           )}
         </CardContent>
       </Card>
+
+      <LicenceGraceCard />
 
       {missingLicence && missingLicence.length > 0 && (
         <Card>

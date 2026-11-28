@@ -58,10 +58,10 @@ async function world<T>(fn: (run: Runner, c: { orgA: string; orgB: string }) => 
 }
 
 describe("the registrar's permissions are exactly what the role is for", () => {
-  test("the matrix: registrar holds ONLY organizations.write; workforce oversight is the admin's own", async () => {
+  test("the matrix: registrar holds ONLY organizations.write (plus platform_settings.write from 0067, the grace period control); workforce oversight is the admin's own", async () => {
     await withRole("postgres", null, async (run) => {
       const reg = await run("select permission from public.permissions where role = 'registrar' order by 1");
-      expect(reg).toEqual([{ permission: "organizations.write" }]);
+      expect(reg).toEqual([{ permission: "organizations.write" }, { permission: "platform_settings.write" }]);
       const adm = (await run("select permission from public.permissions where role = 'admin'")).map((r) => r.permission);
       expect(adm).toContain("workforce.oversee");
       expect(adm).toContain("organizations.write");
