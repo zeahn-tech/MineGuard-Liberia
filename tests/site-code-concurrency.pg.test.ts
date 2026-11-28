@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Migration 0065 — site-code allocation under REAL parallelism, against a real PostgreSQL (not PGlite).
 //
-// Skipped unless SITE_CODE_PG_URL is set. It spawns 50 independent `psql` sessions at once, each registering a site in the
+// Skipped unless SITE_CODE_PG_URL is set (a run with it unset is a SKIP, not a pass: report it as such). It spawns 50 independent `psql` sessions at once, each registering a site in the
 // same county as a signed-in user, and asserts: 50 distinct codes, zero errors, one contiguous run (no gaps).
 //
 // SAFETY: the target is read from SITE_CODE_PG_URL only, and tests/helpers/disposable-pg.ts refuses to connect unless the host
@@ -76,5 +76,28 @@ describe.skipIf(!URL)("site-code allocation under real parallelism (real Postgre
     expect(nums[49]).toBe(10040);
     for (const c of codes) expect(c.split("-")[2].length).toBe(Number(c.split("-")[2]) < 10000 ? 4 : 5);
     expect(codes.some((c) => c === `MGL-${prefix}-1000` || c === `MGL-${prefix}-1001`)).toBe(false); // the truncated forms the auditor saw
+  });
+  test("0066: 50 parallel registrations, 10 with a digit county: those 10 are refused (22023), the other 40 get distinct contiguous codes, no number is burned", async () => {
+    const before = await psql("select coalesce((select last_number from public.site_code_counters where prefix = 'BONG'), 0);");
+    expect(before.err).toBe("");
+    const start = Number(before.out);
+    const session = (i: number) =>
+      psql(`select set_config('request.jwt.claims', '{"sub":"${USER}","role":"authenticated"}', false);
+            insert into public.sites (name, operator_name, county, created_by) values ('Digit ${i}', 'Concurrency Op', '${i % 5 === 0 ? "Bo1ng" : "bong"}', '${USER}') returning code;`);
+    const results = await Promise.all(Array.from({ length: 50 }, (_, i) => session(i)));
+    const refused = results.filter((r) => r.code !== 0);
+    const accepted = results.filter((r) => r.code === 0);
+    expect(refused).toHaveLength(10);
+    expect(refused.every((r) => r.err.includes("INVALID_COUNTY"))).toBe(true);
+    expect(accepted).toHaveLength(40);
+    const codes = accepted.map((r) => r.out.split("\n").find((l) => l.startsWith("MGL-"))!);
+    expect(new Set(codes).size).toBe(40);
+    const nums = codes.map((c) => Number(c.split("-")[2])).sort((a, b) => a - b);
+    expect(nums[0]).toBe(start + 1);
+    expect(nums[39]).toBe(start + 40); // contiguous: the refused inserts did not consume a number
+    const after = await psql("select last_number from public.site_code_counters where prefix = 'BONG';");
+    expect(Number(after.out)).toBe(start + 40);
+    const stored = await psql("select count(*) from public.sites where name like 'Digit %' and county <> 'Bong';");
+    expect(stored.out).toBe("0");
   });
 });

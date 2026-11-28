@@ -1,5 +1,9 @@
 -- ============================================================================
--- POST-DEPLOY VERIFICATION for migration 0065 (psql version). Run it from the REPOSITORY ROOT:
+-- !! SCRATCH OR STAGING ONLY — NEVER RUN THIS FILE AGAINST PRODUCTION !!
+-- Part 2 runs WRITE PROBES (they are rolled back, but they still write). For production use ONLY the read-only
+-- supabase/maintenance/verify_0065_editor.sql (one SELECT, no writes).
+-- ============================================================================
+-- POST-DEPLOY VERIFICATION for migration 0065 (psql version, scratch/staging). Run it from the REPOSITORY ROOT:
 --   psql "$DATABASE_URL" -f supabase/maintenance/verify_0065.sql
 -- Part 1 is the read-only editor script (every row PASS; REVIEW rows are explained in docs/27). Part 2 are write probes: each runs
 -- inside a block that always rolls back its own change, and prints PASS or raises FAIL.
@@ -55,4 +59,24 @@ begin
   raise exception 'ROLLBACK_PROBE';  -- never keep the probe's counter change
 exception when others then
   if sqlerrm <> 'ROLLBACK_PROBE' then raise; end if;
+end $v$;
+
+\echo '== PART 2d: 0066 — county text containing a digit is refused (calls the function only: nothing is written)'
+do $v$
+declare v_state text; v_ok boolean := false;
+begin
+  if pg_get_functiondef('public.mg_county_canonical(text)'::regprocedure) !~ '\[0-9' then
+    raise notice 'SKIP: 0066 is not applied here (county digits are still ignored)'; return;
+  end if;
+  begin
+    perform public.mg_county_canonical('Bo1mi');
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate;
+    v_ok := v_state = '22023' and sqlerrm like 'INVALID_COUNTY%';
+  end;
+  if not v_ok then raise exception 'FAIL: mg_county_canonical accepted a county containing a digit'; end if;
+  if public.mg_county_canonical('Bo-mi!!') <> 'Bomi' or public.mg_county_canonical(' GRAND   bassa') <> 'Grand Bassa' then
+    raise exception 'FAIL: punctuation / spacing variants are no longer accepted';
+  end if;
+  raise notice 'PASS: Bo1mi refused (22023); Bo-mi!! and GRAND   bassa still canonical';
 end $v$;

@@ -80,8 +80,9 @@ describe("F-1 numbering past 9999", () => {
 });
 
 describe("F-2 the county is stored in its canonical spelling", () => {
-  const cases: [string, string][] = [["bomi", "Bomi"], ["Bo-mi!!", "Bomi"], ["Bo1mi", "Bomi"], [" GRAND   bassa", "Grand Bassa"]];
-  test("on insert: the auditor's four inputs are stored canonically", async () => {
+  // "Bo1mi" -> "Bomi" was the 0065 behaviour; migration 0066 (audit N-1) refuses a county containing a digit instead (tests/site-code-0066.test.ts)
+  const cases: [string, string][] = [["bomi", "Bomi"], ["Bo-mi!!", "Bomi"], [" GRAND   bassa", "Grand Bassa"]];
+  test("on insert: the auditor's inputs (minus the digit one, refused since 0066) are stored canonically", async () => {
     for (const [typed, canonical] of cases) {
       await withRole("postgres", null, async (run) => {
         await as(run, f.admin);
