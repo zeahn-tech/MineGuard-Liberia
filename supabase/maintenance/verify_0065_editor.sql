@@ -1,6 +1,7 @@
 -- ============================================================================
 -- POST-DEPLOY VERIFICATION for migration 0065, for the Supabase SQL editor (no psql commands). READ-ONLY: one SELECT.
--- Every row must say PASS. Any FAIL = stop and follow the rollback in docs/27.
+-- Every row must say PASS (row 17 says REVIEW until migration 0066 is applied). Any FAIL = stop and follow the rollback in docs/27.
+-- This is the ONLY verify script for production: read-only, one SELECT. verify_0065.sql runs write probes: scratch or staging only.
 -- (The "code update is rejected" probe is not here because it would write; it is in verify_0065.sql for psql, and in the manual
 --  post-deploy checks in docs/27.)
 -- ============================================================================
@@ -29,7 +30,7 @@ c8 as (select case when count(*) = 2 then 'PASS (both)' else 'REVIEW: ' || coale
 c9 as (select coalesce((select 'grace ends ' || coalesce(value, 'NULL (OFF)') from public.platform_settings where key = 'licence_grace_until_for_site_requests'), 'FAIL: setting missing') r),
 c10 as (select case when count(*) = 1 and bool_and(pg_get_function_identity_arguments(oid) = 'p_name text, p_licence text') then 'PASS' else 'FAIL' end r
           from pg_proc where proname = 'mg_register_company' and pronamespace = 'public'::regnamespace),
-c11 as (select case when max(version) = '0065' and count(*) filter (where version = '0065') = 1 then 'PASS' else 'FAIL/REVIEW: latest is ' || coalesce(max(version), '?') || ' (record 0065 in the history if it is missing)' end r from supabase_migrations.schema_migrations),
+c11 as (select case when count(*) filter (where version = '0065') = 1 then 'PASS (latest recorded: ' || max(version) || ')' else 'FAIL/REVIEW: 0065 recorded ' || count(*) filter (where version = '0065') || ' time(s); latest is ' || coalesce(max(version), '?') || ' (record 0065 in the history if it is missing)' end r from supabase_migrations.schema_migrations),
 -- F-1: numbering. A counter at 10000+ must correspond to a real 5-digit code (the truncation bug produced MGL-XXXX-1000 while the counter moved on),
 --      and no code may have fewer than 4 digits.
 f1 as (select case when count(*) = 0 then 'PASS' else 'FAIL: ' || string_agg(x, '; ') end r from (
@@ -55,7 +56,12 @@ f7b as (select case when count(*) = 0 then 'PASS' else 'REVIEW: stray counter pr
           from public.site_code_counters where prefix not in (select prefix from public.county_codes)),
 -- G-3: the grace setting is audited
 g3 as (select case when exists (select 1 from pg_trigger where tgname = 'platform_settings_changelog' and tgenabled <> 'D')
-                    then 'PASS (changes recorded in audit_log; ' || (select count(*) from public.audit_log where entity_type = 'platform_settings') || ' entries so far)' else 'FAIL: audit trigger missing' end r)
+                    then 'PASS (changes recorded in audit_log; ' || (select count(*) from public.audit_log where entity_type = 'platform_settings') || ' entries so far)' else 'FAIL: audit trigger missing' end r),
+-- 0066 (N-1): the two county functions refuse text containing a digit. Read-only: it inspects the function source, it does not call it.
+-- REVIEW (not FAIL) when 0066 has not been applied yet.
+n1 as (select case when count(*) = 2 and bool_and(pg_get_functiondef(p.oid) ~ '\[0-9') then 'PASS (county digits refused)'
+                   else 'REVIEW: 0066 not applied (a county containing a digit is still accepted and stored without it)' end r
+         from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('mg_county_prefix', 'mg_county_canonical'))
 
 select '1 counters cover every code' as check_name, c1.r as result from c1
 union all select '2 no duplicate site codes', c2.r from c2
@@ -66,7 +72,7 @@ union all select '7 fifteen counties', c7.r from c7
 union all select '8 unique indexes', c8.r from c8
 union all select '9 licence grace setting (informational)', c9.r from c9
 union all select '10 one mg_register_company (name, licence)', c10.r from c10
-union all select '11 migration history ends at 0065', c11.r from c11
+union all select '11 migration history records 0065', c11.r from c11
 union all select '12 F-1 numbering: counter vs code length', f1.r from f1
 union all select '13 F-2 counties in canonical spelling', f2.r from f2
 union all select '14 F-3 stored licence numbers are valid', f3.r from f3
@@ -74,4 +80,5 @@ union all select '14b companies still without a licence (informational)', f3b.r 
 union all select '15 F-7 code prefix matches its county', f7.r from f7
 union all select '15b F-7 counter rows only for county prefixes', f7b.r from f7b
 union all select '16 G-3 grace setting changes are audited', g3.r from g3
+union all select '17 N-1 county text with a digit is refused (0066)', n1.r from n1
 order by 1;
